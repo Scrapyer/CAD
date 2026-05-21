@@ -313,7 +313,7 @@ void RenderViewport::setPreferredRenderBackend(RenderBackendKind kind)
 {
     RenderSettings::setPreferredBackend(kind);
     requestedBackendKind_ = kind;
-    activateBackend(kind);
+    updateColorBarOverlay();
 }
 
 RenderBackendKind RenderViewport::requestedRenderBackendKind() const

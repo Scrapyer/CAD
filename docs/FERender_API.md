@@ -1143,7 +1143,7 @@ RenderBackendKind requestedRenderBackendKind() const;
 RenderBackendKind activeRenderBackendKind() const;
 ```
 
-Vulkan 路径当前实现 `PickMode::Node` / `PickMode::Element` / `PickMode::Part` 的单点拾取、框选添加和点选/框选取消；`RenderViewport` 会缓存当前拾取模式并在切换后端时同步到具体视口。
+Vulkan 路径当前实现 `PickMode::Node` / `PickMode::Element` / `PickMode::Part` 的单点拾取、框选添加和点选/框选取消。`RenderViewport` 启动时读取全局 RHI 配置并激活对应视口；运行时调用 `setPreferredRenderBackend()` 只写入下次启动的首选 RHI，不再立即销毁/重建当前视口。
 运行时 `VulkanContext` 会优先请求 SDK 和 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
 `FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 改为较低 target env。
 Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readback buffer、scalar descriptor/set layout、主视口/拾取 render pass、framebuffer、graphics pipeline / pipeline layout 和 command pool / command buffer 从裸 handle 收敛到独立资源对象；主网格帧录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。公开 `RenderViewport` API 不暴露这些实现细节。
@@ -1162,7 +1162,7 @@ void partsPicked(const std::vector<int>& partIndices);
 
 **头文件**：`RenderSettings.h`
 
-使用 `QSettings("FEModelViewer", "FEModelViewer")` 持久化用户首选 RHI。
+使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。
 
 ```cpp
 class RenderSettings {
@@ -1178,8 +1178,8 @@ public:
 
 | 方法 | 说明 |
 |------|------|
-| `preferredBackend()` | 读取用户首选 RHI，默认 OpenGL |
-| `setPreferredBackend(kind)` | 写入用户首选 RHI |
+| `preferredBackend()` | 从 `config/settings.ini` 读取用户首选 RHI，默认 OpenGL |
+| `setPreferredBackend(kind)` | 写入用户首选 RHI，下次启动生效 |
 | `effectiveBackend()` | 首选 RHI 已编译可用时返回首选，否则回退 OpenGL |
 | `backendKey(kind)` | 转换为稳定配置字符串：`"opengl"` / `"vulkan"` |
 | `backendFromKey(key, fallback)` | 从配置字符串解析 RHI，支持 `gl` / `vk` 简写 |

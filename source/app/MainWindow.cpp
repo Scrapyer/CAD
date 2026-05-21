@@ -558,7 +558,7 @@ void MainWindow::setupToolBar() {
         rhiGroup_->addAction(act);
     }
     rhiAction_ = toolbar_->addAction("RHI");
-    rhiAction_->setToolTip("选择渲染后端");
+    rhiAction_->setToolTip("选择下次启动使用的渲染后端");
     rhiAction_->setMenu(rhiMenu_);
     connect(rhiAction_, &QAction::triggered, this, [this]() {
         if (auto* btn = toolbar_->widgetForAction(rhiAction_))
@@ -572,11 +572,14 @@ void MainWindow::setupToolBar() {
         }
         updateRhiActionText();
         const char* requestedName = renderBackendName(kind);
-        const char* activeName = renderViewport_ ? renderBackendName(renderViewport_->activeRenderBackendKind()) : requestedName;
-        if (kind == (renderViewport_ ? renderViewport_->activeRenderBackendKind() : kind)) {
-            statusLabel_->setText(QStringLiteral("  RHI 已切换为 %1").arg(QString::fromLatin1(requestedName)));
+        const char* activeName = renderViewport_
+            ? renderBackendName(renderViewport_->activeRenderBackendKind())
+            : renderBackendName(RenderSettings::effectiveBackend());
+        if (kind == (renderViewport_ ? renderViewport_->activeRenderBackendKind() : RenderSettings::effectiveBackend())) {
+            statusLabel_->setText(QStringLiteral("  RHI 当前已是 %1；配置已保存")
+                                      .arg(QString::fromLatin1(requestedName)));
         } else {
-            statusLabel_->setText(QStringLiteral("  RHI 首选为 %1；当前主视口暂使用 %2")
+            statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，重启后生效")
                                       .arg(QString::fromLatin1(requestedName), QString::fromLatin1(activeName)));
         }
     });

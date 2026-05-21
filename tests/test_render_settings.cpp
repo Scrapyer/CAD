@@ -3,7 +3,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QSettings>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 int main(int argc, char** argv)
@@ -15,11 +15,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
-
-    QSettings settings(QStringLiteral("FEModelViewer"), QStringLiteral("FEModelViewer"));
-    settings.clear();
+    qputenv("FEMODELVIEWER_CONFIG_DIR", settingsDir.path().toLocal8Bit());
 
     if (RenderSettings::preferredBackend() != RenderBackendKind::OpenGL) {
         return 2;
@@ -40,6 +36,9 @@ int main(int argc, char** argv)
     RenderSettings::setPreferredBackend(RenderBackendKind::Vulkan);
     if (RenderSettings::preferredBackend() != RenderBackendKind::Vulkan) {
         return 7;
+    }
+    if (!QFileInfo::exists(QDir(settingsDir.path()).filePath(QStringLiteral("settings.ini")))) {
+        return 10;
     }
 
     const RenderBackendKind expectedEffective = isRenderBackendAvailable(RenderBackendKind::Vulkan)

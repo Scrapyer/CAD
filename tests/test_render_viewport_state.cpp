@@ -5,7 +5,6 @@
 
 #include <QApplication>
 #include <QElapsedTimer>
-#include <QSettings>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -70,8 +69,7 @@ int main(int argc, char** argv)
 
     QTemporaryDir settingsDir;
     assert(settingsDir.isValid());
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
+    qputenv("FEMODELVIEWER_CONFIG_DIR", settingsDir.path().toLocal8Bit());
     RenderSettings::setPreferredBackend(RenderBackendKind::OpenGL);
 
     RenderViewport viewport;
@@ -101,9 +99,9 @@ int main(int argc, char** argv)
 
     if (isRenderBackendAvailable(RenderBackendKind::Vulkan)) {
         viewport.setPreferredRenderBackend(RenderBackendKind::Vulkan);
-        pumpEvents(app, 600);
+        pumpEvents(app, 250);
         assert(viewport.requestedRenderBackendKind() == RenderBackendKind::Vulkan);
-        assert(viewport.activeRenderBackendKind() == RenderBackendKind::Vulkan);
+        assert(viewport.activeRenderBackendKind() == RenderBackendKind::OpenGL);
         viewport.refresh();
         pumpEvents(app, 250);
     }
@@ -131,12 +129,13 @@ int main(int argc, char** argv)
 
     if (isRenderBackendAvailable(RenderBackendKind::Vulkan)) {
         viewport.setPreferredRenderBackend(RenderBackendKind::Vulkan);
-        pumpEvents(app, 500);
-        assert(viewport.activeRenderBackendKind() == RenderBackendKind::Vulkan);
+        pumpEvents(app, 250);
+        assert(viewport.requestedRenderBackendKind() == RenderBackendKind::Vulkan);
+        assert(viewport.activeRenderBackendKind() == RenderBackendKind::OpenGL);
     }
 
     viewport.hide();
     pumpEvents(app, 100);
-    printf("RenderViewport state cleanup/switch test passed.\\n");
+    printf("RenderViewport state cleanup/deferred RHI switch test passed.\\n");
     return 0;
 }

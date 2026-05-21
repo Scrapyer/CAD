@@ -2,16 +2,37 @@
 
 #include "RenderBackendFactory.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QSettings>
 
 namespace {
-constexpr const char* kSettingsOrg = "FEModelViewer";
-constexpr const char* kSettingsApp = "FEModelViewer";
 constexpr const char* kRenderBackendKey = "render/currentRhi";
+constexpr const char* kConfigEnvVar = "FEMODELVIEWER_CONFIG_DIR";
+constexpr const char* kConfigDirName = "config";
+constexpr const char* kSettingsFileName = "settings.ini";
+
+QString configDirectoryPath()
+{
+    const QByteArray overridePath = qgetenv(kConfigEnvVar);
+    if (!overridePath.isEmpty()) {
+        return QString::fromLocal8Bit(overridePath);
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    if (!appDir.isEmpty()) {
+        return QDir(appDir).filePath(QString::fromLatin1(kConfigDirName));
+    }
+    return QDir::current().filePath(QString::fromLatin1(kConfigDirName));
+}
 
 QSettings makeSettings()
 {
-    return QSettings(QString::fromLatin1(kSettingsOrg), QString::fromLatin1(kSettingsApp));
+    const QString configDirPath = configDirectoryPath();
+    QDir dir;
+    dir.mkpath(configDirPath);
+    const QString settingsPath = QDir(configDirPath).filePath(QString::fromLatin1(kSettingsFileName));
+    return QSettings(settingsPath, QSettings::IniFormat);
 }
 }
 
@@ -27,6 +48,7 @@ void RenderSettings::setPreferredBackend(RenderBackendKind kind)
 {
     QSettings settings = makeSettings();
     settings.setValue(QString::fromLatin1(kRenderBackendKey), backendKey(kind));
+    settings.sync();
 }
 
 RenderBackendKind RenderSettings::effectiveBackend()

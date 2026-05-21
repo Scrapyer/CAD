@@ -4,7 +4,7 @@
 
 - `RenderBackend.h` 定义 `IRenderBackend` 和后端信息结构。
 - `RenderBackendFactory.*` 提供后端创建入口，当前默认返回 OpenGL 后端。
-- `RenderSettings.*` 使用 `QSettings` 记录全局首选 RHI，并在后端不可用时提供回退选择。
+- `RenderSettings.*` 使用应用目录下的 `config/settings.ini` 记录全局首选 RHI，并在后端不可用时提供回退选择；运行时修改只写配置，下次启动生效。
 - `OpenGLRenderBackend.*` 是当前 OpenGL 后端的落脚点。
 - `VulkanContext.*` 封装 Vulkan instance、API 版本选择和 portability enumeration。
 - `VulkanDevice.*` 封装物理设备选择、逻辑设备创建和 graphics/present 队列。
