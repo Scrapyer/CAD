@@ -1,0 +1,377 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "spdxVersion": "SPDX-2.3",
+  "name": "SBOM-SPDX-opencascade-7.9.3",
+  "creationInfo": {
+    "created": "2026-05-17T11:33:44Z",
+    "creators": [
+      "Tool: https://github.com/Homebrew/brew@5.1.11"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://formulae.brew.sh/spdx/opencascade-7.9.3.json",
+  "documentDescribes": [
+    "SPDXRef-Archive-opencascade-src",
+    "SPDXRef-Package-SPDXRef-libpng-1.6.58",
+    "SPDXRef-Package-SPDXRef-freetype-2.14.3",
+    "SPDXRef-Package-SPDXRef-libunistring-1.4.2",
+    "SPDXRef-Package-SPDXRef-gettext-1.0",
+    "SPDXRef-Package-SPDXRef-fontconfig-2.17.1",
+    "SPDXRef-Package-SPDXRef-hwloc-2.13.0",
+    "SPDXRef-Package-SPDXRef-tbb-2023.0.0",
+    "SPDXRef-Package-SPDXRef-ca-certificates-2026-05-14",
+    "SPDXRef-Package-SPDXRef-openssl@3-3.6.2",
+    "SPDXRef-Package-SPDXRef-tcl-tk@8-8.6.18",
+    "SPDXRef-Compiler",
+    "SPDXRef-Bottle-opencascade"
+  ],
+  "files": [],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Archive-opencascade-src",
+      "name": "opencascade",
+      "versionInfo": "7.9.3",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "builtDate": "2025-12-05T23:55:46Z",
+      "licenseConcluded": "LGPL-2.1-only",
+      "downloadLocation": "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V7_9_3.tar.gz",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "5ecf094ec6b12d5413dfb851d8c3590c354058aee556e32e408bdfbf8c357d57"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-libpng-1.6.58",
+      "name": "libpng",
+      "versionInfo": "1.6.58",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "libpng-2.0",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/libpng/blobs/sha256:a28e1e29bf508ddf89800c215a013694c2751ca63e8ae40aca859aff7bf7b02c",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a28e1e29bf508ddf89800c215a013694c2751ca63e8ae40aca859aff7bf7b02c"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/libpng@1.6.58",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-freetype-2.14.3",
+      "name": "freetype",
+      "versionInfo": "2.14.3",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "FTL",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/freetype/blobs/sha256:449e22351da81ba5c8c398f87c295decac6b396bd6fab54becbb3d18800b62d1",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "449e22351da81ba5c8c398f87c295decac6b396bd6fab54becbb3d18800b62d1"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/freetype@2.14.3",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-libunistring-1.4.2",
+      "name": "libunistring",
+      "versionInfo": "1.4.2",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "GPL-2.0-or-later OR LGPL-3.0-or-later",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/libunistring/blobs/sha256:bae6d6d8dffc573c039a850a96e36f1b7fd846abd9ccada8260b7e888b5a3646",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bae6d6d8dffc573c039a850a96e36f1b7fd846abd9ccada8260b7e888b5a3646"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/libunistring@1.4.2",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-gettext-1.0",
+      "name": "gettext",
+      "versionInfo": "1.0",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "GPL-3.0-or-later AND LGPL-2.1-or-later",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/gettext/blobs/sha256:1f98400343132c8e469ed475157f8f4d0f516ea86bd4600552e8b75ab638fcf9",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1f98400343132c8e469ed475157f8f4d0f516ea86bd4600552e8b75ab638fcf9"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/gettext@1.0",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-fontconfig-2.17.1",
+      "name": "fontconfig",
+      "versionInfo": "2.17.1",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "HPND-sell-variant AND Unicode-3.0 AND MIT-Modern-Variant AND MIT AND LicenseRef-Homebrew-public-domain",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/fontconfig/blobs/sha256:20f30c771e40a924e423a9652080c7097e16782ffb236344c368721c001b78a0",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "20f30c771e40a924e423a9652080c7097e16782ffb236344c368721c001b78a0"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/fontconfig@2.17.1",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-hwloc-2.13.0",
+      "name": "hwloc",
+      "versionInfo": "2.13.0",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "BSD-3-Clause",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/hwloc/blobs/sha256:9f8b4882a8b58c18900e03bb2ecadabc828ba3a50978fa33e4d9c8f4c83fe674",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "9f8b4882a8b58c18900e03bb2ecadabc828ba3a50978fa33e4d9c8f4c83fe674"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/hwloc@2.13.0",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-tbb-2023.0.0",
+      "name": "tbb",
+      "versionInfo": "2023.0.0",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "Apache-2.0",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/tbb/blobs/sha256:00e4867e969892148347ae14b779209cac8de44c69227b86749ff4840f6184e8",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "00e4867e969892148347ae14b779209cac8de44c69227b86749ff4840f6184e8"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/tbb@2023.0.0",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-ca-certificates-2026-05-14",
+      "name": "ca-certificates",
+      "versionInfo": "2026-05-14",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "MPL-2.0",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/ca-certificates/blobs/sha256:be025e23565f2d7e012185e26fe716eaefa792a0e80b3fc34e4e10e966e89cd4",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "be025e23565f2d7e012185e26fe716eaefa792a0e80b3fc34e4e10e966e89cd4"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/ca-certificates@2026-05-14",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-openssl@3-3.6.2",
+      "name": "openssl@3",
+      "versionInfo": "3.6.2",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "Apache-2.0",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/openssl/3/blobs/sha256:6f3029073c7e53fcf8f777bed99f25dd2992c5deed3662d739d052e6b594ba60",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "6f3029073c7e53fcf8f777bed99f25dd2992c5deed3662d739d052e6b594ba60"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/openssl@3@3.6.2",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-SPDXRef-tcl-tk@8-8.6.18",
+      "name": "tcl-tk@8",
+      "versionInfo": "8.6.18",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "TCL",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/tcl-tk/8/blobs/sha256:c40ffcd937c2f73a63ee9f881e0efc9ae71ad4d47a723fafedca529da35f5068",
+      "copyrightText": "NOASSERTION",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "c40ffcd937c2f73a63ee9f881e0efc9ae71ad4d47a723fafedca529da35f5068"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/tcl-tk@8@8.6.18",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Compiler",
+      "name": "clang",
+      "versionInfo": "26.5",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "NOASSERTION",
+      "checksums": [],
+      "externalRefs": []
+    },
+    {
+      "SPDXID": "SPDXRef-Bottle-opencascade",
+      "name": "opencascade",
+      "versionInfo": "7.9.3",
+      "filesAnalyzed": false,
+      "licenseDeclared": "NOASSERTION",
+      "builtDate": "2025-12-05T23:55:46Z",
+      "licenseConcluded": "LGPL-2.1-only",
+      "downloadLocation": "https://ghcr.io/v2/homebrew/core/opencascade/blobs/sha256:ee074a5e0dac9f36e41231af3741dddc93501417b014443eadf212f680e9e91c",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:brew/homebrew/core/opencascade@7.9.3",
+          "referenceType": "purl"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ee074a5e0dac9f36e41231af3741dddc93501417b014443eadf212f680e9e91c"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-libpng-1.6.58",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-freetype-2.14.3",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-libunistring-1.4.2",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-gettext-1.0",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-fontconfig-2.17.1",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-hwloc-2.13.0",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-tbb-2023.0.0",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-ca-certificates-2026-05-14",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-openssl@3-3.6.2",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-SPDXRef-tcl-tk@8-8.6.18",
+      "relationshipType": "RUNTIME_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Bottle-opencascade"
+    },
+    {
+      "spdxElementId": "SPDXRef-File-opencascade",
+      "relationshipType": "PACKAGE_OF",
+      "relatedSpdxElement": "SPDXRef-Archive-opencascade-src"
+    },
+    {
+      "spdxElementId": "SPDXRef-Compiler",
+      "relationshipType": "BUILD_TOOL_OF",
+      "relatedSpdxElement": "SPDXRef-Package-opencascade-src"
+    }
+  ]
+}

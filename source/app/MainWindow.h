@@ -62,6 +62,7 @@ private:
     void updateStatusSummaries();
 
     void browseModelFile();
+    void browseImportFile();
     void browseResultFile();
     void applyFiles();
 

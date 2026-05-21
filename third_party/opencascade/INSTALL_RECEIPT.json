@@ -1,0 +1,128 @@
+{
+  "homebrew_version": "5.0.4-58-g43d6c11",
+  "used_options": [],
+  "unused_options": [],
+  "built_as_bottle": true,
+  "poured_from_bottle": true,
+  "loaded_from_api": true,
+  "loaded_from_internal_api": false,
+  "installed_on_request": true,
+  "changed_files": [
+    "bin/DRAWEXE",
+    "bin/DRAWEXE-7.9.3",
+    "bin/ExpToCasExe",
+    "bin/ExpToCasExe-7.9.3",
+    "bin/custom.sh",
+    "bin/custom_clang_64.sh",
+    "bin/draw.sh",
+    "bin/env.sh",
+    "libexec/custom_clang_64.sh"
+  ],
+  "time": 1779017624,
+  "source_modified_time": 1764978946,
+  "compiler": "clang",
+  "aliases": [],
+  "runtime_dependencies": [
+    {
+      "full_name": "libpng",
+      "version": "1.6.58",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "1.6.58",
+      "declared_directly": false
+    },
+    {
+      "full_name": "freetype",
+      "version": "2.14.3",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "2.14.3",
+      "declared_directly": true
+    },
+    {
+      "full_name": "libunistring",
+      "version": "1.4.2",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "1.4.2",
+      "declared_directly": false
+    },
+    {
+      "full_name": "gettext",
+      "version": "1.0",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "1.0",
+      "declared_directly": false
+    },
+    {
+      "full_name": "fontconfig",
+      "version": "2.17.1",
+      "revision": 0,
+      "bottle_rebuild": 1,
+      "pkg_version": "2.17.1",
+      "declared_directly": true
+    },
+    {
+      "full_name": "hwloc",
+      "version": "2.13.0",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "2.13.0",
+      "declared_directly": false
+    },
+    {
+      "full_name": "tbb",
+      "version": "2023.0.0",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "2023.0.0",
+      "declared_directly": true
+    },
+    {
+      "full_name": "ca-certificates",
+      "version": "2026-05-14",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "2026-05-14",
+      "declared_directly": false
+    },
+    {
+      "full_name": "openssl@3",
+      "version": "3.6.2",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "3.6.2",
+      "declared_directly": false
+    },
+    {
+      "full_name": "tcl-tk@8",
+      "version": "8.6.18",
+      "revision": 0,
+      "bottle_rebuild": 0,
+      "pkg_version": "8.6.18",
+      "declared_directly": true
+    }
+  ],
+  "source": {
+    "spec": "stable",
+    "versions": {
+      "stable": "7.9.3",
+      "head": null,
+      "version_scheme": 0,
+      "compatibility_version": null
+    },
+    "path": "/var/folders/7d/6jfpfwrj4n535rz95wdpd_jr0000gn/T/cursor-sandbox-cache/ad671941dcbed2e86a86bfcd46a606a0/homebrew/api/formula.jws.json",
+    "tap_git_head": null,
+    "tap": "homebrew/core"
+  },
+  "arch": "arm64",
+  "built_on": {
+    "os": "Macintosh",
+    "os_version": "macOS 26",
+    "cpu_family": "dunno",
+    "xcode": "26.1",
+    "clt": "26.1.0.0.1.1761104275",
+    "preferred_perl": "5.34"
+  }
+}

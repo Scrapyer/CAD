@@ -1,0 +1,2 @@
+#!/bin/bash
+CASROOT="/opt/homebrew/Cellar/opencascade/7.9.3" exec "/opt/homebrew/Cellar/opencascade/7.9.3/libexec/custom_clang_64.sh"  "$@"

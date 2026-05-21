@@ -6,6 +6,8 @@
  *   - ABAQUS INP（含 INCLUDE 展开）
  *   - Nastran BDF/FEM（固定/自由格式，CORD2R 坐标系变换）
  *   - Nastran OP2 二进制（几何 + 结果）
+ *   - STL（三角面几何）
+ *   - STEP/IGES（OpenCASCADE CAD 交换几何）
  *   - UNV（Dataset 2414/55 结果数据）
  */
 
@@ -32,6 +34,14 @@ public:
     /** @brief 解析 Nastran OP2 几何数据 */
     static bool parseNastranOp2(const QString& filePath, FEModel& model,
                                  const std::function<void(int)>& progress = nullptr);
+
+    /** @brief 解析 STL 三角面几何（ASCII / Binary） */
+    static bool parseStlGeometry(const QString& filePath, FEModel& model,
+                                  const std::function<void(int)>& progress = nullptr);
+
+    /** @brief 解析 CAD 交换几何（STEP / IGES，需要 OpenCASCADE） */
+    static bool parseCadGeometry(const QString& filePath, FEModel& model,
+                                  const std::function<void(int)>& progress = nullptr);
 
     /** @brief 解析 Nastran OP2 结果数据（位移/应力） */
     static bool parseNastranOp2Results(const QString& filePath, FEResultData& results);

@@ -5,6 +5,7 @@
         <file alias="deform.svg">icons/toolbar/deform.svg</file>
         <file alias="export.svg">icons/toolbar/export.svg</file>
         <file alias="fit.svg">icons/toolbar/fit.svg</file>
+        <file alias="import.svg">icons/toolbar/import.svg</file>
         <file alias="import-result.svg">icons/toolbar/import-result.svg</file>
         <file alias="iso-surface.svg">icons/toolbar/iso-surface.svg</file>
         <file alias="labels.svg">icons/toolbar/labels.svg</file>

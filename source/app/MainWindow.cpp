@@ -57,12 +57,41 @@
 #include <QSettings>
 #include <QDir>
 #include <QCloseEvent>
+#include <QStorageInfo>
+#include <QUrl>
 
 namespace {
 
 QIcon toolbarIcon(const QString& name)
 {
     return QIcon(QStringLiteral(":/icons/toolbar/") + name + QStringLiteral(".svg"));
+}
+
+void configureFileDialog(QFileDialog& dialog)
+{
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+#ifdef Q_OS_MAC
+    QList<QUrl> urls = dialog.sidebarUrls();
+    auto addUrl = [&urls](const QString& path) {
+        if (path.isEmpty() || !QDir(path).exists()) return;
+        const QUrl url = QUrl::fromLocalFile(path);
+        if (!urls.contains(url)) urls.prepend(url);
+    };
+
+    addUrl("/Volumes");
+    const auto volumes = QStorageInfo::mountedVolumes();
+    for (const QStorageInfo& volume : volumes) {
+        if (volume.isValid() && volume.isReady()) {
+            addUrl(volume.rootPath());
+        }
+    }
+    const QFileInfoList volumeDirs = QDir("/Volumes").entryInfoList(
+        QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable);
+    for (const QFileInfo& info : volumeDirs) {
+        addUrl(info.absoluteFilePath());
+    }
+    dialog.setSidebarUrls(urls);
+#endif
 }
 
 } // namespace
@@ -353,13 +382,39 @@ void MainWindow::browseModelFile() {
     }
 
     QFileDialog dialog(this, "选择模型文件", lastDir,
-        "所有支持格式 (*.inp *.bdf *.fem *.op2);;"
+        "所有支持格式 (*.inp *.bdf *.fem *.op2 *.stl);;"
         "ABAQUS Input (*.inp);;"
         "Nastran BDF (*.bdf *.fem);;"
         "Nastran OP2 (*.op2);;"
+        "STL Geometry (*.stl);;"
         "所有文件 (*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
-    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    configureFileDialog(dialog);
+    if (dialog.exec() != QDialog::Accepted) return;
+    QString path = dialog.selectedFiles().first();
+
+    if (!path.isEmpty()) {
+        importPaths_.selectModelFile(path);
+        settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
+    }
+}
+
+void MainWindow::browseImportFile() {
+    QSettings settings("FEModelViewer", "FEModelViewer");
+    QString lastDir = settings.value("lastOpenDir", QString()).toString();
+    if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
+        lastDir = QDir::homePath() + "/Desktop";
+        if (!QDir(lastDir).exists()) lastDir = QDir::homePath();
+    }
+
+    QFileDialog dialog(this, "导入几何文件", lastDir,
+        "CAD / Geometry (*.step *.stp *.iges *.igs *.stl);;"
+        "STEP (*.step *.stp);;"
+        "IGES (*.iges *.igs);;"
+        "STL Geometry (*.stl);;"
+        "所有文件 (*)");
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    configureFileDialog(dialog);
     if (dialog.exec() != QDialog::Accepted) return;
     QString path = dialog.selectedFiles().first();
 
@@ -378,14 +433,12 @@ void MainWindow::browseResultFile() {
     }
 
     QFileDialog dialog(this, "选择结果文件", lastDir,
-        "结果文件 (*.odb *.op2 *.h3d *.rst *.xdb *.unv);;"
+        "结果文件 (*.op2 *.unv);;"
         "Nastran OP2 (*.op2);;"
         "Universal UNV (*.unv);;"
-        "ABAQUS ODB (*.odb);;"
-        "HyperWorks H3D (*.h3d);;"
         "所有文件 (*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
-    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    configureFileDialog(dialog);
     if (dialog.exec() != QDialog::Accepted) return;
     QString path = dialog.selectedFiles().first();
 
@@ -620,6 +673,12 @@ void MainWindow::setupMenuBar() {
         applyFiles();
     });
 
+    auto* importAction = fileMenu->addAction(toolbarIcon("import"), "Import...");
+    connect(importAction, &QAction::triggered, this, [this]() {
+        browseImportFile();
+        applyFiles();
+    });
+
     auto* openResultFileAction = fileMenu->addAction(toolbarIcon("import-result"), "Open result file...");
     connect(openResultFileAction, &QAction::triggered, this, [this]() {
         browseResultFile();
@@ -801,6 +860,13 @@ void MainWindow::setupToolBar() {
     saveAction->setToolTip("保存入口预留");
     connect(saveAction, &QAction::triggered, this, [this]() {
         statusLabel_->setText("  保存入口已预留");
+    });
+
+    auto* importAction = toolbar_->addAction(toolbarIcon("import"), "导入");
+    importAction->setToolTip("导入 STEP / IGES / STL 几何文件");
+    connect(importAction, &QAction::triggered, this, [this]() {
+        browseImportFile();
+        applyFiles();
     });
 
     auto* importResultAction = toolbar_->addAction(toolbarIcon("import-result"), "导入结果");

@@ -351,7 +351,7 @@ FERenderData
 
 ### FEParser — 无状态静态工具类
 
-**文件**: `source/io/FEParser.h` + 5 个实现文件
+**文件**: `source/io/FEParser.h` + 7 个实现文件
 
 ```cpp
 class FEParser {
@@ -359,6 +359,8 @@ public:
     static bool parseAbaqusInp(path, model, progress);     // INP 格式
     static bool parseNastranBdf(path, model, progress);    // BDF/FEM 格式
     static bool parseNastranOp2(path, model, progress);    // OP2 几何
+    static bool parseStlGeometry(path, model, progress);   // STL 三角面几何
+    static bool parseCadGeometry(path, model, progress);   // STEP/IGES CAD 交换几何
     static bool parseNastranOp2Results(path, results);     // OP2 结果
     static bool parseUnvResults(path, results);            // UNV 结果
 };
@@ -371,6 +373,8 @@ public:
 | Abaqus INP | .inp | `source/io/FEParser_inp.cpp` | 节点/单元/部件/集合（支持 INCLUDE 展开） |
 | Nastran BDF | .bdf/.fem | `source/io/FEParser_bdf.cpp` | 节点/单元（固定/自由格式，CORD2R 坐标系变换） |
 | Nastran OP2 几何 | .op2 | `source/io/FEParser_op2.cpp` | 二进制格式的节点/单元/部件 |
+| STL 几何 | .stl | `source/io/FEParser_stl.cpp` | ASCII/Binary STL 三角面，导入为 TRI3 壳单元 |
+| CAD 交换几何 | .step/.stp/.iges/.igs | `source/io/FEParser_occ.cpp` | OpenCASCADE 读取并三角化为 TRI3 壳单元 |
 | Nastran OP2 结果 | .op2 | `source/io/FEParser_op2results.cpp` | 位移/应力结果（多工况） |
 | UNV 结果 | .unv | `source/io/FEParser_unv.cpp` | Dataset 2414/55 结果数据 |
 
@@ -929,7 +933,9 @@ FEModelPanel::loadModelFromPath(path)
   ├── 根据后缀选择解析器
   │   ├── .inp → FEParser::parseAbaqusInp()
   │   ├── .bdf/.fem → FEParser::parseNastranBdf()
-  │   └── .op2 → FEParser::parseNastranOp2()
+  │   ├── .op2 → FEParser::parseNastranOp2()
+  │   ├── .stl → FEParser::parseStlGeometry()
+  │   └── .step/.stp/.iges/.igs → FEParser::parseCadGeometry()
   │
   ├── 填充 FEModel（节点/单元/部件）
   │

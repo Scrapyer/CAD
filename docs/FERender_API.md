@@ -662,6 +662,14 @@ public:
     static bool parseNastranOp2(const QString& filePath, FEModel& model,
                                  const std::function<void(int)>& progress = nullptr);
 
+    /** 解析 STL 三角面几何（ASCII / Binary，生成 TRI3 壳单元） */
+    static bool parseStlGeometry(const QString& filePath, FEModel& model,
+                                  const std::function<void(int)>& progress = nullptr);
+
+    /** 解析 CAD 交换几何（STEP / IGES，需要构建时启用 OpenCASCADE） */
+    static bool parseCadGeometry(const QString& filePath, FEModel& model,
+                                  const std::function<void(int)>& progress = nullptr);
+
     /** 解析 Nastran OP2 结果数据（位移 OUG + 应力 OES） */
     static bool parseNastranOp2Results(const QString& filePath, FEResultData& results);
 
@@ -703,6 +711,15 @@ FEModel model;
 bool ok = FEParser::parseNastranOp2("model.op2", model, [](int pct) {
     qDebug("进度: %d%%", pct);
 });
+
+// STL 会按每个三角面生成 TRI3 单元，适合导入几何外形做查看。
+FEModel stlModel;
+FEParser::parseStlGeometry("geometry.stl", stlModel);
+
+// STEP / IGES 通过 OpenCASCADE 三角化为 TRI3 壳单元。
+FEModel cadModel;
+FEParser::parseCadGeometry("assembly.step", cadModel);
+
 
 if (ok) {
     FEResultData results;
@@ -1852,7 +1869,7 @@ glWidget->setIsoSurfaceMesh(iso);
 | `FEProbe.h` | `source/post/FEProbe.h` | `FEProbe`, `FEProbeValue`, `FEPathSample` | 结果探针：点值查询、热点、路径采样、CSV 导出 |
 | `FEPostFilter.h` | `source/post/FEPostFilter.h` | `FEPostFilter`, `FEPlane`, `FESliceResult` | 后处理过滤器：阈值、裁剪、切片 |
 | `FEIsoSurface.h` | `source/post/FEIsoSurface.h` | `FEIsoSurface` | 等值面提取（Marching Tetrahedra） |
-| `FEParser.h` | `source/io/FEParser.h` | `FEParser` | 有限元文件解析器（INP/BDF/OP2/UNV） |
+| `FEParser.h` | `source/io/FEParser.h` | `FEParser` | 有限元和几何文件解析器（INP/BDF/OP2/STL/STEP/IGES/UNV） |
 | `Geometry.h` | `source/render/Geometry.h` | `Mesh`, `Geometry::*` | 网格结构与几何体生成 |
 | `FERenderData.h` | `source/render/FERenderData.h` | `FERenderData` | 渲染数据包（Mesh + 映射表） |
 | `FEMeshConverter.h` | `source/convert/FEMeshConverter.h` | `FEMeshConverter` | 网格转换器 |

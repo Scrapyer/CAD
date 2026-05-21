@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <style>.line{fill:none;stroke:#566170;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.blue{fill:#28a8d8;stroke:#0b79a5;stroke-width:1.4;stroke-linejoin:round}.soft{fill:#f7fbff;stroke:#566170;stroke-width:1.4;stroke-linejoin:round}</style>
+  </defs>
+  <path d="M5 4h9l4 4v12H5z" class="soft"/>
+  <path d="M14 4v4h4" class="line"/>
+  <path d="M12 7v8.5" fill="none" stroke="#0b79a5" stroke-width="1.9" stroke-linecap="round"/>
+  <path d="M8.8 12.4 12 15.6l3.2-3.2" fill="none" stroke="#0b79a5" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M7.8 18.2h8.4" class="line"/>
+</svg>

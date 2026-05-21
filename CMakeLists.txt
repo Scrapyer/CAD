@@ -90,10 +90,12 @@ if(NOT APPLE)
 endif()
 
 option(FEMODELVIEWER_ENABLE_VULKAN_RHI "Build the optional Vulkan RHI backend when a Vulkan SDK is available" ON)
+option(FEMODELVIEWER_ENABLE_OPENCASCADE_IMPORT "Build optional STEP/IGES CAD import support with OpenCASCADE" ON)
 set(FERENDER_VULKAN_SHADER_TARGET_ENV "vulkan1.4" CACHE STRING
     "glslc --target-env value used when compiling FERender Vulkan shaders")
 set(FERENDER_HAS_VULKAN_RHI OFF)
 set(FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE OFF)
+set(FERENDER_HAS_OPENCASCADE_IMPORT OFF)
 if(FEMODELVIEWER_ENABLE_VULKAN_RHI)
     find_package(Vulkan QUIET)
     if(Vulkan_FOUND)
@@ -125,6 +127,38 @@ if(FEMODELVIEWER_ENABLE_VULKAN_RHI)
         endif()
     else()
         message(STATUS "Vulkan RHI disabled: Vulkan SDK was not found")
+    endif()
+endif()
+
+if(FEMODELVIEWER_ENABLE_OPENCASCADE_IMPORT)
+    set(_occ_vendor_dir "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencascade/lib/cmake/opencascade")
+    if(EXISTS "${_occ_vendor_dir}/OpenCASCADEConfig.cmake")
+        set(OpenCASCADE_DIR "${_occ_vendor_dir}" CACHE PATH "OpenCASCADE CMake package directory" FORCE)
+    elseif(NOT OpenCASCADE_DIR OR NOT EXISTS "${OpenCASCADE_DIR}/OpenCASCADEConfig.cmake")
+        foreach(_occ_hint
+            "$ENV{OpenCASCADE_DIR}"
+            "/opt/homebrew/opt/opencascade/lib/cmake/opencascade"
+            "/usr/local/opt/opencascade/lib/cmake/opencascade"
+            "C:/OpenCASCADE/lib/cmake/opencascade"
+            "D:/OpenCASCADE/lib/cmake/opencascade"
+        )
+            if(EXISTS "${_occ_hint}/OpenCASCADEConfig.cmake")
+                set(OpenCASCADE_DIR "${_occ_hint}" CACHE PATH "OpenCASCADE CMake package directory" FORCE)
+                break()
+            endif()
+        endforeach()
+    endif()
+    find_package(OpenCASCADE CONFIG QUIET COMPONENTS
+        FoundationClasses
+        ModelingData
+        ModelingAlgorithms
+        DataExchange
+    )
+    if(OpenCASCADE_FOUND OR (OpenCASCADE_INCLUDE_DIR AND EXISTS "${OpenCASCADE_INCLUDE_DIR}/STEPControl_Reader.hxx"))
+        set(FERENDER_HAS_OPENCASCADE_IMPORT ON)
+        message(STATUS "OpenCASCADE import enabled: ${OpenCASCADE_VERSION} (${OpenCASCADE_DIR})")
+    else()
+        message(STATUS "OpenCASCADE import disabled: OpenCASCADE was not found")
     endif()
 endif()
 
@@ -225,6 +259,8 @@ set(RENDER_SOURCES
     ${SOURCE_DIR}/convert/FEMeshConverter.cpp
     ${SOURCE_DIR}/io/FEParser_inp.cpp
     ${SOURCE_DIR}/io/FEParser_bdf.cpp
+    ${SOURCE_DIR}/io/FEParser_stl.cpp
+    ${SOURCE_DIR}/io/FEParser_occ.cpp
     ${SOURCE_DIR}/io/FEParser_op2.cpp
     ${SOURCE_DIR}/io/FEParser_op2results.cpp
     ${SOURCE_DIR}/io/FEParser_unv.cpp
@@ -299,6 +335,18 @@ target_link_libraries(FERender PUBLIC
 
 if(NOT APPLE)
     target_link_libraries(FERender PUBLIC OpenGL::GL)
+endif()
+
+if(FERENDER_HAS_OPENCASCADE_IMPORT)
+    target_compile_definitions(FERender PRIVATE FERENDER_HAS_OPENCASCADE_IMPORT=1)
+    target_include_directories(FERender PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+    target_link_directories(FERender PRIVATE ${OpenCASCADE_LIBRARY_DIR})
+    target_link_libraries(FERender PRIVATE
+        ${OpenCASCADE_FoundationClasses_LIBRARIES}
+        ${OpenCASCADE_ModelingData_LIBRARIES}
+        ${OpenCASCADE_ModelingAlgorithms_LIBRARIES}
+        ${OpenCASCADE_DataExchange_LIBRARIES}
+    )
 endif()
 
 if(FERENDER_HAS_VULKAN_RHI)
@@ -609,6 +657,14 @@ if(BUILD_TESTING)
     target_link_libraries(test_post_state PRIVATE FERender)
     add_test(NAME post_state
         COMMAND test_post_state
+    )
+
+    add_executable(test_stl_parser
+        tests/test_stl_parser.cpp
+    )
+    target_link_libraries(test_stl_parser PRIVATE FERender Qt6::Core)
+    add_test(NAME stl_parser
+        COMMAND test_stl_parser
     )
 
     add_executable(test_import_path_state

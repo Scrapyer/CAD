@@ -29,10 +29,43 @@
 #include <QEventLoop>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
+#include <QStorageInfo>
+#include <QUrl>
 #include <functional>
 #include <atomic>
 
 #define SKIP_EMPTY Qt::SkipEmptyParts
+
+namespace {
+
+void configureFileDialog(QFileDialog& dialog)
+{
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+#ifdef Q_OS_MAC
+    QList<QUrl> urls = dialog.sidebarUrls();
+    auto addUrl = [&urls](const QString& path) {
+        if (path.isEmpty() || !QDir(path).exists()) return;
+        const QUrl url = QUrl::fromLocalFile(path);
+        if (!urls.contains(url)) urls.prepend(url);
+    };
+
+    addUrl("/Volumes");
+    const auto volumes = QStorageInfo::mountedVolumes();
+    for (const QStorageInfo& volume : volumes) {
+        if (volume.isValid() && volume.isReady()) {
+            addUrl(volume.rootPath());
+        }
+    }
+    const QFileInfoList volumeDirs = QDir("/Volumes").entryInfoList(
+        QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable);
+    for (const QFileInfo& info : volumeDirs) {
+        addUrl(info.absoluteFilePath());
+    }
+    dialog.setSidebarUrls(urls);
+#endif
+}
+
+} // namespace
 
 // ════════════════════════════════════════════════════════════
 // 构造函数
@@ -147,14 +180,15 @@ void FEModelPanel::loadModelFromFile() {
     }
 
     QFileDialog dialog(this, "打开有限元模型", lastDir,
-                       "所有支持格式 (*.inp *.bdf *.fem *.op2 *.odb);;"
+                       "所有支持格式 (*.inp *.bdf *.fem *.op2 *.step *.stp *.iges *.igs *.stl);;"
                        "ABAQUS Input (*.inp);;"
                        "Nastran BDF (*.bdf *.fem);;"
                        "Nastran OP2 (*.op2);;"
-                       "ABAQUS ODB (*.odb);;"
+                       "CAD Exchange (*.step *.stp *.iges *.igs);;"
+                       "STL Geometry (*.stl);;"
                        "所有文件 (*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
-    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    configureFileDialog(dialog);
     if (dialog.exec() != QDialog::Accepted) return;
     QString path = dialog.selectedFiles().first();
     if (path.isEmpty()) return;
@@ -165,11 +199,6 @@ void FEModelPanel::loadModelFromFile() {
 
 void FEModelPanel::loadModelFromPath(const QString& path) {
     if (path.isEmpty()) return;
-
-    if (path.endsWith(".odb", Qt::CaseInsensitive)) {
-        emit loadFinished(false, "ODB 是 ABAQUS 私有二进制格式，需要导出为 .inp 格式");
-        return;
-    }
 
     currentModel_.clear();
     currentRenderData_.clear();
@@ -198,6 +227,17 @@ void FEModelPanel::loadModelFromPath(const QString& path) {
             });
         } else if (path.endsWith(".op2", Qt::CaseInsensitive)) {
             ok = FEParser::parseNastranOp2(path, resultModel, [&](int pct) {
+                targetVal.store(pct * 5);
+            });
+        } else if (path.endsWith(".stl", Qt::CaseInsensitive)) {
+            ok = FEParser::parseStlGeometry(path, resultModel, [&](int pct) {
+                targetVal.store(pct * 5);
+            });
+        } else if (path.endsWith(".step", Qt::CaseInsensitive) ||
+                   path.endsWith(".stp", Qt::CaseInsensitive) ||
+                   path.endsWith(".iges", Qt::CaseInsensitive) ||
+                   path.endsWith(".igs", Qt::CaseInsensitive)) {
+            ok = FEParser::parseCadGeometry(path, resultModel, [&](int pct) {
                 targetVal.store(pct * 5);
             });
         }
