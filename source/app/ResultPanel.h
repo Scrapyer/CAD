@@ -27,7 +27,27 @@ class ResultPanel : public QWidget {
     Q_OBJECT
 
 public:
+    enum class PanelMode {
+        All,
+        Contour,
+        Deformation,
+        Threshold
+    };
+
+    enum class FilterMode {
+        Threshold = 0,
+        ClipPlane = 1,
+        Slice = 2,
+        IsoSurface = 3
+    };
+
     explicit ResultPanel(QWidget* parent = nullptr);
+
+    /** @brief 设置弹窗/面板显示模式 */
+    void setPanelMode(PanelMode mode);
+
+    /** @brief 设置过滤弹窗的当前工具类型 */
+    void setFilterMode(FilterMode mode);
 
     /** @brief 应用主题 */
     void applyTheme(const Theme& theme);
@@ -159,6 +179,7 @@ private:
 
     // ── 过滤控制 ──
     QGroupBox* filterGroup_           = nullptr;
+    QWidget* filterTypeWidget_        = nullptr;
     QComboBox* filterTypeCombo_       = nullptr;
 
     // 阈值

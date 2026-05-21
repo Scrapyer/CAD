@@ -2,24 +2,21 @@
  * @file MainWindow.cpp
  * @brief 主窗口实现
  *
- * HyperView 风格布局：
- *   ┌─────────┬──────────────────────────────────┬─────────────┐
- *   │  工具栏: [清空] | [节点][单元][部件] | [主题]            │
- *   ├─────────┼──────────────────────────────────┼─────────────┤
- *   │         │                                  │             │
- *   │  部件   │      RenderViewport (中央视口)    │  模型信息   │
- *   │ (左停靠)│                                  │  (右停靠)   │
- *   │         ├──────────────────────────────────┤             │
- *   │         │  [文件导入][结果显示][监控]       │             │
- *   │         │  当前面板内容                     │             │
- *   ├─────────┴──────────────────────────────────┴─────────────┤
- *   │  状态栏                                                  │
+ * Tecplot 风格布局：
+ *   ┌─────────────────────────────────────────────────────────┐
+ *   │ Tecplot 式菜单栏 + 紧凑快捷工具栏                        │
+ *   ├────────────┬──────────────────────────────┬─────────────┤
+ *   │ 模型结构   │      RenderViewport           │ 属性/控制   │
+ *   │ 项目树/部件│                              │ 选择/显示   │
+ *   │            ├──────────────────────────────┤             │
+ *   │            │  底部工作流 Tabs              │             │
+ *   ├────────────┴──────────────────────────────┴─────────────┤
+ *   │ 状态栏                                                   │
  *   └─────────────────────────────────────────────────────────┘
  */
 
 #include "MainWindow.h"
 #include "RenderViewport.h"
-#include "MonitorPanel.h"
 #include "FEModelPanel.h"
 #include "PartsPanel.h"
 #include "ResultPanel.h"
@@ -37,17 +34,23 @@
 
 #include <glm/glm.hpp>
 #include <set>
+#include <utility>
 #include <vector>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-#include <QSplitter>
 #include <QToolBar>
 #include <QAction>
 #include <QActionGroup>
+#include <QGroupBox>
+#include <QHeaderView>
+#include <QMenuBar>
 #include <QStatusBar>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPushButton>
+#include <QTreeWidget>
+#include <QTimer>
+#include <QStyle>
+#include <QKeySequence>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QFileInfo>
@@ -55,11 +58,20 @@
 #include <QDir>
 #include <QCloseEvent>
 
+namespace {
+
+QIcon toolbarIcon(const QString& name)
+{
+    return QIcon(QStringLiteral(":/icons/toolbar/") + name + QStringLiteral(".svg"));
+}
+
+} // namespace
+
 MainWindow::MainWindow() {
     setWindowTitle("FEModelViewer");
-    resize(1100, 800);
+    resize(1280, 860);
 
-    // ── 工具栏 ──
+    // ── Tecplot 式紧凑快捷工具栏 ──
     setupToolBar();
 
     // ── 渲染视口 ──
@@ -69,41 +81,53 @@ MainWindow::MainWindow() {
     // ── 创建面板 ──
     partsPanel_ = new PartsPanel;
     feModelPanel_ = new FEModelPanel;
-    monitorPanel_ = new MonitorPanel;
     resultPanel_ = new ResultPanel;
-    filePanel_ = createFilePanel();
+    resultPanel_->setPanelMode(ResultPanel::PanelMode::Contour);
+    deformationPanel_ = new ResultPanel;
+    deformationPanel_->setPanelMode(ResultPanel::PanelMode::Deformation);
+    thresholdPanel_ = new ResultPanel;
+    thresholdPanel_->setPanelMode(ResultPanel::PanelMode::Threshold);
+    {
+        QSettings settings("FEModelViewer", "FEModelViewer");
+        const QString modelPath = settings.value("lastModelPath", QString()).toString();
+        const QString resultPath = settings.value("lastResultPath", QString()).toString();
+        const bool defaultAutoFilled = ImportPathState::looksAutoFilled(modelPath, resultPath);
+        const bool autoFilled =
+            settings.value("lastResultPathAutoFilled", defaultAutoFilled).toBool();
+        importPaths_.restore(modelPath, resultPath, autoFilled);
+    }
 
-    // ── 底部标签页（文件导入 / 结果显示 / 监控）──
-    bottomTabs_ = new QTabWidget;
-    bottomTabs_->setTabPosition(QTabWidget::North);
-    bottomTabs_->addTab(filePanel_,    "文件导入");
-    bottomTabs_->addTab(resultPanel_,  "结果显示");
-    bottomTabs_->addTab(monitorPanel_, "监控");
+    // ── 左右侧组合面板 ──
+    modelNavigatorPanel_ = createModelNavigatorPanel();
+    inspectorPanel_ = createInspectorPanel();
 
-    // ── 中央区域：垂直 Splitter（渲染视口 + 底部标签页）──
-    auto* splitter = new QSplitter(Qt::Vertical);
-    splitter->addWidget(renderViewport_);
-    splitter->addWidget(bottomTabs_);
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 0);
-    splitter->setSizes({600, 180});
-    splitter->setChildrenCollapsible(false);
-    setCentralWidget(splitter);
+    // ── 后处理小弹窗 ──
+    contourDialog_ = createPostDialog("云图显示", resultPanel_);
+    deformationDialog_ = createPostDialog("变形显示", deformationPanel_);
+    thresholdDialog_ = createPostDialog("阈值设置", thresholdPanel_);
 
-    // ── 左侧停靠：部件面板 ──
-    partsDock_ = new QDockWidget("部件", this);
-    partsDock_->setWidget(partsPanel_);
+    // ── 中央区域：渲染视口 ──
+    setCentralWidget(renderViewport_);
+
+    // ── 左侧停靠：模型结构 ──
+    partsDock_ = new QDockWidget("模型结构", this);
+    partsDock_->setWidget(modelNavigatorPanel_);
     partsDock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::LeftDockWidgetArea, partsDock_);
 
-    // ── 右侧停靠：模型信息面板 ──
-    modelInfoDock_ = new QDockWidget("模型信息", this);
-    modelInfoDock_->setWidget(feModelPanel_);
+    // ── 右侧停靠：属性 / 控制 ──
+    modelInfoDock_ = new QDockWidget("属性 / 控制", this);
+    modelInfoDock_->setWidget(inspectorPanel_);
     modelInfoDock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
     addDockWidget(Qt::RightDockWidgetArea, modelInfoDock_);
+    resizeDocks({partsDock_, modelInfoDock_}, {240, 280}, Qt::Horizontal);
 
     // ── 状态栏 ──
     setupStatusBar();
+    updateProjectTreeSummary();
+
+    // ── Tecplot 式菜单栏：主功能从菜单下拉进入 ──
+    setupMenuBar();
 
     // ── 信号/槽连接 ──
 
@@ -123,7 +147,10 @@ MainWindow::MainWindow() {
         renderViewport_->setColorBarVisible(false);
         feModelPanel_->clearActiveScalarField();
         resultPanel_->clearResults();
+        deformationPanel_->clearResults();
+        thresholdPanel_->clearResults();
         if (animController_) animController_->setFrameCount(0);
+        loadedResultFrameCount_ = 0;
 
         renderViewport_->setMesh(mesh);
         renderViewport_->setTriangleToElementMap(triToElem);
@@ -132,6 +159,8 @@ MainWindow::MainWindow() {
         if (size > 0) {
             renderViewport_->fitToModel(center, size);
         }
+        updateProjectTreeSummary();
+        updateStatusSummaries();
         updateFilterPlaneBounds();
     });
 
@@ -144,6 +173,8 @@ MainWindow::MainWindow() {
         renderViewport_->setTriangleToPartMap(triToPart);
         renderViewport_->setEdgeToPartMap(edgeToPart);
         partsPanel_->setParts(modelName, parts, renderViewport_->partColors());
+        updateProjectTreeSummary();
+        updateStatusSummaries();
     });
 
     // 加载进度 → 状态栏进度条
@@ -172,6 +203,8 @@ MainWindow::MainWindow() {
         statusLabel_->setStyleSheet(success
             ? QString("color: %1; font-weight: bold;").arg(currentTheme_.green)
             : QString("color: %1; font-weight: bold;").arg(currentTheme_.red));
+        updateProjectTreeSummary();
+        updateStatusSummaries();
     });
 
     connect(partsPanel_, &PartsPanel::partVisibilityChanged,
@@ -192,13 +225,22 @@ MainWindow::MainWindow() {
     connect(feModelPanel_, &FEModelPanel::searchRequested,
             renderViewport_, &RenderViewport::selectByIds);
 
-    monitorPanel_->bindToViewport(renderViewport_);
-
     // ── 结果面板连接 ──
 
     // resultsLoaded → 填充右侧面板
     connect(feModelPanel_, &FEModelPanel::resultsLoaded,
             resultPanel_, &ResultPanel::setResults);
+    connect(feModelPanel_, &FEModelPanel::resultsLoaded,
+            deformationPanel_, &ResultPanel::setResults);
+    connect(feModelPanel_, &FEModelPanel::resultsLoaded,
+            thresholdPanel_, &ResultPanel::setResults);
+
+    connect(feModelPanel_, &FEModelPanel::resultsLoaded,
+            this, [this](const FEResultData&) {
+        loadedResultFrameCount_ = resultPanel_->frameCount();
+        updateProjectTreeSummary();
+        updateStatusSummaries();
+    });
 
     // 应用云图
     connect(resultPanel_, &ResultPanel::applyResult,
@@ -220,17 +262,19 @@ MainWindow::MainWindow() {
     // ── 动画控制器 ──
     animController_ = new FEAnimationController(this);
 
-    connect(resultPanel_, &ResultPanel::animationPlay,
+    connect(deformationPanel_, &ResultPanel::animationPlay,
             animController_, &FEAnimationController::play);
-    connect(resultPanel_, &ResultPanel::animationPause,
+    connect(deformationPanel_, &ResultPanel::animationPause,
             animController_, &FEAnimationController::pause);
-    connect(resultPanel_, &ResultPanel::animationStop,
+    connect(deformationPanel_, &ResultPanel::animationStop,
             animController_, &FEAnimationController::stop);
 
     // 动画切帧：切帧 → 变形（如果开启）→ 云图
     connect(animController_, &FEAnimationController::frameChanged,
             this, [this](int frameIndex) {
         resultPanel_->selectFrame(frameIndex);
+        deformationPanel_->selectFrame(frameIndex);
+        thresholdPanel_->selectFrame(frameIndex);
 
         if (deform_.active)
             applyDeformation(deform_.scale, deform_.overlay);
@@ -248,40 +292,40 @@ MainWindow::MainWindow() {
     });
 
     // ── 变形显示 ──
-    connect(resultPanel_, &ResultPanel::deformationRequested,
+    connect(deformationPanel_, &ResultPanel::deformationRequested,
             this, [this](float scale, bool overlayUndeformed) {
         applyDeformation(scale, overlayUndeformed);
     });
 
-    connect(resultPanel_, &ResultPanel::deformationCleared,
+    connect(deformationPanel_, &ResultPanel::deformationCleared,
             this, [this]() {
         clearDeformation();
     });
 
-    connect(resultPanel_, &ResultPanel::autoScaleRequested,
+    connect(deformationPanel_, &ResultPanel::autoScaleRequested,
             this, [this]() {
         const FEModel& model = feModelPanel_->currentModel();
         if (model.nodes.empty()) return;
 
-        FEVectorField disp = resultPanel_->currentDisplacement();
+        FEVectorField disp = deformationPanel_->currentDisplacement();
         if (disp.values.empty()) return;
 
         float scale = FEDeformation::autoScale(model, disp);
-        resultPanel_->setDeformScale(scale);
+        deformationPanel_->setDeformScale(scale);
     });
 
     // ── 过滤 ──
-    connect(resultPanel_, &ResultPanel::thresholdRequested,
+    connect(thresholdPanel_, &ResultPanel::thresholdRequested,
             this, &MainWindow::applyThreshold);
-    connect(resultPanel_, &ResultPanel::clipPlaneRequested,
+    connect(thresholdPanel_, &ResultPanel::clipPlaneRequested,
             this, &MainWindow::applyClipPlane);
-    connect(resultPanel_, &ResultPanel::slicePlaneRequested,
+    connect(thresholdPanel_, &ResultPanel::slicePlaneRequested,
             this, &MainWindow::applySlicePlane);
-    connect(resultPanel_, &ResultPanel::isoSurfaceRequested,
+    connect(thresholdPanel_, &ResultPanel::isoSurfaceRequested,
             this, &MainWindow::applyIsoSurface);
-    connect(resultPanel_, &ResultPanel::filterCleared,
+    connect(thresholdPanel_, &ResultPanel::filterCleared,
             this, &MainWindow::clearFilters);
-    connect(resultPanel_, &ResultPanel::planePreviewChanged,
+    connect(thresholdPanel_, &ResultPanel::planePreviewChanged,
             this, [this](const glm::vec3& origin, const glm::vec3& normal) {
         const FEModel& model = activeModel();
         if (model.nodes.empty()) {
@@ -292,117 +336,12 @@ MainWindow::MainWindow() {
         model.computeBoundingBox(bbMin, bbMax);
         renderViewport_->setClipPlanePreview(bbMin, bbMax, origin, normal);
     });
-    connect(resultPanel_, &ResultPanel::planePreviewCleared,
+    connect(thresholdPanel_, &ResultPanel::planePreviewCleared,
             renderViewport_, &RenderViewport::clearClipPlanePreview);
 
     // ── 初始主题（默认深色）──
     currentTheme_ = Theme::dark();
     applyTheme(currentTheme_);
-}
-
-// ════════════════════════════════════════════════════════════
-// 底部文件导入面板
-// ════════════════════════════════════════════════════════════
-
-QWidget* MainWindow::createFilePanel() {
-    auto* panel = new QWidget;
-
-    auto* mainLayout = new QVBoxLayout(panel);
-    mainLayout->setContentsMargins(14, 10, 14, 10);
-    mainLayout->setSpacing(8);
-
-    // ── 模型文件行 ──
-    auto* modelRow = new QHBoxLayout;
-    modelRow->setSpacing(6);
-
-    auto* modelLabel = new QLabel("模型文件");
-    modelLabel->setFixedWidth(60);
-    modelRow->addWidget(modelLabel);
-
-    modelPathEdit_ = new QLineEdit;
-    modelPathEdit_->setPlaceholderText("选择 INP / BDF / FEM / OP2 文件...");
-    modelPathEdit_->setReadOnly(true);
-    modelRow->addWidget(modelPathEdit_);
-
-    auto* modelBrowseBtn = new QPushButton("浏览...");
-    modelBrowseBtn->setFixedWidth(70);
-    modelRow->addWidget(modelBrowseBtn);
-
-    mainLayout->addLayout(modelRow);
-
-    // ── 结果文件行 ──
-    auto* resultRow = new QHBoxLayout;
-    resultRow->setSpacing(6);
-
-    auto* resultLabel = new QLabel("结果文件");
-    resultLabel->setFixedWidth(60);
-    resultRow->addWidget(resultLabel);
-
-    resultPathEdit_ = new QLineEdit;
-    resultPathEdit_->setPlaceholderText("选择 ODB / OP2 / H3D 结果文件...");
-    resultPathEdit_->setReadOnly(true);
-    resultRow->addWidget(resultPathEdit_);
-
-    auto* resultBrowseBtn = new QPushButton("浏览...");
-    resultBrowseBtn->setFixedWidth(70);
-    resultRow->addWidget(resultBrowseBtn);
-
-    // 应用按钮放在结果行右侧
-    auto* applyBtn = new QPushButton("应用");
-    applyBtn->setFixedWidth(70);
-    resultRow->addWidget(applyBtn);
-
-    mainLayout->addLayout(resultRow);
-
-    // 样式在 applyTheme() 中统一设置
-    filePanelApplyBtn_ = applyBtn;
-
-    // ── 连接 ──
-    connect(modelBrowseBtn, &QPushButton::clicked, this, &MainWindow::browseModelFile);
-    connect(resultBrowseBtn, &QPushButton::clicked, this, &MainWindow::browseResultFile);
-    connect(applyBtn, &QPushButton::clicked, this, &MainWindow::applyFiles);
-
-    // 恢复上次的文件路径
-    {
-        QSettings settings("FEModelViewer", "FEModelViewer");
-        const QString modelPath = settings.value("lastModelPath", QString()).toString();
-        const QString resultPath = settings.value("lastResultPath", QString()).toString();
-        const bool defaultAutoFilled = ImportPathState::looksAutoFilled(modelPath, resultPath);
-        const bool autoFilled =
-            settings.value("lastResultPathAutoFilled", defaultAutoFilled).toBool();
-
-        importPaths_.restore(modelPath, resultPath, autoFilled);
-        refreshFilePathEdits();
-    }
-
-    return panel;
-}
-
-void MainWindow::refreshFilePathEdits() {
-    modelPathEdit_->setText(importPaths_.modelPath);
-    resultPathEdit_->setText(importPaths_.resultPath);
-}
-
-void MainWindow::syncImportPathsFromEdits() {
-    const QString editedModel = modelPathEdit_->text().trimmed();
-    const QString editedResult = resultPathEdit_->text().trimmed();
-
-    if (!ImportPathState::samePath(editedModel, importPaths_.modelPath)) {
-        const QString previousAutoResult = importPaths_.resultPath;
-        const bool wasAutoFilled = importPaths_.resultPathAutoFilled;
-
-        importPaths_.selectModelFile(editedModel);
-
-        // 正常 UI 下结果框只会由 browseResultFile 改；这里照顾测试/辅助工具直接设值的情况。
-        if (!ImportPathState::samePath(editedResult, importPaths_.resultPath)
-            && !(wasAutoFilled && ImportPathState::samePath(editedResult, previousAutoResult))) {
-            importPaths_.selectResultFile(editedResult);
-        }
-    } else if (!ImportPathState::samePath(editedResult, importPaths_.resultPath)) {
-        importPaths_.selectResultFile(editedResult);
-    }
-
-    refreshFilePathEdits();
 }
 
 void MainWindow::browseModelFile() {
@@ -426,7 +365,6 @@ void MainWindow::browseModelFile() {
 
     if (!path.isEmpty()) {
         importPaths_.selectModelFile(path);
-        refreshFilePathEdits();
         settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
     }
 }
@@ -453,13 +391,11 @@ void MainWindow::browseResultFile() {
 
     if (!path.isEmpty()) {
         importPaths_.selectResultFile(path);
-        refreshFilePathEdits();
         settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
     }
 }
 
 void MainWindow::applyFiles() {
-    syncImportPathsFromEdits();
     QString modelPath = importPaths_.modelPath;
     QString resultPath = importPaths_.resultPath;
 
@@ -501,49 +437,497 @@ void MainWindow::applyFiles() {
 }
 
 // ════════════════════════════════════════════════════════════
-// 工具栏
+// Tecplot 风格组合面板
 // ════════════════════════════════════════════════════════════
 
+QWidget* MainWindow::createModelNavigatorPanel() {
+    auto* panel = new QWidget;
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(6);
+
+    projectTree_ = new QTreeWidget;
+    projectTree_->setHeaderLabel("Project");
+    projectTree_->setIndentation(16);
+    projectTree_->setUniformRowHeights(true);
+    projectTree_->setAnimated(true);
+    projectTree_->setMinimumHeight(130);
+
+    auto* root = new QTreeWidgetItem(projectTree_, {"FEModelViewer"});
+    root->setFlags(root->flags() | Qt::ItemIsEnabled);
+    QFont rootFont = root->font(0);
+    rootFont.setBold(true);
+    root->setFont(0, rootFont);
+
+    const QStringList nodes = {"Model", "Parts", "Fields", "Results"};
+    for (const QString& name : nodes) {
+        auto* item = new QTreeWidgetItem(root, {name});
+        item->setFlags(item->flags() | Qt::ItemIsEnabled);
+    }
+    projectTree_->expandAll();
+
+    layout->addWidget(projectTree_, 0);
+    layout->addWidget(partsPanel_, 1);
+    return panel;
+}
+
+QWidget* MainWindow::createInspectorPanel() {
+    auto* panel = new QWidget;
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    displayControlPanel_ = createDisplayControlPanel();
+    layout->addWidget(feModelPanel_, 1);
+    layout->addWidget(displayControlPanel_, 0);
+    return panel;
+}
+
+QWidget* MainWindow::createDisplayControlPanel() {
+    auto* group = new QGroupBox("Display");
+    auto* layout = new QVBoxLayout(group);
+    layout->setContentsMargins(10, 16, 10, 10);
+    layout->setSpacing(6);
+
+    const QStringList actions = {"颜色", "透明度", "显隐"};
+    for (const QString& text : actions) {
+        auto* button = new QPushButton(text);
+        connect(button, &QPushButton::clicked, this, [this, text]() {
+            statusLabel_->setText(QString("  %1入口已预留").arg(text));
+        });
+        layout->addWidget(button);
+    }
+    return group;
+}
+
+QDialog* MainWindow::createPostDialog(const QString& title, ResultPanel* panel) {
+    auto* dialog = new QDialog(this);
+    dialog->setWindowTitle(title);
+    dialog->setModal(false);
+    dialog->setAttribute(Qt::WA_DeleteOnClose, false);
+
+    auto* layout = new QVBoxLayout(dialog);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(0);
+    layout->addWidget(panel);
+
+    dialog->resize(panel->sizeHint().expandedTo(QSize(340, 200)));
+    return dialog;
+}
+
+void MainWindow::showPostDialog(QDialog* dialog) {
+    if (!dialog) return;
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+}
+
+void MainWindow::updateProjectTreeSummary() {
+    if (!projectTree_ || projectTree_->topLevelItemCount() == 0) return;
+
+    const FEModel& model = feModelPanel_->currentModel();
+    auto* root = projectTree_->topLevelItem(0);
+    root->setText(0, model.name.empty()
+        ? QStringLiteral("FEModelViewer")
+        : QString::fromStdString(model.name));
+
+    if (root->childCount() < 4) return;
+    root->child(0)->setText(0, QString("Model  (%1 节点 / %2 单元)")
+                                .arg(model.nodeCount())
+                                .arg(model.elementCount()));
+    root->child(1)->setText(0, QString("Parts  (%1)").arg(model.parts.size()));
+    root->child(2)->setText(0, QString("Fields  (%1)").arg(loadedResultFrameCount_ > 0 ? 1 : 0));
+    root->child(3)->setText(0, QString("Results  (%1 帧)").arg(loadedResultFrameCount_));
+    projectTree_->expandAll();
+}
+
+void MainWindow::updateStatusSummaries() {
+    if (!renderViewport_) {
+        return;
+    }
+
+    if (fpsSummaryLabel_)
+        fpsSummaryLabel_->setText(QString("FPS %1").arg(renderViewport_->currentFps(), 0, 'f', 1));
+    if (frameTimeSummaryLabel_)
+        frameTimeSummaryLabel_->setText(QString("帧时间 %1 ms").arg(renderViewport_->frameTimeMs(), 0, 'f', 2));
+    if (vertexSummaryLabel_)
+        vertexSummaryLabel_->setText(QString("顶点数 %1").arg(renderViewport_->vertexCount()));
+    if (triangleSummaryLabel_)
+        triangleSummaryLabel_->setText(QString("三角面 %1").arg(renderViewport_->triangleCount()));
+}
+
+// ════════════════════════════════════════════════════════════
+// 菜单栏 / 工具栏
+// ════════════════════════════════════════════════════════════
+
+void MainWindow::setupMenuBar() {
+    auto statusOnly = [this](const QString& text) {
+        if (statusLabel_) statusLabel_->setText("  " + text);
+    };
+
+    auto* fileMenu = menuBar()->addMenu("File");
+    auto* newLayoutAction = fileMenu->addAction(style()->standardIcon(QStyle::SP_FileIcon), "New Layout");
+    newLayoutAction->setShortcut(QKeySequence("Ctrl+N"));
+    connect(newLayoutAction, &QAction::triggered, this, [this]() {
+        if (!renderViewport_ || !feModelPanel_ || !resultPanel_) return;
+        deform_.clear();
+        postEffect_.clear();
+        contour_.clear();
+        renderViewport_->clearSliceLines();
+        renderViewport_->clearIsoSurface();
+        renderViewport_->clearClipPlanePreview();
+        renderViewport_->setOverlayVisible(false);
+        renderViewport_->setUseVertexColor(false);
+        renderViewport_->setColorBarVisible(false);
+        feModelPanel_->clearActiveScalarField();
+        resultPanel_->clearResults();
+        deformationPanel_->clearResults();
+        thresholdPanel_->clearResults();
+        if (animController_) animController_->setFrameCount(0);
+        loadedResultFrameCount_ = 0;
+        feModelPanel_->clearModel();
+        updateProjectTreeSummary();
+        updateStatusSummaries();
+        if (statusLabel_) statusLabel_->setText("  New layout");
+    });
+
+    auto* openLayoutAction = fileMenu->addAction(style()->standardIcon(QStyle::SP_DialogOpenButton), "Open Layout...");
+    openLayoutAction->setShortcut(QKeySequence("Ctrl+O"));
+    connect(openLayoutAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Open Layout 入口已预留");
+    });
+
+    auto* recentMenu = fileMenu->addMenu("Recent Layouts");
+    auto* noRecentAction = recentMenu->addAction("(none)");
+    noRecentAction->setEnabled(false);
+
+    auto* saveLayoutAction = fileMenu->addAction(style()->standardIcon(QStyle::SP_DialogSaveButton), "Save Layout");
+    saveLayoutAction->setShortcut(QKeySequence("Ctrl+S"));
+    connect(saveLayoutAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Save Layout 入口已预留");
+    });
+
+    auto* saveAsAction = fileMenu->addAction("Save Layout As...");
+    saveAsAction->setShortcut(QKeySequence("Ctrl+W"));
+    connect(saveAsAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Save Layout As 入口已预留");
+    });
+
+    fileMenu->addSeparator();
+    auto* openFileAction = fileMenu->addAction(toolbarIcon("open"), "Open file...");
+    connect(openFileAction, &QAction::triggered, this, [this]() {
+        browseModelFile();
+        applyFiles();
+    });
+
+    auto* openResultFileAction = fileMenu->addAction(toolbarIcon("import-result"), "Open result file...");
+    connect(openResultFileAction, &QAction::triggered, this, [this]() {
+        browseResultFile();
+        applyFiles();
+    });
+
+    auto* writeDataAction = fileMenu->addAction("Write Data...");
+    writeDataAction->setEnabled(false);
+
+    fileMenu->addSeparator();
+    auto* printAction = fileMenu->addAction(style()->standardIcon(QStyle::SP_DialogApplyButton), "Print...");
+    printAction->setShortcut(QKeySequence("Ctrl+P"));
+    connect(printAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Print 入口已预留");
+    });
+    auto* paperSetupAction = fileMenu->addAction("Paper Setup...");
+    connect(paperSetupAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Paper Setup 入口已预留");
+    });
+
+    fileMenu->addSeparator();
+    auto* exportAction = fileMenu->addAction("Export...");
+    connect(exportAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Export 入口已预留");
+    });
+
+    fileMenu->addSeparator();
+    auto* quitAction = fileMenu->addAction("Exit");
+    quitAction->setShortcut(QKeySequence("Ctrl+Q"));
+    connect(quitAction, &QAction::triggered, this, &QWidget::close);
+
+    auto* editMenu = menuBar()->addMenu("Edit");
+    auto* undoAction = editMenu->addAction("Undo");
+    undoAction->setShortcut(QKeySequence("Ctrl+Z"));
+    undoAction->setEnabled(false);
+    auto* redoAction = editMenu->addAction("Redo");
+    redoAction->setShortcut(QKeySequence("Ctrl+Y"));
+    redoAction->setEnabled(false);
+    editMenu->addSeparator();
+    auto* clearSelectionAction = editMenu->addAction("Clear Selection");
+    connect(clearSelectionAction, &QAction::triggered, this, [statusOnly]() {
+        statusOnly("Clear Selection 入口已预留");
+    });
+
+    auto* viewMenu = menuBar()->addMenu("View");
+    auto* fitAction = viewMenu->addAction("Fit to Full Size");
+    connect(fitAction, &QAction::triggered, this, [this]() {
+        if (renderViewport_) renderViewport_->refresh();
+        if (statusLabel_) statusLabel_->setText("  Fit to Full Size");
+    });
+    auto* refreshAction = viewMenu->addAction("Refresh");
+    connect(refreshAction, &QAction::triggered, this, [this]() {
+        if (renderViewport_) renderViewport_->refresh();
+    });
+    auto* labelsAction = viewMenu->addAction("Show ID Labels");
+    labelsAction->setCheckable(true);
+    connect(labelsAction, &QAction::toggled, this, [this](bool checked) {
+        if (renderViewport_) renderViewport_->setShowLabels(checked);
+    });
+
+    auto* plotMenu = menuBar()->addMenu("Plot");
+    const QStringList plotActions = {"Contour", "Deformation", "Slice", "Iso Surface", "Threshold"};
+    for (const QString& text : plotActions) {
+        auto* action = plotMenu->addAction(text);
+        connect(action, &QAction::triggered, this, [this, text]() {
+            if (text == "Contour") showPostDialog(contourDialog_);
+            else if (text == "Deformation") showPostDialog(deformationDialog_);
+            else if (text == "Slice") {
+                thresholdPanel_->setFilterMode(ResultPanel::FilterMode::Slice);
+                thresholdDialog_->setWindowTitle("切片设置");
+                showPostDialog(thresholdDialog_);
+            } else if (text == "Iso Surface") {
+                thresholdPanel_->setFilterMode(ResultPanel::FilterMode::IsoSurface);
+                thresholdDialog_->setWindowTitle("等值面设置");
+                showPostDialog(thresholdDialog_);
+            } else if (text == "Threshold") {
+                thresholdPanel_->setFilterMode(ResultPanel::FilterMode::Threshold);
+                thresholdDialog_->setWindowTitle("阈值设置");
+                showPostDialog(thresholdDialog_);
+            }
+        });
+    }
+    plotMenu->addSeparator();
+    auto* clearPostAction = plotMenu->addAction("Clear Post Effects");
+    connect(clearPostAction, &QAction::triggered, this, [this]() {
+        clearFilters();
+        clearDeformation();
+    });
+
+    auto* insertMenu = menuBar()->addMenu("Insert");
+    for (const QString& text : QStringList{"Text...", "Image...", "Geometry..."}) {
+        auto* action = insertMenu->addAction(text);
+        connect(action, &QAction::triggered, this, [statusOnly, text]() {
+            statusOnly(text + " 入口已预留");
+        });
+    }
+
+    auto* animateMenu = menuBar()->addMenu("Animate");
+    auto* playAction = animateMenu->addAction("Play");
+    connect(playAction, &QAction::triggered, deformationPanel_, &ResultPanel::animationPlay);
+    auto* pauseAction = animateMenu->addAction("Pause");
+    connect(pauseAction, &QAction::triggered, deformationPanel_, &ResultPanel::animationPause);
+    auto* stopAction = animateMenu->addAction("Stop");
+    connect(stopAction, &QAction::triggered, deformationPanel_, &ResultPanel::animationStop);
+
+    auto* dataMenu = menuBar()->addMenu("Data");
+    auto* loadModelAction = dataMenu->addAction("Load Model Data...");
+    connect(loadModelAction, &QAction::triggered, this, [this]() {
+        browseModelFile();
+        applyFiles();
+    });
+    auto* loadResultAction = dataMenu->addAction("Load Result Data...");
+    connect(loadResultAction, &QAction::triggered, this, [this]() {
+        browseResultFile();
+        applyFiles();
+    });
+    dataMenu->addSeparator();
+    auto* applyDataAction = dataMenu->addAction("Apply Current Paths");
+    connect(applyDataAction, &QAction::triggered, this, &MainWindow::applyFiles);
+
+    auto* frameMenu = menuBar()->addMenu("Frame");
+    auto* leftPanelAction = frameMenu->addAction("Model Structure");
+    leftPanelAction->setCheckable(true);
+    leftPanelAction->setChecked(true);
+    connect(leftPanelAction, &QAction::toggled, this, [this](bool visible) {
+        if (partsDock_) partsDock_->setVisible(visible);
+    });
+    auto* rightPanelAction = frameMenu->addAction("Property Panel");
+    rightPanelAction->setCheckable(true);
+    rightPanelAction->setChecked(true);
+    connect(rightPanelAction, &QAction::toggled, this, [this](bool visible) {
+        if (modelInfoDock_) modelInfoDock_->setVisible(visible);
+    });
+    auto* optionsMenu = menuBar()->addMenu("Options");
+    if (themeMenu_) optionsMenu->addMenu(themeMenu_);
+    if (rhiMenu_) optionsMenu->addMenu(rhiMenu_);
+
+    auto* scriptingMenu = menuBar()->addMenu("Scripting");
+    auto* macroAction = scriptingMenu->addAction("Record Macro...");
+    macroAction->setEnabled(false);
+    auto* runScriptAction = scriptingMenu->addAction("Run Script...");
+    runScriptAction->setEnabled(false);
+
+    auto* toolsMenu = menuBar()->addMenu("Tools");
+    auto* probeAction = toolsMenu->addAction("Probe");
+    connect(probeAction, &QAction::triggered, this, [this]() {
+        statusLabel_->setText("  Probe 可通过工具栏节点/单元/部件拾取使用");
+    });
+    auto* resetSettingsAction = toolsMenu->addAction("Reset View State");
+    connect(resetSettingsAction, &QAction::triggered, this, [this]() {
+        if (renderViewport_) renderViewport_->refresh();
+    });
+
+    auto* helpMenu = menuBar()->addMenu("Help");
+    auto* aboutAction = helpMenu->addAction("About FEModelViewer");
+    connect(aboutAction, &QAction::triggered, this, [this]() {
+        QMessageBox::information(this, "About FEModelViewer",
+                                 "FEModelViewer\nQt6 + OpenGL finite element model viewer");
+    });
+}
+
 void MainWindow::setupToolBar() {
-    toolbar_ = addToolBar("主工具栏");
+    toolbar_ = addToolBar("Quick Tools");
     toolbar_->setMovable(false);
-    toolbar_->setIconSize(QSize(18, 18));
-    toolbar_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolbar_->setIconSize(QSize(20, 20));
+    toolbar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-    auto* clearAction = toolbar_->addAction("清空");
+    auto* newLayoutAction = toolbar_->addAction(toolbarIcon("new-layout"), "新建");
+    newLayoutAction->setToolTip("新建布局 / 清空当前模型");
+
+    auto* openAction = toolbar_->addAction(toolbarIcon("open"), "打开");
+    openAction->setToolTip("打开模型文件");
+    connect(openAction, &QAction::triggered, this, [this]() {
+        browseModelFile();
+        applyFiles();
+    });
+
+    auto* saveAction = toolbar_->addAction(toolbarIcon("save"), "保存");
+    saveAction->setToolTip("保存入口预留");
+    connect(saveAction, &QAction::triggered, this, [this]() {
+        statusLabel_->setText("  保存入口已预留");
+    });
+
+    auto* importResultAction = toolbar_->addAction(toolbarIcon("import-result"), "导入结果");
+    importResultAction->setToolTip("导入 OP2 / UNV 结果文件");
+    connect(importResultAction, &QAction::triggered, this, [this]() {
+        browseResultFile();
+        applyFiles();
+    });
+
+    auto* printAction = toolbar_->addAction(toolbarIcon("print"), "打印");
+    printAction->setToolTip("打印入口预留");
+    connect(printAction, &QAction::triggered, this, [this]() {
+        if (statusLabel_) statusLabel_->setText("  Print 入口已预留");
+    });
+
+    toolbar_->addSeparator();
+
+    const std::vector<std::pair<QString, QString>> viewActions = {
+        {"选择", "select"},
+        {"平移", "pan"},
+        {"旋转", "rotate"},
+        {"缩放", "zoom"},
+        {"适配", "fit"}
+    };
+    for (const auto& actionSpec : viewActions) {
+        const QString text = actionSpec.first;
+        const QString icon = actionSpec.second;
+        auto* action = toolbar_->addAction(toolbarIcon(icon), text);
+        action->setToolTip(QString("%1视图入口").arg(text));
+        connect(action, &QAction::triggered, this, [this, text]() {
+            if (text == "适配" && renderViewport_) {
+                renderViewport_->refresh();
+            }
+            statusLabel_->setText(QString("  %1入口已预留").arg(text));
+        });
+    }
+
+    toolbar_->addSeparator();
+
+    auto* screenshotAction = toolbar_->addAction(toolbarIcon("screenshot"), "截图");
+    screenshotAction->setToolTip("截图入口预留");
+    connect(screenshotAction, &QAction::triggered, this, [this]() {
+        statusLabel_->setText("  截图入口已预留");
+    });
+
+    auto* exportAction = toolbar_->addAction(toolbarIcon("export"), "导出");
+    exportAction->setToolTip("导出入口预留");
+    connect(exportAction, &QAction::triggered, this, [this]() {
+        statusLabel_->setText("  导出入口已预留");
+    });
+
+    toolbar_->addSeparator();
+
+    auto* clearAction = toolbar_->addAction(toolbarIcon("clear"), "清空");
     clearAction->setToolTip("清空当前模型");
-
+    connect(newLayoutAction, &QAction::triggered, clearAction, &QAction::trigger);
     toolbar_->addSeparator();
 
     // ── 拾取模式 ──
     pickGroup_ = new QActionGroup(this);
     pickGroup_->setExclusive(true);
 
-    auto* nodeAction = toolbar_->addAction("节点");
+    auto* nodeAction = toolbar_->addAction(toolbarIcon("pick-node"), "节点");
     nodeAction->setCheckable(true);
     nodeAction->setChecked(true);
     nodeAction->setToolTip("节点拾取模式");
     nodeAction->setData(static_cast<int>(PickMode::Node));
     pickGroup_->addAction(nodeAction);
 
-    auto* elemAction = toolbar_->addAction("单元");
+    auto* elemAction = toolbar_->addAction(toolbarIcon("pick-element"), "单元");
     elemAction->setCheckable(true);
     elemAction->setToolTip("单元拾取模式");
     elemAction->setData(static_cast<int>(PickMode::Element));
     pickGroup_->addAction(elemAction);
 
-    auto* partAction = toolbar_->addAction("部件");
+    auto* partAction = toolbar_->addAction(toolbarIcon("pick-part"), "部件");
     partAction->setCheckable(true);
     partAction->setToolTip("部件拾取模式");
     partAction->setData(static_cast<int>(PickMode::Part));
     pickGroup_->addAction(partAction);
 
+    auto* labelsAction = toolbar_->addAction(toolbarIcon("labels"), "标签");
+    labelsAction->setCheckable(true);
+    labelsAction->setToolTip("显示选中项 ID 标签");
+    connect(labelsAction, &QAction::toggled, this, [this](bool checked) {
+        if (renderViewport_) renderViewport_->setShowLabels(checked);
+    });
+
     toolbar_->addSeparator();
+
+    const std::vector<std::pair<QString, QString>> postActions = {
+        {"云图", "contour"},
+        {"变形", "deform"},
+        {"切片", "slice"},
+        {"等值面", "iso-surface"},
+        {"阈值", "threshold"}
+    };
+    for (const auto& actionSpec : postActions) {
+        const QString text = actionSpec.first;
+        const QString icon = actionSpec.second;
+        auto* action = toolbar_->addAction(toolbarIcon(icon), text);
+        action->setToolTip(QString("%1后处理入口").arg(text));
+        connect(action, &QAction::triggered, this, [this, text]() {
+            if (text == "云图") showPostDialog(contourDialog_);
+            else if (text == "变形") showPostDialog(deformationDialog_);
+            else if (text == "切片") {
+                thresholdPanel_->setFilterMode(ResultPanel::FilterMode::Slice);
+                thresholdDialog_->setWindowTitle("切片设置");
+                showPostDialog(thresholdDialog_);
+            } else if (text == "等值面") {
+                thresholdPanel_->setFilterMode(ResultPanel::FilterMode::IsoSurface);
+                thresholdDialog_->setWindowTitle("等值面设置");
+                showPostDialog(thresholdDialog_);
+            } else if (text == "阈值") {
+                thresholdPanel_->setFilterMode(ResultPanel::FilterMode::Threshold);
+                thresholdDialog_->setWindowTitle("阈值设置");
+                showPostDialog(thresholdDialog_);
+            }
+        });
+    }
 
     // ── RHI 选择 ──
     rhiGroup_ = new QActionGroup(this);
     rhiGroup_->setExclusive(true);
     rhiMenu_ = new QMenu(this);
+    rhiMenu_->setTitle("RHI");
+    rhiMenu_->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
     const RenderBackendKind preferredRhi = RenderSettings::preferredBackend();
     const RenderBackendKind rhiKinds[] = {
         RenderBackendKind::OpenGL,
@@ -557,13 +941,9 @@ void MainWindow::setupToolBar() {
         act->setData(static_cast<int>(kind));
         rhiGroup_->addAction(act);
     }
-    rhiAction_ = toolbar_->addAction("RHI");
+    rhiAction_ = new QAction(style()->standardIcon(QStyle::SP_ComputerIcon), "RHI", this);
     rhiAction_->setToolTip("选择下次启动使用的渲染后端");
     rhiAction_->setMenu(rhiMenu_);
-    connect(rhiAction_, &QAction::triggered, this, [this]() {
-        if (auto* btn = toolbar_->widgetForAction(rhiAction_))
-            rhiMenu_->popup(btn->mapToGlobal(btn->rect().bottomLeft()));
-    });
     connect(rhiGroup_, &QActionGroup::triggered, this, [this](QAction* action) {
         const auto kind = static_cast<RenderBackendKind>(action->data().toInt());
         RenderSettings::setPreferredBackend(kind);
@@ -571,6 +951,7 @@ void MainWindow::setupToolBar() {
             renderViewport_->setPreferredRenderBackend(kind);
         }
         updateRhiActionText();
+        updateStatusSummaries();
         const char* requestedName = renderBackendName(kind);
         const char* activeName = renderViewport_
             ? renderBackendName(renderViewport_->activeRenderBackendKind())
@@ -584,10 +965,10 @@ void MainWindow::setupToolBar() {
         }
     });
 
-    toolbar_->addSeparator();
-
     // ── 主题切换（下拉菜单） ──
     themeMenu_ = new QMenu(this);
+    themeMenu_->setTitle("Theme");
+    themeMenu_->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     for (int i = 0; i < Theme::count(); ++i) {
         Theme th = Theme::byIndex(i);
         QAction* act = themeMenu_->addAction(th.name);
@@ -597,14 +978,9 @@ void MainWindow::setupToolBar() {
             applyTheme(currentTheme_);
         });
     }
-    themeAction_ = toolbar_->addAction("主题");
+    themeAction_ = new QAction(style()->standardIcon(QStyle::SP_FileDialogContentsView), "Theme", this);
     themeAction_->setToolTip("切换主题风格");
     themeAction_->setMenu(themeMenu_);
-    // 点击按钮时弹出菜单
-    connect(themeAction_, &QAction::triggered, this, [this]() {
-        if (auto* btn = toolbar_->widgetForAction(themeAction_))
-            themeMenu_->popup(btn->mapToGlobal(btn->rect().bottomLeft()));
-    });
 
     // ── 连接 ──
     connect(clearAction, &QAction::triggered, this, [this]() {
@@ -620,7 +996,10 @@ void MainWindow::setupToolBar() {
         renderViewport_->setColorBarVisible(false);
         feModelPanel_->clearActiveScalarField();
         resultPanel_->clearResults();
+        deformationPanel_->clearResults();
+        thresholdPanel_->clearResults();
         if (animController_) animController_->setFrameCount(0);
+        loadedResultFrameCount_ = 0;
 
         feModelPanel_->clearModel();
         statusProgress_->setVisible(false);
@@ -629,6 +1008,8 @@ void MainWindow::setupToolBar() {
         statusLabel_->setText("  就绪");
         statusLabel_->setStyleSheet(
             QString("color: %1; font-weight: bold;").arg(currentTheme_.green));
+        updateProjectTreeSummary();
+        updateStatusSummaries();
     });
 
     connect(pickGroup_, &QActionGroup::triggered, this, [this](QAction* action) {
@@ -687,6 +1068,24 @@ void MainWindow::setupStatusBar() {
     statusProgress_->setFormat("%p%");
     statusProgress_->setVisible(false);
     sb->addPermanentWidget(statusProgress_);
+
+    fpsSummaryLabel_ = new QLabel("FPS --");
+    sb->addPermanentWidget(fpsSummaryLabel_);
+
+    frameTimeSummaryLabel_ = new QLabel("帧时间 -- ms");
+    sb->addPermanentWidget(frameTimeSummaryLabel_);
+
+    vertexSummaryLabel_ = new QLabel("顶点数 --");
+    sb->addPermanentWidget(vertexSummaryLabel_);
+
+    triangleSummaryLabel_ = new QLabel("三角面 --");
+    sb->addPermanentWidget(triangleSummaryLabel_);
+
+    auto* fpsTimer = new QTimer(this);
+    fpsTimer->setInterval(500);
+    connect(fpsTimer, &QTimer::timeout, this, &MainWindow::updateStatusSummaries);
+    fpsTimer->start();
+    updateStatusSummaries();
 }
 
 void MainWindow::applyTheme(const Theme& t) {
@@ -696,25 +1095,13 @@ void MainWindow::applyTheme(const Theme& t) {
     // 主窗口背景
     setStyleSheet(QString(
         "QMainWindow { background: %1; }"
-    ).arg(t.mantle));
-
-    // 底部标签页
-    bottomTabs_->setStyleSheet(QString(
-        "QTabWidget { background: %1; }"
-        "QTabWidget::pane {"
-        "  background: %1; border: none;"
-        "  border-top: 1px solid %2; }"
-        "QTabBar {"
-        "  background: %3; }"
-        "QTabBar::tab {"
-        "  background: %3; color: %4;"
-        "  border-top-left-radius: 4px; border-top-right-radius: 4px;"
-        "  padding: 6px 16px; font-size: 12px; margin-right: 1px; }"
-        "QTabBar::tab:selected {"
-        "  background: %1; color: %5; font-weight: bold; }"
-        "QTabBar::tab:hover:!selected {"
-        "  background: %2; }"
-    ).arg(t.base, t.surface0, t.mantle, t.subtext0, t.blue));
+        "QMenuBar {"
+        "  background: %2; color: %3; border-bottom: 1px solid %4;"
+        "  padding: 2px 6px; font-size: 12px; }"
+        "QMenuBar::item {"
+        "  background: transparent; padding: 5px 10px; border-radius: 4px; }"
+        "QMenuBar::item:selected { background: %4; color: %5; }"
+    ).arg(t.mantle, t.crust, t.text, t.surface0, t.blue));
 
     // 侧边栏停靠面板
     QString dockStyle = QString(
@@ -728,35 +1115,31 @@ void MainWindow::applyTheme(const Theme& t) {
     partsDock_->setStyleSheet(dockStyle);
     modelInfoDock_->setStyleSheet(dockStyle);
 
-    // Splitter 手柄
-    if (auto* sp = findChild<QSplitter*>()) {
-        sp->setStyleSheet(QString(
-            "QSplitter::handle {"
-            "  background: %1; height: 4px; }"
-            "QSplitter::handle:hover {"
-            "  background: %2; }"
-        ).arg(t.surface0, t.blue));
-    }
-
-    // 工具栏 — 更宽松的间距，checked 状态用底部强调线
-    toolbar_->setStyleSheet(QString(
+    // 工具栏 — Tecplot 式紧凑图标按钮
+    const QString toolBarStyle = QString(
         "QToolBar {"
         "  background: %1; border-bottom: 1px solid %2;"
-        "  padding: 4px 8px; spacing: 4px; }"
+        "  padding: 1px 4px; spacing: 1px; }"
         "QToolButton {"
         "  background: transparent; color: %3;"
-        "  border: 1px solid transparent; border-radius: 5px;"
-        "  padding: 5px 14px; font-size: 12px; margin: 1px 0; }"
+        "  border: 1px solid transparent; border-radius: 2px;"
+        "  padding: 1px; margin: 0;"
+        "  min-width: 24px; min-height: 24px;"
+        "  max-width: 24px; max-height: 24px; }"
         "QToolButton:hover {"
         "  background: %2; }"
         "QToolButton:pressed {"
         "  background: %4; }"
         "QToolButton:checked {"
         "  background: %4; color: %5;"
-        "  border-bottom: 2px solid %5; border-radius: 5px; }"
+        "  border: 1px solid %5; border-radius: 2px; }"
         "QToolBar::separator {"
-        "  width: 1px; background: %2; margin: 6px 8px; }"
-    ).arg(t.mantle, t.surface0, t.text, t.surface1, t.blue));
+        "  width: 1px; background: %2; margin: 3px 3px; }"
+    ).arg(t.mantle, t.surface0, t.text, t.surface1, t.blue);
+    toolbar_->setStyleSheet(toolBarStyle);
+    if (postToolBar_) {
+        postToolBar_->setStyleSheet(toolBarStyle);
+    }
 
     // 主题下拉菜单
     const QString menuStyle = QString(
@@ -774,6 +1157,9 @@ void MainWindow::applyTheme(const Theme& t) {
     themeMenu_->setStyleSheet(menuStyle);
     if (rhiMenu_) {
         rhiMenu_->setStyleSheet(menuStyle);
+    }
+    for (QMenu* menu : menuBar()->findChildren<QMenu*>()) {
+        menu->setStyleSheet(menuStyle);
     }
 
     // 标记当前主题
@@ -795,6 +1181,12 @@ void MainWindow::applyTheme(const Theme& t) {
         QString("color: %1; font-weight: bold; font-size: 11px;").arg(t.green));
     progressText_->setStyleSheet(
         QString("color: %1; font-size: 11px; padding-right: 8px;").arg(t.blue));
+    const QString summaryStyle =
+        QString("color: %1; font-size: 11px; padding: 0 8px;").arg(t.subtext1);
+    if (fpsSummaryLabel_) fpsSummaryLabel_->setStyleSheet(summaryStyle);
+    if (frameTimeSummaryLabel_) frameTimeSummaryLabel_->setStyleSheet(summaryStyle);
+    if (vertexSummaryLabel_) vertexSummaryLabel_->setStyleSheet(summaryStyle);
+    if (triangleSummaryLabel_) triangleSummaryLabel_->setStyleSheet(summaryStyle);
     statusProgress_->setStyleSheet(QString(
         "QProgressBar {"
         "  border: 1px solid %1; border-radius: 7px;"
@@ -806,42 +1198,61 @@ void MainWindow::applyTheme(const Theme& t) {
         "  border-radius: 6px; }"
     ).arg(t.surface1, t.base, t.text, t.blue, t.teal));
 
-    // 底部文件面板
-    filePanel_->setStyleSheet(QString(
-        "QWidget { background: %1; color: %2; }"
-        "QLabel { font-size: 12px; color: %3; font-weight: bold; }"
-        "QLineEdit {"
-        "  background: %4; border: 1px solid %5; border-radius: 5px;"
-        "  padding: 5px 10px; font-size: 12px; color: %2;"
-        "  selection-background-color: %5; }"
-        "QLineEdit:focus { border-color: %3; }"
-        "QLineEdit[readOnly=\"true\"] { color: %6; }"
-        "QPushButton {"
-        "  background: %7; color: %2; border: 1px solid %5;"
-        "  border-radius: 5px; padding: 5px 12px; font-size: 12px; }"
-        "QPushButton:hover { background: %5; border-color: %3; }"
-        "QPushButton:pressed { background: %8; }"
-    ).arg(t.crust, t.text, t.blue, t.base, t.surface1,
-          t.overlay2, t.surface0, t.surface2));
+    if (modelNavigatorPanel_) {
+        modelNavigatorPanel_->setStyleSheet(QString(
+            "QWidget { background: %1; color: %2; }"
+            "QTreeWidget {"
+            "  background: %3; border: 1px solid %4;"
+            "  border-radius: 6px; outline: none; padding: 2px; }"
+            "QTreeWidget::item {"
+            "  padding: 4px 4px; border-radius: 4px; margin: 1px 0; }"
+            "QTreeWidget::item:hover { background: %4; }"
+            "QTreeWidget::item:selected { background: %5; }"
+            "QHeaderView::section {"
+            "  background: %3; border: none; border-bottom: 1px solid %4;"
+            "  padding: 5px 8px; font-weight: bold; font-size: 12px; color: %6; }"
+        ).arg(t.base, t.text, t.mantle, t.surface0, t.surface1, t.blue));
+    }
 
-    filePanelApplyBtn_->setStyleSheet(QString(
-        "QPushButton {"
-        "  background: %1; color: %2; border: none;"
-        "  border-radius: 5px; padding: 6px 16px; font-size: 12px; font-weight: bold; }"
-        "QPushButton:hover { background: %3; }"
-        "QPushButton:pressed { background: %4; }"
-    ).arg(t.blue, t.btnText, t.blueHover, t.bluePressed));
+    if (inspectorPanel_) {
+        inspectorPanel_->setStyleSheet(QString(
+            "QWidget { background: %1; color: %2; }"
+        ).arg(t.base, t.text));
+    }
+
+    if (displayControlPanel_) {
+        displayControlPanel_->setStyleSheet(QString(
+            "QGroupBox {"
+            "  background: %1; border: 1px solid %2;"
+            "  border-radius: 8px; margin: 10px 8px 8px 8px;"
+            "  padding: 14px 10px 10px 10px;"
+            "  font-weight: bold; font-size: 12px; color: %3; }"
+            "QGroupBox::title {"
+            "  subcontrol-origin: margin; left: 12px; padding: 0 6px;"
+            "  color: %4; }"
+            "QPushButton {"
+            "  background: %2; color: %5; border: 1px solid %6;"
+            "  border-radius: 5px; padding: 5px 10px; font-size: 12px; }"
+            "QPushButton:hover { background: %6; border-color: %4; }"
+            "QPushButton:pressed { background: %7; }"
+        ).arg(t.mantle, t.surface0, t.subtext0, t.green, t.text, t.surface1, t.surface2));
+    }
 
     // 各面板
     feModelPanel_->applyTheme(t);
     partsPanel_->applyTheme(t);
-    monitorPanel_->applyTheme(t);
     resultPanel_->applyTheme(t);
+    deformationPanel_->applyTheme(t);
+    thresholdPanel_->applyTheme(t);
     renderViewport_->applyTheme(t);
+
+    const QString dialogStyle = QString("QDialog { background: %1; }").arg(t.base);
+    if (contourDialog_) contourDialog_->setStyleSheet(dialogStyle);
+    if (deformationDialog_) deformationDialog_->setStyleSheet(dialogStyle);
+    if (thresholdDialog_) thresholdDialog_->setStyleSheet(dialogStyle);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    syncImportPathsFromEdits();
     QSettings settings("FEModelViewer", "FEModelViewer");
     settings.setValue("lastModelPath", importPaths_.modelPath);
     settings.setValue("lastResultPath", importPaths_.resultPath);
@@ -905,14 +1316,14 @@ void MainWindow::updateFilterPlaneBounds()
 {
     const FEModel& model = activeModel();
     if (model.nodes.empty()) {
-        resultPanel_->setPlaneBounds(glm::vec3(0.0f), glm::vec3(0.0f));
+        thresholdPanel_->setPlaneBounds(glm::vec3(0.0f), glm::vec3(0.0f));
         renderViewport_->clearClipPlanePreview();
         return;
     }
 
     glm::vec3 bbMin, bbMax;
     model.computeBoundingBox(bbMin, bbMax);
-    resultPanel_->setPlaneBounds(bbMin, bbMax);
+    thresholdPanel_->setPlaneBounds(bbMin, bbMax);
 }
 
 void MainWindow::applyDeformation(float scale, bool overlayUndeformed)
@@ -920,7 +1331,7 @@ void MainWindow::applyDeformation(float scale, bool overlayUndeformed)
     const FEModel& model = feModelPanel_->currentModel();
     if (model.nodes.empty()) return;
 
-    FEVectorField disp = resultPanel_->currentDisplacement();
+    FEVectorField disp = deformationPanel_->currentDisplacement();
     if (disp.values.empty()) return;
 
     FEDeformationOptions opts;
@@ -1016,7 +1427,7 @@ void MainWindow::applyThreshold(float minVal, float maxVal)
 
     FEScalarField field;
     QString title;
-    if (!resultPanel_->currentScalarField(field, title)) return;
+    if (!thresholdPanel_->currentScalarField(field, title)) return;
 
     FEScalarField elemField = field;
     if (field.location == FieldLocation::Node) {
@@ -1108,7 +1519,7 @@ void MainWindow::applyIsoSurface(float isoValue)
 
     FEScalarField field;
     QString title;
-    if (!resultPanel_->currentScalarField(field, title)) return;
+    if (!thresholdPanel_->currentScalarField(field, title)) return;
 
     postEffect_.iso = { title, isoValue };
     postEffect_.applied = true;

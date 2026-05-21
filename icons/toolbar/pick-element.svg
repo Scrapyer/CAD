@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <style>.line{fill:none;stroke:#566170;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.blue{fill:#28a8d8;stroke:#0b79a5;stroke-width:1.4;stroke-linejoin:round}.pale{fill:#dff3fb;stroke:#566170;stroke-width:1.4;stroke-linejoin:round}.soft{fill:#f7fbff;stroke:#566170;stroke-width:1.4;stroke-linejoin:round}.warn{fill:none;stroke:#d84f4f;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}</style>
+  </defs>
+  <g transform="translate(-1.44 -1.44) scale(1.12)">
+<path d="M5 17 11 5l8 11z" class="pale"/><path d="M11 5v11M5 17l14-1" fill="none" stroke="#0b79a5" stroke-width="1.2"/>
+  </g>
+</svg>

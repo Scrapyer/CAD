@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 #include <QSignalBlocker>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,86 @@ ResultPanel::ResultPanel(QWidget* parent)
     : QWidget(parent)
 {
     setupUI();
+}
+
+void ResultPanel::setPanelMode(PanelMode mode)
+{
+    const bool showContour = (mode == PanelMode::All
+                           || mode == PanelMode::Contour
+                           || mode == PanelMode::Threshold);
+    const bool showDeform = (mode == PanelMode::All || mode == PanelMode::Deformation);
+    const bool showThreshold = (mode == PanelMode::All || mode == PanelMode::Threshold);
+
+    resultGroup_->setVisible(showContour);
+    deformGroup_->setVisible(showDeform);
+    filterGroup_->setVisible(showThreshold);
+
+    if (mode == PanelMode::Contour) {
+        resultGroup_->setTitle("云图显示");
+        setMinimumSize(340, 180);
+        resize(360, 220);
+    } else if (mode == PanelMode::Deformation) {
+        deformGroup_->setTitle("变形显示");
+        setMinimumSize(320, 160);
+        resize(340, 200);
+    } else if (mode == PanelMode::Threshold) {
+        resultGroup_->setTitle("结果字段");
+        filterGroup_->setTitle("阈值设置");
+        if (filterTypeCombo_) {
+            filterTypeCombo_->setCurrentIndex(0);
+        }
+        if (filterTypeWidget_) filterTypeWidget_->hide();
+        if (threshWidget_) threshWidget_->show();
+        if (clipWidget_) clipWidget_->hide();
+        if (sliceWidget_) sliceWidget_->hide();
+        if (isoWidget_) isoWidget_->hide();
+        setMinimumSize(340, 320);
+        resize(380, 360);
+    } else {
+        resultGroup_->setTitle("结果显示");
+        filterGroup_->setTitle("过滤");
+        if (filterTypeWidget_) filterTypeWidget_->show();
+    }
+}
+
+void ResultPanel::setFilterMode(FilterMode mode)
+{
+    const int idx = static_cast<int>(mode);
+    if (filterTypeCombo_) {
+        QSignalBlocker blocker(filterTypeCombo_);
+        filterTypeCombo_->setCurrentIndex(idx);
+    }
+
+    const bool usesPlane = (idx == 1 || idx == 2);
+    const bool needsScalar = (idx == 0 || idx == 3);
+
+    if (filterTypeWidget_) filterTypeWidget_->hide();
+    if (resultGroup_) resultGroup_->setVisible(needsScalar);
+    if (filterGroup_) {
+        const QStringList titles = {"阈值设置", "裁剪设置", "切片设置", "等值面设置"};
+        if (idx >= 0 && idx < titles.size()) filterGroup_->setTitle(titles[idx]);
+    }
+
+    if (threshWidget_) threshWidget_->setVisible(idx == 0);
+    if (clipWidget_) clipWidget_->setVisible(usesPlane);
+    if (clipSideCheck_) clipSideCheck_->setVisible(idx == 1);
+    if (sliceWidget_) sliceWidget_->setVisible(idx == 2);
+    if (isoWidget_) isoWidget_->setVisible(idx == 3);
+    if (filterApplyBtn_) {
+        const QStringList labels = {"应用阈值", "应用裁剪", "应用切片", "应用等值面"};
+        if (idx >= 0 && idx < labels.size()) filterApplyBtn_->setText(labels[idx]);
+    }
+
+    if (usesPlane) {
+        updatePlaneControlsForAxis(false);
+        emitPlanePreviewIfActive();
+        setMinimumSize(340, 240);
+        resize(360, 280);
+    } else {
+        emit planePreviewCleared();
+        setMinimumSize(340, 320);
+        resize(380, 360);
+    }
 }
 
 void ResultPanel::setupUI()
@@ -154,15 +235,17 @@ void ResultPanel::setupUI()
     filterLayout->setContentsMargins(8, 12, 8, 8);
     filterLayout->setSpacing(6);
 
+    filterTypeWidget_ = new QWidget;
     {
-        auto* typeRow = new QHBoxLayout;
+        auto* typeRow = new QHBoxLayout(filterTypeWidget_);
+        typeRow->setContentsMargins(0, 0, 0, 0);
         typeRow->addWidget(new QLabel("类型:"));
         filterTypeCombo_ = new QComboBox;
         filterTypeCombo_->setObjectName("filterTypeCombo");
         filterTypeCombo_->addItems({"阈值", "裁剪平面（隐藏一侧）", "切片线（不隐藏）", "等值面"});
         typeRow->addWidget(filterTypeCombo_);
-        filterLayout->addLayout(typeRow);
     }
+    filterLayout->addWidget(filterTypeWidget_);
 
     // 阈值控件
     threshWidget_ = new QWidget;

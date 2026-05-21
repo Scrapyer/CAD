@@ -1,0 +1,26 @@
+<RCC>
+    <qresource prefix="/icons/toolbar">
+        <file alias="clear.svg">icons/toolbar/clear.svg</file>
+        <file alias="contour.svg">icons/toolbar/contour.svg</file>
+        <file alias="deform.svg">icons/toolbar/deform.svg</file>
+        <file alias="export.svg">icons/toolbar/export.svg</file>
+        <file alias="fit.svg">icons/toolbar/fit.svg</file>
+        <file alias="import-result.svg">icons/toolbar/import-result.svg</file>
+        <file alias="iso-surface.svg">icons/toolbar/iso-surface.svg</file>
+        <file alias="labels.svg">icons/toolbar/labels.svg</file>
+        <file alias="new-layout.svg">icons/toolbar/new-layout.svg</file>
+        <file alias="open.svg">icons/toolbar/open.svg</file>
+        <file alias="pan.svg">icons/toolbar/pan.svg</file>
+        <file alias="pick-element.svg">icons/toolbar/pick-element.svg</file>
+        <file alias="pick-node.svg">icons/toolbar/pick-node.svg</file>
+        <file alias="pick-part.svg">icons/toolbar/pick-part.svg</file>
+        <file alias="print.svg">icons/toolbar/print.svg</file>
+        <file alias="rotate.svg">icons/toolbar/rotate.svg</file>
+        <file alias="save.svg">icons/toolbar/save.svg</file>
+        <file alias="screenshot.svg">icons/toolbar/screenshot.svg</file>
+        <file alias="select.svg">icons/toolbar/select.svg</file>
+        <file alias="slice.svg">icons/toolbar/slice.svg</file>
+        <file alias="threshold.svg">icons/toolbar/threshold.svg</file>
+        <file alias="zoom.svg">icons/toolbar/zoom.svg</file>
+    </qresource>
+</RCC>

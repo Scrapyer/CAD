@@ -2,11 +2,11 @@
  * @file MainWindow.h
  * @brief 主窗口声明
  *
- * HyperView 风格布局：
- *   - 工具栏（拾取模式切换 + 主题选择）
- *   - 左侧停靠：部件面板
- *   - 中央渲染视口 + 底部标签页（文件导入 / 结果显示 / 监控）
- *   - 右侧停靠：模型信息面板
+ * Tecplot 风格布局：
+ *   - Tecplot 式菜单栏 + 紧凑快捷工具栏
+ *   - 左侧停靠：项目树 / 部件列表
+ *   - 中央渲染视口 + 底部工作流标签页
+ *   - 右侧停靠：选择详情 / 显示控制
  *   - 状态栏
  */
 
@@ -15,13 +15,14 @@
 #include <QMainWindow>
 #include <QActionGroup>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPushButton>
 #include <QProgressBar>
 #include <QToolBar>
 #include <QMenu>
-#include <QTabWidget>
+#include <QStringList>
 #include <QDockWidget>
+#include <QDialog>
+#include <QTreeWidget>
 
 #include "Theme.h"
 #include "FERenderData.h"
@@ -32,7 +33,6 @@
 #include "RenderBackend.h"
 
 class RenderViewport;
-class MonitorPanel;
 class FEModelPanel;
 class PartsPanel;
 class ResultPanel;
@@ -48,17 +48,22 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
+    void setupMenuBar();
     void setupToolBar();
     void setupStatusBar();
-    QWidget* createFilePanel();
+    QWidget* createModelNavigatorPanel();
+    QWidget* createInspectorPanel();
+    QWidget* createDisplayControlPanel();
+    QDialog* createPostDialog(const QString& title, ResultPanel* panel);
+    void showPostDialog(QDialog* dialog);
     void applyTheme(const Theme& theme);
     void updateRhiActionText();
+    void updateProjectTreeSummary();
+    void updateStatusSummaries();
 
     void browseModelFile();
     void browseResultFile();
     void applyFiles();
-    void refreshFilePathEdits();
-    void syncImportPathsFromEdits();
 
     void applyDeformation(float scale, bool overlayUndeformed);
     void clearDeformation();
@@ -78,11 +83,15 @@ private:
     void reapplyContourIfNeeded();
 
     RenderViewport*        renderViewport_  = nullptr;
-    MonitorPanel*          monitorPanel_    = nullptr;
     FEModelPanel*          feModelPanel_    = nullptr;
     PartsPanel*            partsPanel_      = nullptr;
     ResultPanel*           resultPanel_     = nullptr;
+    ResultPanel*           deformationPanel_ = nullptr;
+    ResultPanel*           thresholdPanel_   = nullptr;
     FEAnimationController* animController_  = nullptr;
+    QDialog*               contourDialog_    = nullptr;
+    QDialog*               deformationDialog_ = nullptr;
+    QDialog*               thresholdDialog_   = nullptr;
 
     // 工具栏拾取模式动作组
     QActionGroup*  pickGroup_     = nullptr;
@@ -92,16 +101,22 @@ private:
     QLabel*        statusLabel_    = nullptr;
     QProgressBar*  statusProgress_ = nullptr;
     QLabel*        progressText_   = nullptr;
+    QLabel*        fpsSummaryLabel_      = nullptr;
+    QLabel*        frameTimeSummaryLabel_ = nullptr;
+    QLabel*        vertexSummaryLabel_   = nullptr;
+    QLabel*        triangleSummaryLabel_ = nullptr;
 
-    // 底部标签页面板
-    QTabWidget*    bottomTabs_     = nullptr;
-    QLineEdit*     modelPathEdit_  = nullptr;
-    QLineEdit*     resultPathEdit_ = nullptr;
+    // 最近的导入路径
     ImportPathState importPaths_;
 
     // 侧边栏停靠
-    QDockWidget*   partsDock_      = nullptr;
-    QDockWidget*   modelInfoDock_  = nullptr;
+    QDockWidget*   partsDock_      = nullptr;   // 左侧：模型结构
+    QDockWidget*   modelInfoDock_  = nullptr;   // 右侧：属性/控制
+    QWidget*       modelNavigatorPanel_ = nullptr;
+    QWidget*       inspectorPanel_      = nullptr;
+    QWidget*       displayControlPanel_ = nullptr;
+    QTreeWidget*   projectTree_         = nullptr;
+    int            loadedResultFrameCount_ = 0;
 
     // 后处理显示状态
     DeformState     deform_;
@@ -110,9 +125,8 @@ private:
 
     // 主题相关
     Theme          currentTheme_;
-    QWidget*       filePanel_      = nullptr;
-    QToolBar*      toolbar_        = nullptr;
-    QPushButton*   filePanelApplyBtn_ = nullptr;
+    QToolBar*      toolbar_        = nullptr;   // Tecplot 式快捷工具栏
+    QToolBar*      postToolBar_    = nullptr;
     QAction*       themeAction_    = nullptr;
     QMenu*         themeMenu_      = nullptr;
     QAction*       rhiAction_      = nullptr;

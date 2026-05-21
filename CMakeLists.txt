@@ -476,6 +476,8 @@ qt6_wrap_cpp(VIEWER_MOC_SRCS
     ${SOURCE_DIR}/app/MonitorPanel.h
 )
 
+qt6_add_resources(VIEWER_QRC icons.qrc)
+
 add_executable(${PROJECT_NAME}
     ${SOURCE_DIR}/app/main.cpp
     ${SOURCE_DIR}/app/MainWindow.cpp
@@ -485,6 +487,7 @@ add_executable(${PROJECT_NAME}
     ${SOURCE_DIR}/app/ControlPanel.cpp
     ${SOURCE_DIR}/app/MonitorPanel.cpp
     ${VIEWER_MOC_SRCS}
+    ${VIEWER_QRC}
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES AUTOMOC OFF)
