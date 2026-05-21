@@ -243,17 +243,23 @@ if(FERENDER_HAS_VULKAN_RHI)
         ${SOURCE_DIR}/rhi/VulkanClearFrameRenderer.cpp
         ${SOURCE_DIR}/rhi/VulkanCommandResource.cpp
         ${SOURCE_DIR}/rhi/VulkanContext.cpp
+        ${SOURCE_DIR}/rhi/VulkanDepthResource.cpp
         ${SOURCE_DIR}/rhi/VulkanDescriptorResource.cpp
         ${SOURCE_DIR}/rhi/VulkanDescriptorSetLayoutResource.cpp
         ${SOURCE_DIR}/rhi/VulkanDevice.cpp
         ${SOURCE_DIR}/rhi/VulkanFramebufferResource.cpp
+        ${SOURCE_DIR}/rhi/VulkanFramePipelines.cpp
+        ${SOURCE_DIR}/rhi/VulkanMeshBufferResources.cpp
         ${SOURCE_DIR}/rhi/VulkanMeshFramePass.cpp
         ${SOURCE_DIR}/rhi/VulkanPickPass.cpp
+        ${SOURCE_DIR}/rhi/VulkanPickResources.cpp
         ${SOURCE_DIR}/rhi/VulkanPipelineResource.cpp
         ${SOURCE_DIR}/rhi/VulkanRenderPassResource.cpp
         ${SOURCE_DIR}/rhi/VulkanRenderBackend.cpp
+        ${SOURCE_DIR}/rhi/VulkanStagingUploadContext.cpp
         ${SOURCE_DIR}/rhi/VulkanSurface.cpp
         ${SOURCE_DIR}/rhi/VulkanSwapchain.cpp
+        ${SOURCE_DIR}/rhi/VulkanSwapchainFrameResources.cpp
     )
     if(APPLE)
         list(APPEND RENDER_SOURCES

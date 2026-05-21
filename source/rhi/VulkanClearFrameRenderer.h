@@ -2,11 +2,14 @@
 
 #include "VulkanBufferResource.h"
 #include "VulkanCommandResource.h"
+#include "VulkanDepthResource.h"
 #include "VulkanDescriptorResource.h"
 #include "VulkanDescriptorSetLayoutResource.h"
-#include "VulkanFramebufferResource.h"
-#include "VulkanPipelineResource.h"
+#include "VulkanFramePipelines.h"
+#include "VulkanMeshBufferResources.h"
+#include "VulkanPickResources.h"
 #include "VulkanRenderPassResource.h"
+#include "VulkanSwapchainFrameResources.h"
 
 #include <QString>
 #include <QMatrix4x4>
@@ -79,11 +82,8 @@ public:
     const QString& lastError() const { return lastError_; }
 
 private:
-    bool createImageViews(const VulkanDevice& device, const VulkanSwapchain& swapchain);
     bool createRenderPass(const VulkanDevice& device, VkFormat imageFormat);
     bool createDepthResources(const VulkanDevice& device, const VulkanSwapchain& swapchain);
-    VkFormat findDepthFormat(const VulkanDevice& device) const;
-    bool hasStencilComponent(VkFormat format) const;
     bool createBackgroundGraphicsPipeline(const VulkanDevice& device);
     bool createGraphicsPipeline(const VulkanDevice& device);
     bool createMeshGraphicsPipeline(const VulkanDevice& device);
@@ -91,27 +91,14 @@ private:
     bool createLineGraphicsPipeline(const VulkanDevice& device);
     bool createPickRenderPass(const VulkanDevice& device);
     bool createPickGraphicsPipeline(const VulkanDevice& device);
-    bool createPickResources(const VulkanDevice& device, uint32_t width, uint32_t height);
-    void destroyPickResources(const VulkanDevice& device);
     bool createMeshScalarDescriptor(const VulkanDevice& device);
     bool createAxesIndicatorResource(const VulkanDevice& device);
     bool createShaderModule(const VulkanDevice& device, const QString& shaderPath, VkShaderModule& shaderModule);
-    bool createImage(const VulkanDevice& device,
-                     uint32_t width,
-                     uint32_t height,
-                     VkFormat format,
-                     VkImageTiling tiling,
-                     VkImageUsageFlags usage,
-                     VkImage& image,
-                     VkDeviceMemory& memory);
-    bool createImageView(const VulkanDevice& device,
-                         VkImage image,
-                         VkFormat format,
-                         VkImageAspectFlags aspectMask,
-                         VkImageView& imageView);
-    uint32_t findMemoryType(const VulkanDevice& device,
-                            uint32_t typeFilter,
-                            VkMemoryPropertyFlags properties) const;
+    bool uploadLineVerticesDeviceLocal(const VulkanDevice& device,
+                                       VulkanBufferResource& resource,
+                                       uint32_t& vertexCount,
+                                       const std::vector<float>& lineVertices,
+                                       const char* debugName);
     void destroyMeshBuffers(const VulkanDevice& device);
     void destroyIsoSurfaceBuffers(const VulkanDevice& device);
     void destroyClipPreviewBuffers(const VulkanDevice& device);
@@ -142,43 +129,15 @@ private:
     void recordBackground(VkCommandBuffer commandBuffer, VkExtent2D extent);
     int colorToId(unsigned char r, unsigned char g, unsigned char b) const;
 
-    std::vector<VkImageView> imageViews_;
-    VulkanFramebufferResource swapchainFramebuffers_;
+    VulkanSwapchainFrameResources swapchainFrameResources_;
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
-    VkImage depthImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory depthImageMemory_ = VK_NULL_HANDLE;
-    VkImageView depthImageView_ = VK_NULL_HANDLE;
+    VulkanDepthResource depthResource_;
     VulkanRenderPassResource renderPass_;
-    VulkanPipelineResource backgroundPipeline_;
-    VulkanPipelineResource trianglePipeline_;
-    VulkanPipelineResource meshPipeline_;
-    VulkanPipelineResource isoSurfacePipeline_;
+    VulkanFramePipelines pipelines_;
     VulkanDescriptorSetLayoutResource meshScalarSetLayout_;
-    VulkanDescriptorResource meshScalarDescriptor_;
-    VulkanPipelineResource linePipeline_;
     VulkanRenderPassResource pickRenderPass_;
-    VulkanPipelineResource pickPipeline_;
-    VkImage pickColorImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory pickColorMemory_ = VK_NULL_HANDLE;
-    VkImageView pickColorImageView_ = VK_NULL_HANDLE;
-    VkImage pickDepthImage_ = VK_NULL_HANDLE;
-    VkDeviceMemory pickDepthMemory_ = VK_NULL_HANDLE;
-    VkImageView pickDepthImageView_ = VK_NULL_HANDLE;
-    VulkanFramebufferResource pickFramebuffer_;
-    VkExtent2D pickExtent_ = {0, 0};
-    VulkanBufferResource meshVertexResource_;
-    VulkanBufferResource meshIndexResource_;
-    uint32_t meshIndexCount_ = 0;
-    bool meshUseVertexScalars_ = false;
-    float meshScalarMin_ = 0.0f;
-    float meshScalarMax_ = 1.0f;
-    int meshNumBands_ = 10;
-    std::vector<uint32_t> meshScalarSourceIndices_;
-    VulkanBufferResource meshScalarResource_;
-    uint32_t meshScalarCount_ = 0;
-    VulkanBufferResource edgeVertexResource_;
-    VulkanBufferResource edgeIndexResource_;
-    uint32_t edgeIndexCount_ = 0;
+    VulkanPickResources pickResources_;
+    VulkanMeshBufferResources meshResources_;
     VulkanBufferResource isoSurfaceVertexResource_;
     VulkanBufferResource isoSurfaceIndexResource_;
     uint32_t isoSurfaceIndexCount_ = 0;

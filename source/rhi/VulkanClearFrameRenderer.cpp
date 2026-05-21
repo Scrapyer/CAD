@@ -5,6 +5,7 @@
 #include "VulkanMeshFramePass.h"
 #include "VulkanPickPass.h"
 #include "VulkanRenderBackend.h"
+#include "VulkanStagingUploadContext.h"
 #include "VulkanSwapchain.h"
 #include "Geometry.h"
 
@@ -76,8 +77,7 @@ bool VulkanClearFrameRenderer::initialize(const VulkanDevice& device, const Vulk
 
     destroy(device);
 
-    return createImageViews(device, swapchain) &&
-           createRenderPass(device, swapchain.imageFormat()) &&
+    return createRenderPass(device, swapchain.imageFormat()) &&
            createBackgroundGraphicsPipeline(device) &&
            createGraphicsPipeline(device) &&
            createMeshGraphicsPipeline(device) &&
@@ -112,28 +112,11 @@ void VulkanClearFrameRenderer::destroy(const VulkanDevice& device)
         imageAvailableSemaphore_ = VK_NULL_HANDLE;
     }
     commandResource_.destroy(device);
-    destroyPickResources(device);
-    swapchainFramebuffers_.destroy(device);
-    if (depthImageView_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(vkDevice, depthImageView_, nullptr);
-        depthImageView_ = VK_NULL_HANDLE;
-    }
-    if (depthImage_ != VK_NULL_HANDLE) {
-        vkDestroyImage(vkDevice, depthImage_, nullptr);
-        depthImage_ = VK_NULL_HANDLE;
-    }
-    if (depthImageMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(vkDevice, depthImageMemory_, nullptr);
-        depthImageMemory_ = VK_NULL_HANDLE;
-    }
+    pickResources_.destroy(device);
+    swapchainFrameResources_.destroy(device);
+    depthResource_.destroy(device);
     depthFormat_ = VK_FORMAT_UNDEFINED;
-    trianglePipeline_.destroy(device);
-    backgroundPipeline_.destroy(device);
-    meshPipeline_.destroy(device);
-    isoSurfacePipeline_.destroy(device);
-    linePipeline_.destroy(device);
-    pickPipeline_.destroy(device);
-    meshScalarDescriptor_.destroy(device);
+    pipelines_.destroy(device);
     meshScalarSetLayout_.destroy(device);
     destroyMeshBuffers(device);
     destroyIsoSurfaceBuffers(device);
@@ -146,10 +129,6 @@ void VulkanClearFrameRenderer::destroy(const VulkanDevice& device)
     axesLineVertexCount_ = 0;
     pickRenderPass_.destroy(device);
     renderPass_.destroy(device);
-    for (VkImageView imageView : imageViews_) {
-        vkDestroyImageView(vkDevice, imageView, nullptr);
-    }
-    imageViews_.clear();
 }
 
 bool VulkanClearFrameRenderer::renderClearFrame(
@@ -172,7 +151,7 @@ bool VulkanClearFrameRenderer::renderClearFrame(
         return false;
     }
 
-    if (imageIndex >= swapchainFramebuffers_.count()) {
+    if (imageIndex >= swapchainFrameResources_.count()) {
         lastError_ = QStringLiteral("Swapchain image index is out of range");
         return false;
     }
@@ -181,7 +160,7 @@ bool VulkanClearFrameRenderer::renderClearFrame(
         return false;
     }
     if (!recordCommandBuffer(
-            commandResource_.buffer(), swapchainFramebuffers_.framebuffer(imageIndex), swapchain.extent(), clearColor, false)) {
+            commandResource_.buffer(), swapchainFrameResources_.framebuffer(imageIndex), swapchain.extent(), clearColor, false)) {
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -218,7 +197,7 @@ bool VulkanClearFrameRenderer::renderTriangleFrame(
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
-    if (!isInitialized() || trianglePipeline_.pipeline() == VK_NULL_HANDLE) {
+    if (!isInitialized() || pipelines_.triangle.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan triangle pipeline is not initialized");
         return false;
     }
@@ -230,7 +209,7 @@ bool VulkanClearFrameRenderer::renderTriangleFrame(
     if (!acquireSwapchainImage(device, swapchain, imageIndex)) {
         return false;
     }
-    if (imageIndex >= swapchainFramebuffers_.count()) {
+    if (imageIndex >= swapchainFrameResources_.count()) {
         lastError_ = QStringLiteral("Swapchain image index is out of range");
         return false;
     }
@@ -239,7 +218,7 @@ bool VulkanClearFrameRenderer::renderTriangleFrame(
         return false;
     }
     if (!recordCommandBuffer(commandResource_.buffer(),
-                             swapchainFramebuffers_.framebuffer(imageIndex),
+                             swapchainFrameResources_.framebuffer(imageIndex),
                              swapchain.extent(),
                              clearColor,
                              true,
@@ -285,21 +264,21 @@ bool VulkanClearFrameRenderer::uploadMesh(
         return true;
     }
 
-    meshUseVertexScalars_ = options.useVertexColor && !options.vertexScalars.empty();
-    meshScalarMin_ = options.scalarMin;
-    meshScalarMax_ = options.scalarMax;
-    meshNumBands_ = std::max(1, options.numBands);
+    meshResources_.meshUseVertexScalars = options.useVertexColor && !options.vertexScalars.empty();
+    meshResources_.meshScalarMin = options.scalarMin;
+    meshResources_.meshScalarMax = options.scalarMax;
+    meshResources_.meshNumBands = std::max(1, options.numBands);
 
     const size_t sourceVertexCount = mesh.vertices.size() / 6;
     const size_t triangleCount = mesh.indices.size() / 3;
     std::vector<VulkanMeshVertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<float> expandedScalars;
-    meshScalarSourceIndices_.clear();
+    meshResources_.meshScalarSourceIndices.clear();
     vertices.reserve(triangleCount * 3);
     indices.reserve(triangleCount * 3);
     expandedScalars.reserve(triangleCount * 3);
-    meshScalarSourceIndices_.reserve(triangleCount * 3);
+    meshResources_.meshScalarSourceIndices.reserve(triangleCount * 3);
 
     for (size_t tri = 0; tri < triangleCount; ++tri) {
         const int part = tri < options.triangleToPart.size()
@@ -338,7 +317,7 @@ bool VulkanClearFrameRenderer::uploadMesh(
             expandedScalars.push_back(sourceIndex < options.vertexScalars.size()
                 ? options.vertexScalars[sourceIndex]
                 : 0.0f);
-            meshScalarSourceIndices_.push_back(sourceIndex);
+            meshResources_.meshScalarSourceIndices.push_back(sourceIndex);
         }
     }
 
@@ -346,71 +325,34 @@ bool VulkanClearFrameRenderer::uploadMesh(
         return true;
     }
 
+    VulkanStagingUploadContext uploadContext;
     const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(vertices.size() * sizeof(VulkanMeshVertex));
-    if (!meshVertexResource_.uploadDeviceLocal(device,
-                                               vertices.data(),
-                                               vertexSize,
-                                               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                               commandResource_.pool(),
-                                               device.graphicsQueue(),
-                                               "mesh vertex",
-                                               lastError_)) {
+    if (!uploadContext.uploadBuffer(device,
+                                    meshResources_.meshVertexResource,
+                                    vertices.data(),
+                                    vertexSize,
+                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                    "mesh vertex",
+                                    lastError_)) {
+        uploadContext.discard(device);
+        destroyMeshBuffers(device);
         return false;
     }
 
     const VkDeviceSize indexSize = static_cast<VkDeviceSize>(indices.size() * sizeof(uint32_t));
-    if (!meshIndexResource_.uploadDeviceLocal(device,
-                                              indices.data(),
-                                              indexSize,
-                                              VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                              commandResource_.pool(),
-                                              device.graphicsQueue(),
-                                              "mesh index",
-                                              lastError_)) {
-        return false;
-    }
-
-    meshIndexCount_ = static_cast<uint32_t>(indices.size());
-    meshScalarCount_ = static_cast<uint32_t>(expandedScalars.size());
-
-    const VkDeviceSize scalarSize = static_cast<VkDeviceSize>(
-        std::max<size_t>(expandedScalars.size(), 1) * sizeof(float));
-    const void* scalarData = expandedScalars.empty()
-        ? static_cast<const void*>(nullptr)
-        : static_cast<const void*>(expandedScalars.data());
-    float zeroScalar = 0.0f;
-    if (expandedScalars.empty()) {
-        scalarData = &zeroScalar;
-    }
-    if (!meshScalarResource_.uploadHostVisible(device,
-                                               scalarData,
-                                               scalarSize,
-                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                               "mesh scalar storage",
-                                               lastError_)) {
-        destroyMeshBuffers(device);
-        return false;
-    }
-    if (!createMeshScalarDescriptor(device)) {
+    if (!uploadContext.uploadBuffer(device,
+                                    meshResources_.meshIndexResource,
+                                    indices.data(),
+                                    indexSize,
+                                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                    "mesh index",
+                                    lastError_)) {
+        uploadContext.discard(device);
         destroyMeshBuffers(device);
         return false;
     }
 
     if (!mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0) {
-        const VkDeviceSize edgeVertexSize =
-            static_cast<VkDeviceSize>(mesh.edgeVertices.size() * sizeof(float));
-        if (!edgeVertexResource_.uploadDeviceLocal(device,
-                                                   mesh.edgeVertices.data(),
-                                                   edgeVertexSize,
-                                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                   commandResource_.pool(),
-                                                   device.graphicsQueue(),
-                                                   "edge vertex",
-                                                   lastError_)) {
-            destroyMeshBuffers(device);
-            return false;
-        }
-
         std::vector<uint32_t> edgeIndices;
         edgeIndices.reserve(mesh.edgeIndices.size());
         const size_t edgeCount = mesh.edgeIndices.size() / 2;
@@ -425,22 +367,69 @@ bool VulkanClearFrameRenderer::uploadMesh(
             edgeIndices.push_back(mesh.edgeIndices[edge * 2 + 1]);
         }
         if (edgeIndices.empty()) {
-            return true;
+            meshResources_.edgeVertexResource.destroy(device);
+            meshResources_.edgeIndexResource.destroy(device);
+            meshResources_.edgeIndexCount = 0;
+        } else {
+            const VkDeviceSize edgeVertexSize =
+                static_cast<VkDeviceSize>(mesh.edgeVertices.size() * sizeof(float));
+            if (!uploadContext.uploadBuffer(device,
+                                            meshResources_.edgeVertexResource,
+                                            mesh.edgeVertices.data(),
+                                            edgeVertexSize,
+                                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                            "edge vertex",
+                                            lastError_)) {
+                uploadContext.discard(device);
+                destroyMeshBuffers(device);
+                return false;
+            }
+            const VkDeviceSize edgeIndexSize =
+                static_cast<VkDeviceSize>(edgeIndices.size() * sizeof(uint32_t));
+            if (!uploadContext.uploadBuffer(device,
+                                            meshResources_.edgeIndexResource,
+                                            edgeIndices.data(),
+                                            edgeIndexSize,
+                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                            "edge index",
+                                            lastError_)) {
+                uploadContext.discard(device);
+                destroyMeshBuffers(device);
+                return false;
+            }
+            meshResources_.edgeIndexCount = static_cast<uint32_t>(edgeIndices.size());
         }
-        const VkDeviceSize edgeIndexSize =
-            static_cast<VkDeviceSize>(edgeIndices.size() * sizeof(uint32_t));
-        if (!edgeIndexResource_.uploadDeviceLocal(device,
-                                                  edgeIndices.data(),
-                                                  edgeIndexSize,
-                                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                                  commandResource_.pool(),
-                                                  device.graphicsQueue(),
-                                                  "edge index",
-                                                  lastError_)) {
-            destroyMeshBuffers(device);
-            return false;
-        }
-        edgeIndexCount_ = static_cast<uint32_t>(edgeIndices.size());
+    }
+
+    if (!uploadContext.submit(device, commandResource_.pool(), device.graphicsQueue(), lastError_)) {
+        destroyMeshBuffers(device);
+        return false;
+    }
+
+    meshResources_.meshIndexCount = static_cast<uint32_t>(indices.size());
+    meshResources_.meshScalarCount = static_cast<uint32_t>(expandedScalars.size());
+
+    const VkDeviceSize scalarSize = static_cast<VkDeviceSize>(
+        std::max<size_t>(expandedScalars.size(), 1) * sizeof(float));
+    const void* scalarData = expandedScalars.empty()
+        ? static_cast<const void*>(nullptr)
+        : static_cast<const void*>(expandedScalars.data());
+    float zeroScalar = 0.0f;
+    if (expandedScalars.empty()) {
+        scalarData = &zeroScalar;
+    }
+    if (!meshResources_.meshScalarResource.uploadHostVisible(device,
+                                               scalarData,
+                                               scalarSize,
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                               "mesh scalar storage",
+                                               lastError_)) {
+        destroyMeshBuffers(device);
+        return false;
+    }
+    if (!createMeshScalarDescriptor(device)) {
+        destroyMeshBuffers(device);
+        return false;
     }
 
     return true;
@@ -460,20 +449,20 @@ bool VulkanClearFrameRenderer::uploadVertexScalars(
         lastError_ = QStringLiteral("Vulkan device is not initialized");
         return false;
     }
-    if (!meshScalarResource_.isValid() || meshScalarSourceIndices_.empty()) {
+    if (!meshResources_.meshScalarResource.isValid() || meshResources_.meshScalarSourceIndices.empty()) {
         lastError_ = QStringLiteral("Vulkan scalar storage buffer is not initialized");
         return false;
     }
 
     vkDeviceWaitIdle(vkDevice);
-    meshUseVertexScalars_ = useScalars && !scalars.empty();
-    meshScalarMin_ = minVal;
-    meshScalarMax_ = maxVal;
-    meshNumBands_ = std::max(1, numBands);
+    meshResources_.meshUseVertexScalars = useScalars && !scalars.empty();
+    meshResources_.meshScalarMin = minVal;
+    meshResources_.meshScalarMax = maxVal;
+    meshResources_.meshNumBands = std::max(1, numBands);
 
-    std::vector<float> expandedScalars(meshScalarSourceIndices_.size(), 0.0f);
-    for (size_t i = 0; i < meshScalarSourceIndices_.size(); ++i) {
-        const uint32_t sourceIndex = meshScalarSourceIndices_[i];
+    std::vector<float> expandedScalars(meshResources_.meshScalarSourceIndices.size(), 0.0f);
+    for (size_t i = 0; i < meshResources_.meshScalarSourceIndices.size(); ++i) {
+        const uint32_t sourceIndex = meshResources_.meshScalarSourceIndices[i];
         if (sourceIndex < scalars.size()) {
             expandedScalars[i] = scalars[sourceIndex];
         }
@@ -488,7 +477,7 @@ bool VulkanClearFrameRenderer::uploadVertexScalars(
     if (expandedScalars.empty()) {
         scalarData = &zeroScalar;
     }
-    return meshScalarResource_.updateHostVisible(device,
+    return meshResources_.meshScalarResource.updateHostVisible(device,
                                                  scalarData,
                                                  scalarSize,
                                                  "mesh scalar storage",
@@ -507,28 +496,11 @@ bool VulkanClearFrameRenderer::uploadSelectionLines(
     }
 
     vkDeviceWaitIdle(vkDevice);
-    selectionLineVertexResource_.destroy(device);
-    selectionLineVertexCount_ = 0;
-
-    if (lineVertices.empty()) {
-        return true;
-    }
-    if (lineVertices.size() % 3 != 0) {
-        lastError_ = QStringLiteral("Selection line vertex data is not position triplets");
-        return false;
-    }
-
-    const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(lineVertices.size() * sizeof(float));
-    if (!selectionLineVertexResource_.uploadHostVisible(device,
-                                                        lineVertices.data(),
-                                                        vertexSize,
-                                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                        "selection line vertex",
-                                                        lastError_)) {
-        return false;
-    }
-    selectionLineVertexCount_ = static_cast<uint32_t>(lineVertices.size() / 3);
-    return true;
+    return uploadLineVerticesDeviceLocal(device,
+                                         selectionLineVertexResource_,
+                                         selectionLineVertexCount_,
+                                         lineVertices,
+                                         "Selection line vertex");
 }
 
 bool VulkanClearFrameRenderer::uploadOverlayLines(
@@ -543,28 +515,11 @@ bool VulkanClearFrameRenderer::uploadOverlayLines(
     }
 
     vkDeviceWaitIdle(vkDevice);
-    overlayLineVertexResource_.destroy(device);
-    overlayLineVertexCount_ = 0;
-
-    if (lineVertices.empty()) {
-        return true;
-    }
-    if (lineVertices.size() % 3 != 0) {
-        lastError_ = QStringLiteral("Overlay line vertex data is not position triplets");
-        return false;
-    }
-
-    const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(lineVertices.size() * sizeof(float));
-    if (!overlayLineVertexResource_.uploadHostVisible(device,
-                                                      lineVertices.data(),
-                                                      vertexSize,
-                                                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                      "overlay line vertex",
-                                                      lastError_)) {
-        return false;
-    }
-    overlayLineVertexCount_ = static_cast<uint32_t>(lineVertices.size() / 3);
-    return true;
+    return uploadLineVerticesDeviceLocal(device,
+                                         overlayLineVertexResource_,
+                                         overlayLineVertexCount_,
+                                         lineVertices,
+                                         "Overlay line vertex");
 }
 
 bool VulkanClearFrameRenderer::uploadSliceLines(
@@ -579,28 +534,11 @@ bool VulkanClearFrameRenderer::uploadSliceLines(
     }
 
     vkDeviceWaitIdle(vkDevice);
-    sliceLineVertexResource_.destroy(device);
-    sliceLineVertexCount_ = 0;
-
-    if (lineVertices.empty()) {
-        return true;
-    }
-    if (lineVertices.size() % 3 != 0) {
-        lastError_ = QStringLiteral("Slice line vertex data is not position triplets");
-        return false;
-    }
-
-    const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(lineVertices.size() * sizeof(float));
-    if (!sliceLineVertexResource_.uploadHostVisible(device,
-                                                    lineVertices.data(),
-                                                    vertexSize,
-                                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                    "slice line vertex",
-                                                    lastError_)) {
-        return false;
-    }
-    sliceLineVertexCount_ = static_cast<uint32_t>(lineVertices.size() / 3);
-    return true;
+    return uploadLineVerticesDeviceLocal(device,
+                                         sliceLineVertexResource_,
+                                         sliceLineVertexCount_,
+                                         lineVertices,
+                                         "Slice line vertex");
 }
 
 bool VulkanClearFrameRenderer::uploadIsoSurfaceMesh(const VulkanDevice& device, const Mesh& mesh)
@@ -637,27 +575,33 @@ bool VulkanClearFrameRenderer::uploadIsoSurfaceMesh(const VulkanDevice& device, 
         vertices.push_back(vertex);
     }
 
+    VulkanStagingUploadContext uploadContext;
     const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(vertices.size() * sizeof(VulkanMeshVertex));
-    if (!isoSurfaceVertexResource_.uploadDeviceLocal(device,
-                                                     vertices.data(),
-                                                     vertexSize,
-                                                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                     commandResource_.pool(),
-                                                     device.graphicsQueue(),
-                                                     "iso surface vertex",
-                                                     lastError_)) {
+    if (!uploadContext.uploadBuffer(device,
+                                    isoSurfaceVertexResource_,
+                                    vertices.data(),
+                                    vertexSize,
+                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                    "iso surface vertex",
+                                    lastError_)) {
+        uploadContext.discard(device);
+        destroyIsoSurfaceBuffers(device);
         return false;
     }
 
     const VkDeviceSize indexSize = static_cast<VkDeviceSize>(mesh.indices.size() * sizeof(uint32_t));
-    if (!isoSurfaceIndexResource_.uploadDeviceLocal(device,
-                                                    mesh.indices.data(),
-                                                    indexSize,
-                                                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                                    commandResource_.pool(),
-                                                    device.graphicsQueue(),
-                                                    "iso surface index",
-                                                    lastError_)) {
+    if (!uploadContext.uploadBuffer(device,
+                                    isoSurfaceIndexResource_,
+                                    mesh.indices.data(),
+                                    indexSize,
+                                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                    "iso surface index",
+                                    lastError_)) {
+        uploadContext.discard(device);
+        destroyIsoSurfaceBuffers(device);
+        return false;
+    }
+    if (!uploadContext.submit(device, commandResource_.pool(), device.graphicsQueue(), lastError_)) {
         destroyIsoSurfaceBuffers(device);
         return false;
     }
@@ -699,51 +643,60 @@ bool VulkanClearFrameRenderer::uploadClipPreviewMesh(const VulkanDevice& device,
         vertices.push_back(vertex);
     }
 
+    VulkanStagingUploadContext uploadContext;
     const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(vertices.size() * sizeof(VulkanMeshVertex));
-    if (!clipPreviewVertexResource_.uploadDeviceLocal(device,
-                                                      vertices.data(),
-                                                      vertexSize,
-                                                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                      commandResource_.pool(),
-                                                      device.graphicsQueue(),
-                                                      "clip preview vertex",
-                                                      lastError_)) {
+    if (!uploadContext.uploadBuffer(device,
+                                    clipPreviewVertexResource_,
+                                    vertices.data(),
+                                    vertexSize,
+                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                    "clip preview vertex",
+                                    lastError_)) {
+        uploadContext.discard(device);
+        destroyClipPreviewBuffers(device);
         return false;
     }
 
     const VkDeviceSize indexSize = static_cast<VkDeviceSize>(mesh.indices.size() * sizeof(uint32_t));
-    if (!clipPreviewIndexResource_.uploadDeviceLocal(device,
-                                                     mesh.indices.data(),
-                                                     indexSize,
-                                                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                                     commandResource_.pool(),
-                                                     device.graphicsQueue(),
-                                                     "clip preview index",
-                                                     lastError_)) {
+    if (!uploadContext.uploadBuffer(device,
+                                    clipPreviewIndexResource_,
+                                    mesh.indices.data(),
+                                    indexSize,
+                                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                    "clip preview index",
+                                    lastError_)) {
+        uploadContext.discard(device);
         destroyClipPreviewBuffers(device);
         return false;
     }
-    clipPreviewIndexCount_ = static_cast<uint32_t>(mesh.indices.size());
 
     if (!mesh.edgeVertices.empty()) {
         if (mesh.edgeVertices.size() % 3 != 0) {
             lastError_ = QStringLiteral("Clip preview line vertex data is not position triplets");
+            uploadContext.discard(device);
             destroyClipPreviewBuffers(device);
             return false;
         }
         const VkDeviceSize lineSize = static_cast<VkDeviceSize>(mesh.edgeVertices.size() * sizeof(float));
-        if (!clipPreviewLineVertexResource_.uploadHostVisible(device,
-                                                              mesh.edgeVertices.data(),
-                                                              lineSize,
-                                                              VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                              "clip preview line vertex",
-                                                              lastError_)) {
+        if (!uploadContext.uploadBuffer(device,
+                                        clipPreviewLineVertexResource_,
+                                        mesh.edgeVertices.data(),
+                                        lineSize,
+                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                        "clip preview line vertex",
+                                        lastError_)) {
+            uploadContext.discard(device);
             destroyClipPreviewBuffers(device);
             return false;
         }
         clipPreviewLineVertexCount_ = static_cast<uint32_t>(mesh.edgeVertices.size() / 3);
     }
 
+    if (!uploadContext.submit(device, commandResource_.pool(), device.graphicsQueue(), lastError_)) {
+        destroyClipPreviewBuffers(device);
+        return false;
+    }
+    clipPreviewIndexCount_ = static_cast<uint32_t>(mesh.indices.size());
     return true;
 }
 
@@ -756,11 +709,11 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
-    if (!isInitialized() || meshPipeline_.pipeline() == VK_NULL_HANDLE) {
+    if (!isInitialized() || pipelines_.mesh.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan mesh pipeline is not initialized");
         return false;
     }
-    if (!meshVertexResource_.isValid() || !meshIndexResource_.isValid() || meshIndexCount_ == 0) {
+    if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
         return renderTriangleFrame(device, swapchain, clearColor, axesMvp);
     }
 
@@ -771,7 +724,7 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
     if (!acquireSwapchainImage(device, swapchain, imageIndex)) {
         return false;
     }
-    if (imageIndex >= swapchainFramebuffers_.count()) {
+    if (imageIndex >= swapchainFrameResources_.count()) {
         lastError_ = QStringLiteral("Swapchain image index is out of range");
         return false;
     }
@@ -780,7 +733,7 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
         return false;
     }
     if (!recordMeshCommandBuffer(commandResource_.buffer(),
-                                 swapchainFramebuffers_.framebuffer(imageIndex),
+                                 swapchainFrameResources_.framebuffer(imageIndex),
                                  swapchain.extent(),
                                  clearColor,
                                  mvp,
@@ -880,7 +833,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
     VkExtent2D extent,
     const QMatrix4x4& axesMvp)
 {
-    if (linePipeline_.pipeline() == VK_NULL_HANDLE ||
+    if (pipelines_.line.pipeline() == VK_NULL_HANDLE ||
         !axesLineVertexResource_.isValid() ||
         axesLineVertexCount_ < 6 ||
         extent.width == 0 ||
@@ -922,7 +875,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
 
     vkCmdSetViewport(commandBuffer, 0, 1, &axesViewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &axesScissor);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, linePipeline_.pipeline());
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.line.pipeline());
 
     VkDeviceSize offsets[] = {0};
     VkBuffer axesVertexBuffer = axesLineVertexResource_.buffer();
@@ -942,7 +895,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
         pushConstants[18] = axisColors[axis][2];
         pushConstants[19] = axisColors[axis][3];
         vkCmdPushConstants(commandBuffer,
-                           linePipeline_.layout(),
+                           pipelines_.line.layout(),
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0,
                            static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
@@ -953,7 +906,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
 
 void VulkanClearFrameRenderer::recordBackground(VkCommandBuffer commandBuffer, VkExtent2D extent)
 {
-    if (backgroundPipeline_.pipeline() == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
+    if (pipelines_.background.pipeline() == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
         return;
     }
 
@@ -971,7 +924,7 @@ void VulkanClearFrameRenderer::recordBackground(VkCommandBuffer commandBuffer, V
 
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, backgroundPipeline_.pipeline());
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.background.pipeline());
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 }
 
@@ -982,18 +935,18 @@ bool VulkanClearFrameRenderer::renderPickFrame(
     uint32_t height)
 {
     lastError_.clear();
-    if (!isInitialized() || pickPipeline_.pipeline() == VK_NULL_HANDLE) {
+    if (!isInitialized() || pipelines_.pick.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan pick pipeline is not initialized");
         return false;
     }
-    if (!meshVertexResource_.isValid() || !meshIndexResource_.isValid() || meshIndexCount_ == 0) {
+    if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
         lastError_ = QStringLiteral("Vulkan mesh buffers are not initialized");
         return false;
     }
 
     width = std::max<uint32_t>(1, width);
     height = std::max<uint32_t>(1, height);
-    if (!createPickResources(device, width, height)) {
+    if (!pickResources_.create(device, pickRenderPass_.handle(), depthFormat_, width, height, lastError_)) {
         return false;
     }
 
@@ -1005,14 +958,14 @@ bool VulkanClearFrameRenderer::renderPickFrame(
     }
     VulkanPickPass::Resources pickResources;
     pickResources.renderPass = pickRenderPass_.handle();
-    pickResources.framebuffer = pickFramebuffer_.framebuffer(0);
-    pickResources.colorImage = pickColorImage_;
-    pickResources.pipeline = &pickPipeline_;
-    pickResources.meshVertexResource = &meshVertexResource_;
-    pickResources.meshIndexResource = &meshIndexResource_;
-    pickResources.meshIndexCount = meshIndexCount_;
+    pickResources.framebuffer = pickResources_.framebuffer();
+    pickResources.colorImage = pickResources_.colorImage();
+    pickResources.pipeline = &pipelines_.pick;
+    pickResources.meshVertexResource = &meshResources_.meshVertexResource;
+    pickResources.meshIndexResource = &meshResources_.meshIndexResource;
+    pickResources.meshIndexCount = meshResources_.meshIndexCount;
     if (!VulkanPickPass::record(commandResource_.buffer(),
-                                pickExtent_,
+                                pickResources_.extent(),
                                 mvp,
                                 pickResources,
                                 VK_NULL_HANDLE,
@@ -1048,11 +1001,11 @@ bool VulkanClearFrameRenderer::pickElementAt(
 {
     elementId = -1;
     lastError_.clear();
-    if (!isInitialized() || pickPipeline_.pipeline() == VK_NULL_HANDLE) {
+    if (!isInitialized() || pipelines_.pick.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan pick pipeline is not initialized");
         return false;
     }
-    if (!meshVertexResource_.isValid() || !meshIndexResource_.isValid() || meshIndexCount_ == 0) {
+    if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
         lastError_ = QStringLiteral("Vulkan mesh buffers are not initialized");
         return false;
     }
@@ -1062,18 +1015,12 @@ bool VulkanClearFrameRenderer::pickElementAt(
     x = std::min(x, width - 1);
     y = std::min(y, height - 1);
 
-    if (!createPickResources(device, width, height)) {
+    if (!pickResources_.create(device, pickRenderPass_.handle(), depthFormat_, width, height, lastError_)) {
         return false;
     }
 
-    VulkanBufferResource readbackResource;
     unsigned char pixel[4] = {0, 0, 0, 0};
-    if (!readbackResource.uploadHostVisible(device,
-                                            pixel,
-                                            sizeof(pixel),
-                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                            "pick readback",
-                                            lastError_)) {
+    if (!pickResources_.ensureReadbackBuffer(device, lastError_)) {
         return false;
     }
 
@@ -1085,21 +1032,20 @@ bool VulkanClearFrameRenderer::pickElementAt(
     }
     VulkanPickPass::Resources pickResources;
     pickResources.renderPass = pickRenderPass_.handle();
-    pickResources.framebuffer = pickFramebuffer_.framebuffer(0);
-    pickResources.colorImage = pickColorImage_;
-    pickResources.pipeline = &pickPipeline_;
-    pickResources.meshVertexResource = &meshVertexResource_;
-    pickResources.meshIndexResource = &meshIndexResource_;
-    pickResources.meshIndexCount = meshIndexCount_;
+    pickResources.framebuffer = pickResources_.framebuffer();
+    pickResources.colorImage = pickResources_.colorImage();
+    pickResources.pipeline = &pipelines_.pick;
+    pickResources.meshVertexResource = &meshResources_.meshVertexResource;
+    pickResources.meshIndexResource = &meshResources_.meshIndexResource;
+    pickResources.meshIndexCount = meshResources_.meshIndexCount;
     if (!VulkanPickPass::record(commandResource_.buffer(),
-                                pickExtent_,
+                                pickResources_.extent(),
                                 mvp,
                                 pickResources,
-                                readbackResource.buffer(),
+                                pickResources_.readbackBuffer(),
                                 x,
                                 y,
                                 lastError_)) {
-        readbackResource.destroy(device);
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -1112,60 +1058,26 @@ bool VulkanClearFrameRenderer::pickElementAt(
     VkResult result = vkQueueSubmit(device.graphicsQueue(), 1, &submitInfo, inFlightFence_);
     if (result != VK_SUCCESS) {
         lastError_ = QStringLiteral("vkQueueSubmit(pick readback) failed: ") + VulkanContext::formatResult(result);
-        readbackResource.destroy(device);
         return false;
     }
 
     result = vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
     if (result != VK_SUCCESS) {
         lastError_ = QStringLiteral("vkWaitForFences(pick readback) failed: ") + VulkanContext::formatResult(result);
-        readbackResource.destroy(device);
         return false;
     }
 
-    if (!readbackResource.readHostVisible(device, pixel, sizeof(pixel), "pick readback", lastError_)) {
-        readbackResource.destroy(device);
+    if (!pickResources_.readPixel(device, pixel, lastError_)) {
         return false;
     }
 
     elementId = colorToId(pixel[0], pixel[1], pixel[2]);
-
-    readbackResource.destroy(device);
-    return true;
-}
-
-bool VulkanClearFrameRenderer::createImageViews(const VulkanDevice& device, const VulkanSwapchain& swapchain)
-{
-    imageViews_.resize(swapchain.images().size(), VK_NULL_HANDLE);
-    for (size_t i = 0; i < swapchain.images().size(); ++i) {
-        VkImageViewCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        createInfo.image = swapchain.images()[i];
-        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        createInfo.format = swapchain.imageFormat();
-        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        createInfo.subresourceRange.layerCount = 1;
-
-        VkResult result = vkCreateImageView(device.device(), &createInfo, nullptr, &imageViews_[i]);
-        if (result != VK_SUCCESS) {
-            lastError_ = QStringLiteral("vkCreateImageView failed: ") +
-                VulkanContext::formatResult(result);
-            return false;
-        }
-    }
     return true;
 }
 
 bool VulkanClearFrameRenderer::createRenderPass(const VulkanDevice& device, VkFormat imageFormat)
 {
-    depthFormat_ = findDepthFormat(device);
+    depthFormat_ = VulkanDepthResource::findDepthFormat(device);
     if (depthFormat_ == VK_FORMAT_UNDEFINED) {
         lastError_ = QStringLiteral("No supported Vulkan depth format");
         return false;
@@ -1230,26 +1142,12 @@ bool VulkanClearFrameRenderer::createRenderPass(const VulkanDevice& device, VkFo
 
 bool VulkanClearFrameRenderer::createDepthResources(const VulkanDevice& device, const VulkanSwapchain& swapchain)
 {
-    if (depthFormat_ == VK_FORMAT_UNDEFINED) {
-        lastError_ = QStringLiteral("Vulkan depth format is undefined");
-        return false;
-    }
-
-    if (!createImage(device,
-                     swapchain.extent().width,
-                     swapchain.extent().height,
-                     depthFormat_,
-                     VK_IMAGE_TILING_OPTIMAL,
-                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                     depthImage_,
-                     depthImageMemory_)) {
-        return false;
-    }
-
-    const VkImageAspectFlags aspectMask = hasStencilComponent(depthFormat_)
-        ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
-        : VK_IMAGE_ASPECT_DEPTH_BIT;
-    return createImageView(device, depthImage_, depthFormat_, aspectMask, depthImageView_);
+    return depthResource_.create(device,
+                                 swapchain.extent().width,
+                                 swapchain.extent().height,
+                                 depthFormat_,
+                                 "main",
+                                 lastError_);
 }
 
 bool VulkanClearFrameRenderer::createPickRenderPass(const VulkanDevice& device)
@@ -1314,29 +1212,6 @@ bool VulkanClearFrameRenderer::createPickRenderPass(const VulkanDevice& device)
     createInfo.pDependencies = &dependency;
 
     return pickRenderPass_.create(device, createInfo, "pick", lastError_);
-}
-
-VkFormat VulkanClearFrameRenderer::findDepthFormat(const VulkanDevice& device) const
-{
-    const std::array<VkFormat, 3> candidates = {
-        VK_FORMAT_D32_SFLOAT,
-        VK_FORMAT_D32_SFLOAT_S8_UINT,
-        VK_FORMAT_D24_UNORM_S8_UINT
-    };
-
-    for (VkFormat format : candidates) {
-        VkFormatProperties properties{};
-        vkGetPhysicalDeviceFormatProperties(device.physicalDevice(), format, &properties);
-        if (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
-            return format;
-        }
-    }
-    return VK_FORMAT_UNDEFINED;
-}
-
-bool VulkanClearFrameRenderer::hasStencilComponent(VkFormat format) const
-{
-    return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
 
 bool VulkanClearFrameRenderer::createBackgroundGraphicsPipeline(const VulkanDevice& device)
@@ -1435,7 +1310,7 @@ bool VulkanClearFrameRenderer::createBackgroundGraphicsPipeline(const VulkanDevi
     pipelineInfo.renderPass = renderPass_.handle();
     pipelineInfo.subpass = 0;
 
-    const bool pipelineCreated = backgroundPipeline_.createGraphics(
+    const bool pipelineCreated = pipelines_.background.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "background", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
@@ -1548,7 +1423,7 @@ bool VulkanClearFrameRenderer::createGraphicsPipeline(const VulkanDevice& device
     pipelineInfo.renderPass = renderPass_.handle();
     pipelineInfo.subpass = 0;
 
-    const bool pipelineCreated = trianglePipeline_.createGraphics(
+    const bool pipelineCreated = pipelines_.triangle.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "triangle", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
@@ -1712,7 +1587,7 @@ bool VulkanClearFrameRenderer::createMeshGraphicsPipeline(const VulkanDevice& de
     pipelineInfo.renderPass = renderPass_.handle();
     pipelineInfo.subpass = 0;
 
-    const bool pipelineCreated = meshPipeline_.createGraphics(
+    const bool pipelineCreated = pipelines_.mesh.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "mesh", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
@@ -1864,7 +1739,7 @@ bool VulkanClearFrameRenderer::createIsoSurfaceGraphicsPipeline(const VulkanDevi
     pipelineInfo.renderPass = renderPass_.handle();
     pipelineInfo.subpass = 0;
 
-    const bool pipelineCreated = isoSurfacePipeline_.createGraphics(
+    const bool pipelineCreated = pipelines_.isoSurface.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "iso surface", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
@@ -2007,7 +1882,7 @@ bool VulkanClearFrameRenderer::createLineGraphicsPipeline(const VulkanDevice& de
     pipelineInfo.renderPass = renderPass_.handle();
     pipelineInfo.subpass = 0;
 
-    const bool pipelineCreated = linePipeline_.createGraphics(
+    const bool pipelineCreated = pipelines_.line.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "line", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
@@ -2147,7 +2022,7 @@ bool VulkanClearFrameRenderer::createPickGraphicsPipeline(const VulkanDevice& de
     pipelineInfo.renderPass = pickRenderPass_.handle();
     pipelineInfo.subpass = 0;
 
-    const bool pipelineCreated = pickPipeline_.createGraphics(
+    const bool pipelineCreated = pipelines_.pick.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "pick", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
@@ -2196,124 +2071,19 @@ bool VulkanClearFrameRenderer::createShaderModule(
     return true;
 }
 
-bool VulkanClearFrameRenderer::createImage(
-    const VulkanDevice& device,
-    uint32_t width,
-    uint32_t height,
-    VkFormat format,
-    VkImageTiling tiling,
-    VkImageUsageFlags usage,
-    VkImage& image,
-    VkDeviceMemory& memory)
-{
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = width;
-    imageInfo.extent.height = height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = tiling;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VkResult result = vkCreateImage(device.device(), &imageInfo, nullptr, &image);
-    if (result != VK_SUCCESS) {
-        lastError_ = QStringLiteral("vkCreateImage failed: ") + VulkanContext::formatResult(result);
-        return false;
-    }
-
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(device.device(), image, &requirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = requirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(
-        device,
-        requirements.memoryTypeBits,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    result = vkAllocateMemory(device.device(), &allocInfo, nullptr, &memory);
-    if (result != VK_SUCCESS) {
-        lastError_ = QStringLiteral("vkAllocateMemory(image) failed: ") + VulkanContext::formatResult(result);
-        vkDestroyImage(device.device(), image, nullptr);
-        image = VK_NULL_HANDLE;
-        return false;
-    }
-
-    result = vkBindImageMemory(device.device(), image, memory, 0);
-    if (result != VK_SUCCESS) {
-        lastError_ = QStringLiteral("vkBindImageMemory failed: ") + VulkanContext::formatResult(result);
-        vkFreeMemory(device.device(), memory, nullptr);
-        vkDestroyImage(device.device(), image, nullptr);
-        memory = VK_NULL_HANDLE;
-        image = VK_NULL_HANDLE;
-        return false;
-    }
-
-    return true;
-}
-
-bool VulkanClearFrameRenderer::createImageView(
-    const VulkanDevice& device,
-    VkImage image,
-    VkFormat format,
-    VkImageAspectFlags aspectMask,
-    VkImageView& imageView)
-{
-    VkImageViewCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    createInfo.image = image;
-    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    createInfo.format = format;
-    createInfo.subresourceRange.aspectMask = aspectMask;
-    createInfo.subresourceRange.baseMipLevel = 0;
-    createInfo.subresourceRange.levelCount = 1;
-    createInfo.subresourceRange.baseArrayLayer = 0;
-    createInfo.subresourceRange.layerCount = 1;
-
-    VkResult result = vkCreateImageView(device.device(), &createInfo, nullptr, &imageView);
-    if (result != VK_SUCCESS) {
-        lastError_ = QStringLiteral("vkCreateImageView failed: ") + VulkanContext::formatResult(result);
-        return false;
-    }
-    return true;
-}
-
-uint32_t VulkanClearFrameRenderer::findMemoryType(
-    const VulkanDevice& device,
-    uint32_t typeFilter,
-    VkMemoryPropertyFlags properties) const
-{
-    VkPhysicalDeviceMemoryProperties memoryProperties{};
-    vkGetPhysicalDeviceMemoryProperties(device.physicalDevice(), &memoryProperties);
-    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) &&
-            (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-    return 0;
-}
-
 bool VulkanClearFrameRenderer::createMeshScalarDescriptor(const VulkanDevice& device)
 {
     VkDevice vkDevice = device.device();
-    if (vkDevice == VK_NULL_HANDLE || !meshScalarResource_.isValid()) {
+    if (vkDevice == VK_NULL_HANDLE || !meshResources_.meshScalarResource.isValid()) {
         lastError_ = QStringLiteral("Vulkan scalar storage buffer is not initialized");
         return false;
     }
 
     const VkDeviceSize range = static_cast<VkDeviceSize>(
-        std::max<uint32_t>(meshScalarCount_, 1) * sizeof(float));
-    return meshScalarDescriptor_.createStorageBufferSet(device,
+        std::max<uint32_t>(meshResources_.meshScalarCount, 1) * sizeof(float));
+    return meshResources_.meshScalarDescriptor.createStorageBufferSet(device,
                                                         meshScalarSetLayout_.handle(),
-                                                        meshScalarResource_.buffer(),
+                                                        meshResources_.meshScalarResource.buffer(),
                                                         range,
                                                         lastError_);
 }
@@ -2340,27 +2110,54 @@ bool VulkanClearFrameRenderer::createAxesIndicatorResource(const VulkanDevice& d
     return true;
 }
 
+bool VulkanClearFrameRenderer::uploadLineVerticesDeviceLocal(
+    const VulkanDevice& device,
+    VulkanBufferResource& resource,
+    uint32_t& vertexCount,
+    const std::vector<float>& lineVertices,
+    const char* debugName)
+{
+    resource.destroy(device);
+    vertexCount = 0;
+
+    if (lineVertices.empty()) {
+        return true;
+    }
+    if (lineVertices.size() % 3 != 0) {
+        lastError_ = QStringLiteral("%1 data is not position triplets")
+            .arg(QString::fromUtf8(debugName));
+        return false;
+    }
+
+    VulkanStagingUploadContext uploadContext;
+    const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(lineVertices.size() * sizeof(float));
+    if (!uploadContext.uploadBuffer(device,
+                                    resource,
+                                    lineVertices.data(),
+                                    vertexSize,
+                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                    debugName,
+                                    lastError_)) {
+        uploadContext.discard(device);
+        resource.destroy(device);
+        return false;
+    }
+    if (!uploadContext.submit(device, commandResource_.pool(), device.graphicsQueue(), lastError_)) {
+        resource.destroy(device);
+        return false;
+    }
+    vertexCount = static_cast<uint32_t>(lineVertices.size() / 3);
+    return true;
+}
+
 void VulkanClearFrameRenderer::destroyMeshBuffers(const VulkanDevice& device)
 {
     VkDevice vkDevice = device.device();
     if (vkDevice == VK_NULL_HANDLE) {
         return;
     }
-    meshScalarDescriptor_.destroy(device);
-    meshIndexResource_.destroy(device);
-    edgeIndexResource_.destroy(device);
-    meshVertexResource_.destroy(device);
-    meshScalarResource_.destroy(device);
-    edgeVertexResource_.destroy(device);
+    meshResources_.destroy(device);
     selectionLineVertexResource_.destroy(device);
-    meshIndexCount_ = 0;
-    meshUseVertexScalars_ = false;
-    meshScalarMin_ = 0.0f;
-    meshScalarMax_ = 1.0f;
-    meshNumBands_ = 10;
-    meshScalarSourceIndices_.clear();
-    meshScalarCount_ = 0;
-    edgeIndexCount_ = 0;
     selectionLineVertexCount_ = 0;
 }
 
@@ -2388,110 +2185,13 @@ void VulkanClearFrameRenderer::destroyClipPreviewBuffers(const VulkanDevice& dev
     clipPreviewLineVertexCount_ = 0;
 }
 
-bool VulkanClearFrameRenderer::createPickResources(const VulkanDevice& device, uint32_t width, uint32_t height)
-{
-    if (pickFramebuffer_.isValid() &&
-        pickExtent_.width == width &&
-        pickExtent_.height == height) {
-        return true;
-    }
-
-    destroyPickResources(device);
-    pickExtent_ = {width, height};
-
-    if (!createImage(device,
-                     width,
-                     height,
-                     VK_FORMAT_R8G8B8A8_UNORM,
-                     VK_IMAGE_TILING_OPTIMAL,
-                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                     pickColorImage_,
-                     pickColorMemory_)) {
-        return false;
-    }
-    if (!createImageView(
-            device, pickColorImage_, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, pickColorImageView_)) {
-        return false;
-    }
-
-    if (!createImage(device,
-                     width,
-                     height,
-                     depthFormat_,
-                     VK_IMAGE_TILING_OPTIMAL,
-                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                     pickDepthImage_,
-                     pickDepthMemory_)) {
-        return false;
-    }
-    const VkImageAspectFlags depthAspect = hasStencilComponent(depthFormat_)
-        ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
-        : VK_IMAGE_ASPECT_DEPTH_BIT;
-    if (!createImageView(device, pickDepthImage_, depthFormat_, depthAspect, pickDepthImageView_)) {
-        return false;
-    }
-
-    const std::vector<VkImageView> attachments = {pickColorImageView_, pickDepthImageView_};
-    return pickFramebuffer_.createSingle(device,
-                                         pickRenderPass_.handle(),
-                                         VkExtent2D{width, height},
-                                         attachments,
-                                         "pick",
-                                         lastError_);
-}
-
-void VulkanClearFrameRenderer::destroyPickResources(const VulkanDevice& device)
-{
-    VkDevice vkDevice = device.device();
-    if (vkDevice == VK_NULL_HANDLE) {
-        return;
-    }
-    pickFramebuffer_.destroy(device);
-    if (pickDepthImageView_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(vkDevice, pickDepthImageView_, nullptr);
-        pickDepthImageView_ = VK_NULL_HANDLE;
-    }
-    if (pickDepthImage_ != VK_NULL_HANDLE) {
-        vkDestroyImage(vkDevice, pickDepthImage_, nullptr);
-        pickDepthImage_ = VK_NULL_HANDLE;
-    }
-    if (pickDepthMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(vkDevice, pickDepthMemory_, nullptr);
-        pickDepthMemory_ = VK_NULL_HANDLE;
-    }
-    if (pickColorImageView_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(vkDevice, pickColorImageView_, nullptr);
-        pickColorImageView_ = VK_NULL_HANDLE;
-    }
-    if (pickColorImage_ != VK_NULL_HANDLE) {
-        vkDestroyImage(vkDevice, pickColorImage_, nullptr);
-        pickColorImage_ = VK_NULL_HANDLE;
-    }
-    if (pickColorMemory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(vkDevice, pickColorMemory_, nullptr);
-        pickColorMemory_ = VK_NULL_HANDLE;
-    }
-    pickExtent_ = {0, 0};
-}
-
 bool VulkanClearFrameRenderer::createFramebuffers(const VulkanDevice& device, const VulkanSwapchain& swapchain)
 {
-    if (depthImageView_ == VK_NULL_HANDLE) {
-        lastError_ = QStringLiteral("Vulkan depth image view is not initialized");
-        return false;
-    }
-
-    std::vector<std::vector<VkImageView>> attachmentSets;
-    attachmentSets.reserve(imageViews_.size());
-    for (size_t i = 0; i < imageViews_.size(); ++i) {
-        attachmentSets.push_back({imageViews_[i], depthImageView_});
-    }
-    return swapchainFramebuffers_.create(device,
-                                         renderPass_.handle(),
-                                         swapchain.extent(),
-                                         attachmentSets,
-                                         "swapchain",
-                                         lastError_);
+    return swapchainFrameResources_.create(device,
+                                           swapchain,
+                                           renderPass_.handle(),
+                                           depthResource_.imageView(),
+                                           lastError_);
 }
 
 bool VulkanClearFrameRenderer::createCommandPool(const VulkanDevice& device)
@@ -2580,7 +2280,7 @@ bool VulkanClearFrameRenderer::recordCommandBuffer(
 
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline_.pipeline());
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.triangle.pipeline());
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     }
     recordAxesIndicator(commandBuffer, extent, axesMvp);
@@ -2631,17 +2331,17 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     recordBackground(commandBuffer, extent);
 
     VulkanMeshFramePass::Resources meshFrameResources;
-    meshFrameResources.meshPipeline = &meshPipeline_;
-    meshFrameResources.isoSurfacePipeline = &isoSurfacePipeline_;
-    meshFrameResources.linePipeline = &linePipeline_;
-    meshFrameResources.meshScalarDescriptor = &meshScalarDescriptor_;
-    meshFrameResources.meshVertexResource = &meshVertexResource_;
-    meshFrameResources.meshIndexResource = &meshIndexResource_;
-    meshFrameResources.meshIndexCount = meshIndexCount_;
-    meshFrameResources.meshUseVertexScalars = meshUseVertexScalars_;
-    meshFrameResources.meshScalarMin = meshScalarMin_;
-    meshFrameResources.meshScalarMax = meshScalarMax_;
-    meshFrameResources.meshNumBands = meshNumBands_;
+    meshFrameResources.meshPipeline = &pipelines_.mesh;
+    meshFrameResources.isoSurfacePipeline = &pipelines_.isoSurface;
+    meshFrameResources.linePipeline = &pipelines_.line;
+    meshFrameResources.meshScalarDescriptor = &meshResources_.meshScalarDescriptor;
+    meshFrameResources.meshVertexResource = &meshResources_.meshVertexResource;
+    meshFrameResources.meshIndexResource = &meshResources_.meshIndexResource;
+    meshFrameResources.meshIndexCount = meshResources_.meshIndexCount;
+    meshFrameResources.meshUseVertexScalars = meshResources_.meshUseVertexScalars;
+    meshFrameResources.meshScalarMin = meshResources_.meshScalarMin;
+    meshFrameResources.meshScalarMax = meshResources_.meshScalarMax;
+    meshFrameResources.meshNumBands = meshResources_.meshNumBands;
     meshFrameResources.isoSurfaceVertexResource = &isoSurfaceVertexResource_;
     meshFrameResources.isoSurfaceIndexResource = &isoSurfaceIndexResource_;
     meshFrameResources.isoSurfaceIndexCount = isoSurfaceIndexCount_;
@@ -2652,9 +2352,9 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     meshFrameResources.clipPreviewLineVertexCount = clipPreviewLineVertexCount_;
     meshFrameResources.overlayLineVertexResource = &overlayLineVertexResource_;
     meshFrameResources.overlayLineVertexCount = overlayLineVertexCount_;
-    meshFrameResources.edgeVertexResource = &edgeVertexResource_;
-    meshFrameResources.edgeIndexResource = &edgeIndexResource_;
-    meshFrameResources.edgeIndexCount = edgeIndexCount_;
+    meshFrameResources.edgeVertexResource = &meshResources_.edgeVertexResource;
+    meshFrameResources.edgeIndexResource = &meshResources_.edgeIndexResource;
+    meshFrameResources.edgeIndexCount = meshResources_.edgeIndexCount;
     meshFrameResources.sliceLineVertexResource = &sliceLineVertexResource_;
     meshFrameResources.sliceLineVertexCount = sliceLineVertexCount_;
     meshFrameResources.selectionLineVertexResource = &selectionLineVertexResource_;

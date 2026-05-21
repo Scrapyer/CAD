@@ -115,6 +115,36 @@ bool VulkanBufferResource::uploadDeviceLocal(const VulkanDevice& device,
     return true;
 }
 
+bool VulkanBufferResource::createDeviceLocal(const VulkanDevice& device,
+                                             VkDeviceSize size,
+                                             VkBufferUsageFlags usage,
+                                             const char* debugName,
+                                             QString& lastError)
+{
+    VkDevice vkDevice = device.device();
+    if (vkDevice == VK_NULL_HANDLE) {
+        lastError = QStringLiteral("Vulkan device is not initialized");
+        return false;
+    }
+
+    destroy(device);
+    if (size == 0) {
+        return true;
+    }
+
+    if (!create(device,
+                size,
+                usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                lastError)) {
+        lastError = QStringLiteral("Vulkan device-local buffer(%1) failed: %2")
+            .arg(QString::fromUtf8(debugName))
+            .arg(lastError);
+        return false;
+    }
+    return true;
+}
+
 bool VulkanBufferResource::updateHostVisible(const VulkanDevice& device,
                                              const void* data,
                                              VkDeviceSize size,

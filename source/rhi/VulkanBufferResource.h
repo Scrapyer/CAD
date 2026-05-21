@@ -36,6 +36,11 @@ public:
                            VkQueue queue,
                            const char* debugName,
                            QString& lastError);
+    bool createDeviceLocal(const VulkanDevice& device,
+                           VkDeviceSize size,
+                           VkBufferUsageFlags usage,
+                           const char* debugName,
+                           QString& lastError);
     bool updateHostVisible(const VulkanDevice& device,
                            const void* data,
                            VkDeviceSize size,

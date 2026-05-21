@@ -494,8 +494,8 @@ surface，再交回后端创建 swapchain。macOS 已提供 `VulkanMacOSSurfaceF
 可用于 present-capable device 初始化、`VkSwapchainKHR` 创建和 swapchain image 获取。
 `VulkanContext` 会优先请求 SDK 与 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
 `FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 回退。
-`VulkanClearFrameRenderer` 已能创建 image view、render pass、framebuffer、command pool
-和同步对象；CMake 会用 `glslc` 将 `source/rhi/shaders/vulkan_background.*`、
+`VulkanClearFrameRenderer` 已能创建 render pass、command pool
+和同步对象，并通过 `VulkanFramePipelines` 管理 pipeline 资源组、通过 `VulkanSwapchainFrameResources` 管理 swapchain image view / framebuffer 集合；CMake 会用 `glslc` 将 `source/rhi/shaders/vulkan_background.*`、
 `source/rhi/shaders/vulkan_triangle.*`、
 `source/rhi/shaders/vulkan_mesh.*`、`source/rhi/shaders/vulkan_iso.*` 和
 `source/rhi/shaders/vulkan_line.*` 编译为 SPIR-V，并创建 background pipeline、最小 triangle pipeline、mesh pipeline、iso surface pipeline 和 line pipeline。当前 mesh
@@ -506,7 +506,7 @@ per-vertex scalar 写入独立 storage buffer，并通过 descriptor set 绑定�
 `triangleToElement` 编码颜色，支持单像素 staging buffer 读回并解码为单元 ID；`VulkanViewport`
 在 CPU 侧利用 `vertexToNode`、`triangleToPart` 和部件反查表解释为节点/单元/部件点选、框选添加和点选/框选取消；
 选中单元会把 `Mesh::elemEdgeVertices` 中对应边线上传为金色高亮线，选中部件会基于三角形邻接关系筛选边界/开放/特征/视角轮廓边，选中节点会上传一个小型三轴标记；
-Vulkan 已有独立 overlay line buffer、slice line buffer、iso surface buffer 和 clip preview buffer，可用于变形显示中的未变形半透明线框、基础切片交线绘制、半透明等值面叠加和裁剪/切片平面预览。主网格、普通边线、iso surface 和 clip preview 三角面几何已通过 staging buffer 上传到 device-local buffer，copy 等待使用单次 fence 而不是等待整个 graphics queue idle；scalar SSBO、overlay、slice、selection line、clip preview 边框线和 pick readback 仍通过 `VulkanBufferResource` 管理 host-visible buffer 生命周期；scalar descriptor pool/set 已通过 `VulkanDescriptorResource` 管理，scalar descriptor set layout 已通过 `VulkanDescriptorSetLayoutResource` 管理；主视口和拾取路径的 render pass / framebuffer 已通过 `VulkanRenderPassResource` / `VulkanFramebufferResource` 管理，graphics pipeline / pipeline layout 已通过 `VulkanPipelineResource` 管理，主 command pool / command buffer 已通过 `VulkanCommandResource` 管理。mesh frame 内的 iso、clip preview、overlay、普通边线、slice 和 selection 录制已收敛到 `VulkanMeshFramePass`；拾取绘制、readback image barrier 和 1x1 copy 录制已收敛到 `VulkanPickPass`。
+Vulkan 已有独立 overlay line buffer、slice line buffer、iso surface buffer 和 clip preview buffer，可用于变形显示中的未变形半透明线框、基础切片交线绘制、半透明等值面叠加和裁剪/切片平面预览。主网格、普通边线、iso surface、clip preview 三角面和动态线几何已通过 staging buffer 上传到 device-local buffer，主 mesh / iso surface / clip preview 的多段 copy 已通过 `VulkanStagingUploadContext` 合并为单次 command buffer + fence 提交；主 mesh/edge/scalar/descriptor 已通过 `VulkanMeshBufferResources` 管理；scalar SSBO 和 pick readback 仍通过 `VulkanBufferResource` 管理 host-visible buffer 生命周期；主 depth 已通过 `VulkanDepthResource` 管理，pick color/depth/framebuffer/readback 已通过 `VulkanPickResources` 管理，swapchain image view/framebuffer 集合已通过 `VulkanSwapchainFrameResources` 管理；scalar descriptor set layout 已通过 `VulkanDescriptorSetLayoutResource` 管理；主视口和拾取路径的 render pass / framebuffer 已通过 `VulkanRenderPassResource` / `VulkanFramebufferResource` 管理，graphics pipeline / pipeline layout 已通过 `VulkanPipelineResource` 管理，主 command pool / command buffer 已通过 `VulkanCommandResource` 管理。mesh frame 内的 iso、clip preview、overlay、普通边线、slice 和 selection 录制已收敛到 `VulkanMeshFramePass`；拾取绘制、readback image barrier 和 1x1 copy 录制已收敛到 `VulkanPickPass`。
 
 #### 后端边界
 
@@ -690,8 +690,8 @@ Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 
 | 角落坐标轴 | 已完成，复用 line pipeline 绘制左下角 XYZ 轴线，并用 Qt overlay 显示 X/Y/Z 标签 |
 | 色标、overlay、切片、等值面、裁剪/切片平面预览 | 已完成基础显示链路 |
 | resize / swapchain 过期恢复 | 已完成，窗口 resize 和 acquire/present out-of-date/suboptimal 会触发下一帧重建 |
-| 正式资源模型 | 已开始，device-local/staging buffer、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制已独立 |
-| Vulkan 集成测试 | 已补充隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
+| 正式资源模型 | 已开始，device-local/staging buffer、mesh buffer group、frame pipeline group、depth、pick resources、swapchain frame resources、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制和批量 staging 上传已独立 |
+| Vulkan 集成测试 | 已补充连续加载网格模型、快速 swapchain recreate、pick 后 recreate、隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
 
 ### 拾取模式
 

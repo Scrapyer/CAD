@@ -14,8 +14,13 @@
   创建 `VK_EXT_metal_surface` surface。
 - `VulkanBufferResource.*` 封装 Vulkan buffer 的创建、上传、局部更新和销毁；主网格
   vertex/index、普通边线 vertex/index、iso surface vertex/index、clip preview vertex/index
-  已通过 staging buffer 上传到 device-local 内存，staging copy 使用单次 fence 等待完成；
-  scalar SSBO、overlay、slice、selection line、clip preview 边框线和 pick readback 仍按更新频率使用 host-visible 路径。
+  以及 overlay、slice、selection、clip preview 边框线已通过 staging buffer 上传到 device-local 内存；
+  scalar SSBO 和 pick readback 仍按更新频率使用 host-visible 路径。
+- `VulkanMeshBufferResources.*` 封装主 mesh、普通边线、scalar SSBO 和 scalar descriptor 资源组。
+- `VulkanDepthResource.*` 封装 depth attachment 的 image / memory / image view 生命周期。
+- `VulkanPickResources.*` 封装离屏 pick color image、pick depth、framebuffer 和单像素 readback buffer。
+- `VulkanSwapchainFrameResources.*` 封装 swapchain image view 与 framebuffer 集合。
+- `VulkanStagingUploadContext.*` 合并一次模型上传中的多段 staging copy，用单个 command buffer 和 fence 提交。
 - `VulkanDescriptorResource.*` 封装 storage-buffer descriptor pool/set 的创建、更新和销毁，
   当前承接 mesh scalar SSBO 绑定。
 - `VulkanDescriptorSetLayoutResource.*` 封装 descriptor set layout 生命周期，当前承接
@@ -24,8 +29,9 @@
   render pass / framebuffer 生命周期，逐步把裸 Vulkan handle 收敛为 RHI 资源对象。
 - `VulkanPipelineResource.*` 封装 graphics pipeline 与 pipeline layout 生命周期，当前承接
   background、triangle、mesh、iso surface、line 和 pick 管线。
+- `VulkanFramePipelines.*` 封装 frame renderer 使用的 pipeline 资源组，后续可继续迁入具体创建逻辑。
 - `VulkanCommandResource.*` 封装 resettable command pool 与主 command buffer 生命周期，
-  当前承接主视口、拾取和 readback 录制，staging 上传复用其 command pool 分配一次性 copy buffer。
+  当前承接主视口、拾取和 readback 录制，staging 上传上下文复用其 command pool 分配一次性 copy buffer。
 - `VulkanMeshFramePass.*` 负责主网格帧 command buffer 内的 mesh、iso、clip preview、
   overlay、edge、slice 和 selection draw 录制。
 - `VulkanPickPass.*` 负责离屏拾取 command buffer 录制和 1x1 readback copy/barrier 录制。
@@ -33,8 +39,8 @@
   `shaders/vulkan_iso.*` / `shaders/vulkan_line.*` / `shaders/vulkan_pick.*` 是 Vulkan 渐变背景、最小图形管线、主网格管线、等值面叠加管线、边线管线和拾取管线的
   GLSL 源码，由 CMake 调用
   `glslc` 编译为 SPIR-V。
-- `VulkanClearFrameRenderer.*` 创建 swapchain image view、render pass、graphics pipeline、
-  framebuffer、command pool、同步对象，并协调清屏、固定三角形、主网格和拾取帧提交。
+- `VulkanClearFrameRenderer.*` 创建 render pass、graphics pipeline、command pool、同步对象，
+  并协调清屏、固定三角形、主网格、swapchain frame resources 和拾取帧提交。
 - `VulkanRenderBackend.*` 组合 Vulkan 基础设施，是传统 Vulkan 图形管线后端的落脚点。
 - 后续 QRhi 后端也放在这里，避免继续扩大 `source/render/GLWidget.*`。
 
@@ -57,7 +63,7 @@ vertex/index buffer 和 edge vertex/index buffer、用 push constant MVP/基础�
 `fitToModel()`、`setObjectColor()`、`setTriangleToPartMap()`、`setEdgeToPartMap()`、
 `setPartVisibility()` 和基础轨道相机状态，并 present 主网格与普通边线。Vulkan 上传阶段
 会按部件可见性过滤三角形/边线，并把部件颜色写入 mesh vertex buffer；主网格/普通边线几何
-上传时会先写入 staging buffer，再通过 fence 同步的 copy command 复制到 device-local vertex/index buffer，把 per-vertex scalar 写入独立 storage buffer。
+上传时会先写入 staging buffer，再通过 `VulkanStagingUploadContext` 合并多个 copy command 并用单个 fence 同步到 device-local vertex/index/line buffer，把 per-vertex scalar 写入独立 storage buffer。
 当前还会创建离屏 pick render pass / framebuffer，用 `triangleToElement` 编码每个可见三角形的拾取颜色，
 并通过 1x1 staging buffer 读回点击像素；`VulkanViewport` 已接入 Node / Element / Part 模式点选、
 Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消、`selectionChanged` 信号、Part 模式的 `partsPicked` 信号和选中高亮线。
@@ -84,10 +90,17 @@ Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消、`selectio
 | 等值面叠加 | 完整 | 已完成，半透明三角面 pipeline |
 | 裁剪/切片平面预览 | 完整 | 已完成，半透明平面 + 边框线 |
 | resize / swapchain 过期恢复 | 完整 | 已完成，acquire/present 检测 out-of-date/suboptimal 后下一帧重建 |
-| 高级 RHI 资源模型 | OpenGL 后端资源托管 | 已开始，buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制已独立 |
-| Vulkan 集成测试 | 完整 | 已补充隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
+| 高级 RHI 资源模型 | OpenGL 后端资源托管 | 已开始，buffer、mesh buffer group、frame pipeline group、depth、pick、swapchain frame resources、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制和批量 staging 上传已独立 |
+| Vulkan 集成测试 | 完整 | 已补充连续加载网格模型、快速 swapchain recreate、pick 后 recreate、隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
 
-当前阶段已抽离后端边界、通用 `Scene*` pass 描述、OpenGL 上下文信息、shader program 创建、scene/axes shader uniform 设置、默认 OpenGL 状态、基础资源创建、主网格 VAO/VBO/IBO/颜色/标量缓冲托管、普通边线 VAO/VBO/IBO 托管、选中高亮/轮廓边 VAO/VBO 托管、叠加线框、切片交线、等值面、裁剪/切片平面预览 VAO/VBO/IBO 托管、部件索引 texture buffer 资源托管、常规 VAO/VBO/IBO 上传、固定 position+color 几何资源托管、拾取 framebuffer 和拾取 VAO 托管、基础 viewport/clear/depth/blend/cull 状态切换、pass 状态应用、聚合 scene pass 执行、托管资源 scene pass 执行、常规 `drawArrays` / `drawElements` 调用，以及拾取绘制和像素读取。Vulkan 路径已经开始把裸 buffer 生命周期收敛到 `VulkanBufferResource`，当前覆盖主网格、普通边线、scalar SSBO、overlay、slice、selection line、iso surface、clip preview 和 pick readback；主网格、普通边线、iso surface 和 clip preview 三角面几何已从长期 host-visible buffer 改为 staging 上传到 device-local buffer，staging copy 使用 fence 等待完成而不是等待整个 graphics queue idle；scalar descriptor pool/set 已收敛到 `VulkanDescriptorResource`，scalar descriptor set layout 已收敛到 `VulkanDescriptorSetLayoutResource`，主视口和拾取路径的 render pass / framebuffer 已收敛到 `VulkanRenderPassResource` / `VulkanFramebufferResource`，graphics pipeline 和 pipeline layout 已收敛到 `VulkanPipelineResource`，主 command pool / command buffer 已收敛到 `VulkanCommandResource`，mesh frame 内的 iso/clip/overlay/edge/slice/selection draw 录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。
+## Vulkan 后续验证日志
+
+- Windows Vulkan 路径还需要 MinGW/MSVC 实机验证。
+- pipeline 创建逻辑仍在 `VulkanClearFrameRenderer` 里，资源组已拆出，但 builder/factory 还没完全独立。
+- 还没有更极端的大模型性能基准和长时间 soak test。
+- RHI 切换在真实 UI 高频操作下还可以继续手测。
+
+当前阶段已抽离后端边界、通用 `Scene*` pass 描述、OpenGL 上下文信息、shader program 创建、scene/axes shader uniform 设置、默认 OpenGL 状态、基础资源创建、主网格 VAO/VBO/IBO/颜色/标量缓冲托管、普通边线 VAO/VBO/IBO 托管、选中高亮/轮廓边 VAO/VBO 托管、叠加线框、切片交线、等值面、裁剪/切片平面预览 VAO/VBO/IBO 托管、部件索引 texture buffer 资源托管、常规 VAO/VBO/IBO 上传、固定 position+color 几何资源托管、拾取 framebuffer 和拾取 VAO 托管、基础 viewport/clear/depth/blend/cull 状态切换、pass 状态应用、聚合 scene pass 执行、托管资源 scene pass 执行、常规 `drawArrays` / `drawElements` 调用，以及拾取绘制和像素读取。Vulkan 路径已经开始把裸 buffer 生命周期收敛到 `VulkanBufferResource`，当前覆盖主网格、普通边线、scalar SSBO、overlay、slice、selection line、iso surface、clip preview 和 pick readback；主网格、普通边线、iso surface、clip preview 三角面和动态线几何已从长期 host-visible buffer 改为 staging 上传到 device-local buffer，主 mesh / iso surface / clip preview 的多段 staging copy 已通过 `VulkanStagingUploadContext` 合并为单次 command buffer + fence 提交；主 mesh/edge/scalar/descriptor 已收敛到 `VulkanMeshBufferResources`，frame pipeline 句柄已收敛到 `VulkanFramePipelines`；主 depth 已收敛到 `VulkanDepthResource`，pick color/depth/framebuffer/readback 已收敛到 `VulkanPickResources`，swapchain image view/framebuffer 集合已收敛到 `VulkanSwapchainFrameResources`；scalar descriptor set layout 已收敛到 `VulkanDescriptorSetLayoutResource`，主视口和拾取路径的 render pass / framebuffer 已收敛到 `VulkanRenderPassResource` / `VulkanFramebufferResource`，graphics pipeline 和 pipeline layout 已收敛到 `VulkanPipelineResource`，主 command pool / command buffer 已收敛到 `VulkanCommandResource`，mesh frame 内的 iso/clip/overlay/edge/slice/selection draw 录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。
 
 `RenderBackend.h` 放置与具体图形 API 无关的描述结构，例如 `RenderBackendKind`、`SceneFrameUniforms`、`SceneDrawUniforms`、`ScenePassState`、`ScenePrimitive` 和 `PickDrawItem`。`RenderSettings` 记录用户首选 RHI；`RenderViewport` 是应用层依赖的视口宿主，按全局设置在 `GLWidget` 和 macOS `VulkanViewport` 之间切换。`GLWidget` 通过 `createRenderBackend()` 创建当前视口可用后端，`OpenGLRenderBackend` 负责把这些通用描述映射到具体 OpenGL 常量和调用。
 
