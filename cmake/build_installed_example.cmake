@@ -15,6 +15,24 @@ if(NOT DEFINED EXAMPLE_BINARY_DIR)
 endif()
 
 set(example_source_dir "${PROJECT_SOURCE_DIR}/examples/simple_viewer")
+set(example_prefix_path "${INSTALL_PREFIX}")
+if(DEFINED EXAMPLE_QT_PREFIX_PATH AND NOT EXAMPLE_QT_PREFIX_PATH STREQUAL "")
+    list(APPEND example_prefix_path ${EXAMPLE_QT_PREFIX_PATH})
+endif()
+list(JOIN example_prefix_path ";" example_prefix_path_arg)
+string(REPLACE ";" "\\;" example_prefix_path_arg "${example_prefix_path_arg}")
+
+set(example_configure_args
+    -S "${example_source_dir}"
+    -B "${EXAMPLE_BINARY_DIR}"
+    "-DCMAKE_PREFIX_PATH=${example_prefix_path_arg}"
+)
+
+if(DEFINED EXAMPLE_CMAKE_OSX_SYSROOT AND NOT EXAMPLE_CMAKE_OSX_SYSROOT STREQUAL "")
+    list(APPEND example_configure_args
+        "-DCMAKE_OSX_SYSROOT=${EXAMPLE_CMAKE_OSX_SYSROOT}"
+    )
+endif()
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${INSTALL_PREFIX}" "${EXAMPLE_BINARY_DIR}"
@@ -33,10 +51,7 @@ if(NOT install_result EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}"
-        -S "${example_source_dir}"
-        -B "${EXAMPLE_BINARY_DIR}"
-        "-DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}"
+    COMMAND "${CMAKE_COMMAND}" ${example_configure_args}
     RESULT_VARIABLE configure_result
 )
 if(NOT configure_result EQUAL 0)

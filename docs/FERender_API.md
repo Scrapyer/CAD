@@ -1,7 +1,7 @@
 # FERender 渲染库 API 参考文档
 
 > **版本**：1.0
-> **依赖**：Qt 5.x (Core, Gui, Widgets, OpenGL) · OpenGL 4.1+ · GLM 0.9.9+
+> **依赖**：Qt 6.8+ (Core, Gui, Widgets, OpenGL, OpenGLWidgets) · OpenGL 4.1+ · GLM 0.9.9+ · Vulkan SDK 1.4+（可选 RHI 后端，老 SDK 可通过 CMake cache 回退 shader target env）
 > **语言标准**：C++17
 > **构建产物**：共享库 `FERender.dll` / `libFERender.so` / `libFERender.dylib`
 
@@ -30,6 +30,8 @@
 - [4. 渲染层 API](#4-渲染层-api)
   - [4.1 Camera — 轨道相机](#41-camera--轨道相机)
   - [4.2 GLWidget — OpenGL 渲染窗口](#42-glwidget--opengl-渲染窗口)
+  - [4.3 RenderViewport — 渲染视口宿主](#43-renderviewport--渲染视口宿主)
+  - [4.4 RenderSettings — 全局 RHI 设置](#44-rendersettings--全局-rhi-设置)
 - [5. 交互层 API](#5-交互层-api)
   - [5.1 PickMode — 拾取模式](#51-pickmode--拾取模式)
   - [5.2 FEPickResult — 拾取结果](#52-fpickresult--拾取结果)
@@ -78,9 +80,10 @@ target_link_libraries(MyApp PRIVATE FERender::FERender)
 ```
 
 `FERender::FERender` 会自动传递以下依赖：
-- Qt5::Core, Qt5::Gui, Qt5::Widgets, Qt5::OpenGL
+- Qt6::Core, Qt6::Gui, Qt6::Widgets, Qt6::OpenGL, Qt6::OpenGLWidgets
 - OpenGL::GL
 - GLM 头文件路径
+- 可选 Vulkan SDK 1.4+（仅在构建 FERender 时启用 Vulkan RHI 后端；shader target env 默认 `vulkan1.4`）
 
 仓库内的 `examples/simple_viewer` 是完整的外部调用示例：它通过
 `find_package(FERender REQUIRED CONFIG)` 链接安装后的 `FERender::FERender`，
@@ -988,6 +991,7 @@ glm::vec3 eyePos = cam.eye();
 
 ```cpp
 explicit GLWidget(QWidget* parent = nullptr);
+~GLWidget() override;
 ```
 
 #### 网格与颜色
@@ -1024,6 +1028,16 @@ explicit GLWidget(QWidget* parent = nullptr);
 | `void setOverlayVisible(bool visible)` | 控制叠加网格显隐 |
 
 用于变形显示时叠加原始形状，以便对比观察变形量。叠加网格以半透明灰色线框绘制。
+
+#### RHI 选择状态
+
+| 方法 | 返回类型 | 说明 |
+|------|----------|------|
+| `setPreferredRenderBackend(RenderBackendKind kind)` | `void` | 设置用户首选 RHI，并写入全局 `RenderSettings` |
+| `requestedRenderBackendKind()` | `RenderBackendKind` | 用户请求的 RHI |
+| `activeRenderBackendKind()` | `RenderBackendKind` | 当前视口实际使用的 RHI |
+
+`GLWidget` 只表示 OpenGL 子视口自身的状态；主界面应优先使用 `RenderViewport`，由它根据全局设置在 OpenGL `GLWidget` 和 macOS Vulkan 宿主视口之间切换。Vulkan 不可用时会回退到 OpenGL。
 
 #### 过滤预览与后处理叠加
 
@@ -1108,7 +1122,67 @@ signals:
 | 滚轮 | 缩放 |
 | 左键单击 | 点选（根据 PickMode 选中节点/单元/部件） |
 | Ctrl + 左键单击 | 追加/取消选中（多选） |
-| 左键拖拽框选 | 框选 |
+| Ctrl/Shift + 左键拖拽 | 框选添加 |
+| Ctrl/Shift + 右键单击/拖拽 | 点选/框选取消 |
+
+---
+
+### 4.3 RenderViewport — 渲染视口宿主
+
+**头文件**：`RenderViewport.h`
+
+`RenderViewport` 是主界面使用的渲染视口宿主层，负责按全局 RHI 设置分发到具体视口实现。OpenGL 路径承载现有 `GLWidget`，Vulkan 路径在 macOS 上承载 `QWindow + VkSurfaceKHR` 宿主视口，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，通过 `fitToModel()` 同步相机适配，通过 `setObjectColor()` 同步基础对象色，通过 `setTriangleToPartMap()`、`setEdgeToPartMap()` 和 `setPartVisibility()` 支持基础部件颜色与显隐，支持基础轨道相机交互，并绘制渐变背景、主表面、普通边线、左下角坐标轴和 X/Y/Z 标签。Vulkan 视口会在窗口 resize 后重建 swapchain，也会在 acquire/present 返回 out-of-date 或 suboptimal 时标记下一帧重建。当前 Vulkan 路径已有离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 单点点选、Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消会更新 Vulkan 视口选择状态并转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；`setVertexScalars()` 已可把 per-vertex scalar 上传为 Vulkan storage buffer，并通过 descriptor set 绑定到 mesh pipeline，由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射；mesh 已上传后再次调用 `setVertexScalars()` 只更新 scalar buffer 和 contour 参数，不重传 mesh geometry。主网格、普通边线、等值面和裁剪/切片平面预览三角面几何已通过 staging buffer 上传到 device-local vertex/index buffer，staging copy 使用单次 fence 等待。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可在 Vulkan 路径绘制变形显示使用的未变形半透明线框，`setSliceLines()` / `clearSliceLines()` 已可绘制和清除基础切片交线，`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可绘制和清除半透明等值面叠加，`setClipPlanePreview()` / `clearClipPlanePreview()` 已可绘制和清除裁剪/切片平面预览。
+
+常用接口与 `GLWidget` 保持一致，包括：
+
+```cpp
+void setMesh(const Mesh& mesh);
+void setPickMode(PickMode mode);
+void setPreferredRenderBackend(RenderBackendKind kind);
+RenderBackendKind requestedRenderBackendKind() const;
+RenderBackendKind activeRenderBackendKind() const;
+```
+
+Vulkan 路径当前实现 `PickMode::Node` / `PickMode::Element` / `PickMode::Part` 的单点拾取、框选添加和点选/框选取消；`RenderViewport` 会缓存当前拾取模式并在切换后端时同步到具体视口。
+运行时 `VulkanContext` 会优先请求 SDK 和 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
+`FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 改为较低 target env。
+Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readback buffer、scalar descriptor/set layout、主视口/拾取 render pass、framebuffer、graphics pipeline / pipeline layout 和 command pool / command buffer 从裸 handle 收敛到独立资源对象；主网格帧录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。公开 `RenderViewport` API 不暴露这些实现细节。
+
+信号：
+
+```cpp
+void renderInitialized();
+void selectionChanged(PickMode mode, int count, const std::vector<int>& ids);
+void partsPicked(const std::vector<int>& partIndices);
+```
+
+---
+
+### 4.4 RenderSettings — 全局 RHI 设置
+
+**头文件**：`RenderSettings.h`
+
+使用 `QSettings("FEModelViewer", "FEModelViewer")` 持久化用户首选 RHI。
+
+```cpp
+class RenderSettings {
+public:
+    static RenderBackendKind preferredBackend();
+    static void setPreferredBackend(RenderBackendKind kind);
+    static RenderBackendKind effectiveBackend();
+    static QString backendKey(RenderBackendKind kind);
+    static RenderBackendKind backendFromKey(const QString& key,
+                                            RenderBackendKind fallback = RenderBackendKind::OpenGL);
+};
+```
+
+| 方法 | 说明 |
+|------|------|
+| `preferredBackend()` | 读取用户首选 RHI，默认 OpenGL |
+| `setPreferredBackend(kind)` | 写入用户首选 RHI |
+| `effectiveBackend()` | 首选 RHI 已编译可用时返回首选，否则回退 OpenGL |
+| `backendKey(kind)` | 转换为稳定配置字符串：`"opengl"` / `"vulkan"` |
+| `backendFromKey(key, fallback)` | 从配置字符串解析 RHI，支持 `gl` / `vk` 简写 |
 
 ---
 
@@ -1761,30 +1835,36 @@ glWidget->setIsoSurfaceMesh(iso);
 
 ## 附录 A：头文件清单
 
-| 头文件 | 主要类型 | 说明 |
-|--------|----------|------|
-| `FENode.h` | `FENode` | 节点数据结构 |
-| `FEElement.h` | `FEElement`, `ElementType` | 单元数据结构与类型枚举 |
-| `FEGroup.h` | `FEPart`, `FENodeSet`, `FEElementSet` | 分组结构 |
-| `FEModel.h` | `FEModel` | 模型顶层容器 |
-| `FEField.h` | `FEScalarField`, `FEVectorField`, `ColorMap`, `ColorMapType` | 结果场与色谱 |
-| `FEResultData.h` | `FEResultData`, `FESubcase`, `FEResultType`, `FEResultComponent` | 多工况结果层级 |
-| `FEResultMapper.h` | `FEResultMapper`, `FEMappedScalars` | 结果场到渲染顶点标量数组的映射 |
-| `FEResultRepository.h` | `FEResultRepository`, `FEResultFrame`, `FEResultFrameInfo`, `FEResultDomain` | 结果仓库与帧模型 |
-| `FEDeformation.h` | `FEDeformation`, `FEDeformationOptions` | 变形显示工具类 |
-| `FEAnimationController.h` | `FEAnimationController` | 帧动画控制器（QTimer 驱动） |
-| `FEProbe.h` | `FEProbe`, `FEProbeValue`, `FEPathSample` | 结果探针：点值查询、热点、路径采样、CSV 导出 |
-| `FEPostFilter.h` | `FEPostFilter`, `FEPlane`, `FESliceResult` | 后处理过滤器：阈值、裁剪、切片 |
-| `FEIsoSurface.h` | `FEIsoSurface` | 等值面提取（Marching Tetrahedra） |
-| `FEParser.h` | `FEParser` | 有限元文件解析器（INP/BDF/OP2/UNV） |
-| `Geometry.h` | `Mesh`, `Geometry::*` | 网格结构与几何体生成 |
-| `FERenderData.h` | `FERenderData` | 渲染数据包（Mesh + 映射表） |
-| `FEMeshConverter.h` | `FEMeshConverter` | 网格转换器 |
-| `Camera.h` | `Camera` | 轨道相机 |
-| `Theme.h` | `Theme` | 主题颜色配置（供 `GLWidget::applyTheme()` 使用） |
-| `GLWidget.h` | `GLWidget` | OpenGL 渲染窗口 |
-| `FEPickResult.h` | `PickMode`, `FEPickResult`, `FESelection` | 拾取与选中 |
-| `ferender_export.h` | `FERENDER_EXPORT` 宏 | DLL 导出宏（自动生成） |
+源码已按模块放入 `source/`；安装后的公开头文件仍平铺到 `include/FERender`，因此外部项目继续使用 `#include "FEModel.h"`、`#include "GLWidget.h"` 等写法。
+
+| 头文件 | 源码位置 | 主要类型 | 说明 |
+|--------|----------|----------|------|
+| `FENode.h` | `source/data/FENode.h` | `FENode` | 节点数据结构 |
+| `FEElement.h` | `source/data/FEElement.h` | `FEElement`, `ElementType` | 单元数据结构与类型枚举 |
+| `FEGroup.h` | `source/data/FEGroup.h` | `FEPart`, `FENodeSet`, `FEElementSet` | 分组结构 |
+| `FEModel.h` | `source/data/FEModel.h` | `FEModel` | 模型顶层容器 |
+| `FEField.h` | `source/data/FEField.h` | `FEScalarField`, `FEVectorField`, `ColorMap`, `ColorMapType` | 结果场与色谱 |
+| `FEResultData.h` | `source/data/FEResultData.h` | `FEResultData`, `FESubcase`, `FEResultType`, `FEResultComponent` | 多工况结果层级 |
+| `FEResultMapper.h` | `source/post/FEResultMapper.h` | `FEResultMapper`, `FEMappedScalars` | 结果场到渲染顶点标量数组的映射 |
+| `FEResultRepository.h` | `source/post/FEResultRepository.h` | `FEResultRepository`, `FEResultFrame`, `FEResultFrameInfo`, `FEResultDomain` | 结果仓库与帧模型 |
+| `FEDeformation.h` | `source/post/FEDeformation.h` | `FEDeformation`, `FEDeformationOptions` | 变形显示工具类 |
+| `FEAnimationController.h` | `source/post/FEAnimationController.h` | `FEAnimationController` | 帧动画控制器（QTimer 驱动） |
+| `FEProbe.h` | `source/post/FEProbe.h` | `FEProbe`, `FEProbeValue`, `FEPathSample` | 结果探针：点值查询、热点、路径采样、CSV 导出 |
+| `FEPostFilter.h` | `source/post/FEPostFilter.h` | `FEPostFilter`, `FEPlane`, `FESliceResult` | 后处理过滤器：阈值、裁剪、切片 |
+| `FEIsoSurface.h` | `source/post/FEIsoSurface.h` | `FEIsoSurface` | 等值面提取（Marching Tetrahedra） |
+| `FEParser.h` | `source/io/FEParser.h` | `FEParser` | 有限元文件解析器（INP/BDF/OP2/UNV） |
+| `Geometry.h` | `source/render/Geometry.h` | `Mesh`, `Geometry::*` | 网格结构与几何体生成 |
+| `FERenderData.h` | `source/render/FERenderData.h` | `FERenderData` | 渲染数据包（Mesh + 映射表） |
+| `FEMeshConverter.h` | `source/convert/FEMeshConverter.h` | `FEMeshConverter` | 网格转换器 |
+| `Camera.h` | `source/render/Camera.h` | `Camera` | 轨道相机 |
+| `Theme.h` | `source/common/Theme.h` | `Theme` | 主题颜色配置（供 `GLWidget::applyTheme()` 使用） |
+| `RenderBackend.h` | `source/rhi/RenderBackend.h` | `RenderBackendKind`, `IRenderBackend`, `Scene*` | RHI 类型和通用渲染描述 |
+| `RenderBackendFactory.h` | `source/rhi/RenderBackendFactory.h` | `createRenderBackend`, `isRenderBackendAvailable` | 渲染后端创建与可用性查询 |
+| `RenderSettings.h` | `source/rhi/RenderSettings.h` | `RenderSettings` | 全局首选 RHI 持久化设置 |
+| `GLWidget.h` | `source/render/GLWidget.h` | `GLWidget` | OpenGL 渲染窗口 |
+| `RenderViewport.h` | `source/render/RenderViewport.h` | `RenderViewport` | 渲染视口宿主层 |
+| `FEPickResult.h` | `source/render/FEPickResult.h` | `PickMode`, `FEPickResult`, `FESelection` | 拾取与选中 |
+| `ferender_export.h` | 构建目录生成 | `FERENDER_EXPORT` 宏 | DLL 导出宏（自动生成） |
 
 ---
 

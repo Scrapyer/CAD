@@ -6,7 +6,7 @@
 
 **Architecture:** 保持 `FERender` 作为可安装共享库，新增结果数据仓库、结果映射、变形/动画、过滤/截面、探针曲线、矢量/张量可视化和导出能力。GUI 应用和 `examples/` 只作为引擎 API 的消费者，避免把核心后处理逻辑继续放在 `MainWindow` 或面板类里。
 
-**Tech Stack:** C++17, Qt5 Widgets/OpenGL, QOpenGLWidget, OpenGL 4.1 Core Profile, GLM, CMake/CTest.
+**Tech Stack:** C++17, Qt6.8 Widgets/OpenGL, QOpenGLWidget, OpenGL 4.1 Core Profile, GLM, CMake/CTest.
 
 ---
 

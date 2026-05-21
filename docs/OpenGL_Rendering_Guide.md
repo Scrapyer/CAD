@@ -241,21 +241,17 @@ shader_->link();
 ### 3.4 创建 GPU 缓冲对象
 
 ```cpp
-vao_.create();          // 主网格 VAO
-vbo_.create();          // 主网格 VBO（顶点数据）
-ibo_ = new QOpenGLBuffer(QOpenGLBuffer::IndexBuffer);
-ibo_->create();         // 主网格 IBO（索引数据）
-colorVbo_.create();     // 每顶点颜色 VBO
-scalarVbo_.create();    // 每顶点标量值 VBO
+meshResource_ = std::make_unique<OpenGLMeshResource>();
+glBackend->createMeshResource(*meshResource_);
 ```
 
-`.create()` 相当于 `glGenBuffers(1, &id)`——在 GPU 上分配一个缓冲对象的 **ID**，但此时**还没有上传任何数据**。实际数据在 `uploadMesh()` 时上传。
+后端托管主网格 VAO、顶点 VBO、索引 IBO、每顶点颜色 VBO 和标量 VBO。底层 `.create()` 相当于 `glGenBuffers(1, &id)`，此时还没有上传任何数据，实际数据在 `uploadMesh()` 时上传。
 
 ### 3.5 创建 Texture Buffer（部件索引查找表）
 
 ```cpp
-glGenBuffers(1, &triPartTbo_);     // TBO（Texture Buffer Object）
-glGenTextures(1, &triPartTex_);     // 纹理对象
+triPartTextureBuffer_ = std::make_unique<OpenGLTextureBufferResource>();
+glBackend->createTextureBufferResource(*triPartTextureBuffer_);
 ```
 
 这是一种特殊纹理：不是图片，而是一维数据数组。片段着色器中通过 `texelFetch(uTriPartMap, gl_PrimitiveID)` 查表，用三角形序号获取其所属部件索引。
@@ -271,15 +267,11 @@ float bgData[] = {
      1,  1,  bgTopColor_[0], bgTopColor_[1], bgTopColor_[2],  // 右上角
     // ... 共 6 个顶点 = 2 个三角形 = 1 个全屏四边形
 };
-bgVao_.bind();
-bgVbo_.bind();
-bgVbo_.allocate(bgData, sizeof(bgData));
-glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5*sizeof(float), nullptr);
-glEnableVertexAttribArray(0);
-glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5*sizeof(float),
-                      reinterpret_cast<void*>(2*sizeof(float)));
-glEnableVertexAttribArray(1);
-bgVao_.release();
+backgroundGeometry_ = std::make_unique<OpenGLPositionColorGeometry>();
+glBackend->uploadPositionColorGeometry(*backgroundGeometry_,
+                                       bgData,
+                                       sizeof(bgData),
+                                       2);
 ```
 
 逐行解读：
@@ -728,7 +720,7 @@ int GLWidget::colorToId(unsigned char r, unsigned char g, unsigned char b) {
 
 ```
 ① 绑定离屏 FBO（画到隐藏画布上）
-  glBindFramebuffer(GL_FRAMEBUFFER, pickFbo_->handle())
+  glBindFramebuffer(GL_FRAMEBUFFER, pickFramebuffer_ 的后端 FBO handle)
 
 ② 清屏为黑色 (0,0,0) = 背景/未命中
   glClearColor(0, 0, 0, 1)
@@ -749,7 +741,7 @@ int GLWidget::colorToId(unsigned char r, unsigned char g, unsigned char b) {
 
 ```cpp
 // 绑定 FBO 并读取点击位置的像素
-glBindFramebuffer(GL_FRAMEBUFFER, pickFbo_->handle());
+glBindFramebuffer(GL_FRAMEBUFFER, pickFramebuffer_ 的后端 FBO handle);
 int px = pos.x() * dpr;                    // 处理高 DPI
 int py = (height() - pos.y()) * dpr;       // Y 轴翻转（OpenGL 坐标系 Y 朝上）
 glReadPixels(px, py, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
@@ -835,8 +827,9 @@ if (partVisibilityDirty_) {
 
     // 同步更新 texture buffer
     // （因为 gl_PrimitiveID 是从 0 重新编号的，需要重建映射）
-    glBindBuffer(GL_TEXTURE_BUFFER, triPartTbo_);
-    glBufferData(GL_TEXTURE_BUFFER, ..., filteredTriPart.data(), GL_STATIC_DRAW);
+    glBackend->uploadTextureBuffer(*triPartTextureBuffer_,
+                                   filteredTriPart.data(),
+                                   ...);
 }
 ```
 
@@ -847,20 +840,14 @@ Texture Buffer 是一种特殊的一维纹理，用于在着色器中按索引�
 **C++ 端**：
 ```cpp
 // 创建
-glGenBuffers(1, &triPartTbo_);
-glGenTextures(1, &triPartTex_);
+triPartTextureBuffer_ = std::make_unique<OpenGLTextureBufferResource>();
+glBackend->createTextureBufferResource(*triPartTextureBuffer_);
 
 // 上传数据
-glBindBuffer(GL_TEXTURE_BUFFER, triPartTbo_);
-glBufferData(GL_TEXTURE_BUFFER, size, data, GL_STATIC_DRAW);
-
-// 关联纹理和缓冲
-glBindTexture(GL_TEXTURE_BUFFER, triPartTex_);
-glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, triPartTbo_);
+glBackend->uploadTextureBuffer(*triPartTextureBuffer_, data, size);
 
 // 绑定到纹理单元 0
-glActiveTexture(GL_TEXTURE0);
-glBindTexture(GL_TEXTURE_BUFFER, triPartTex_);
+glBackend->bindTextureBufferToUnit(*triPartTextureBuffer_, 0);
 shader_->setUniformValue("uTriPartMap", 0);  // 告诉着色器用纹理单元 0
 ```
 
@@ -998,8 +985,8 @@ MainWindow 接收信号
     │
     └── GLWidget::setVertexScalars(scalars, min, max, numBands)
         │
-        ├── 上传标量到 scalarVbo_（GPU 端 VBO）
-        │   scalarVbo_.allocate(scalars.data(), ...)
+        ├── 上传标量到 meshResource_ 的标量缓冲（GPU 端 VBO）
+        │   glBackend->uploadMeshScalarBuffer(*meshResource_, ...)
         │   glVertexAttribPointer(3, 1, GL_FLOAT, ...)  // location 3
         │
         └── 设置 uniform 参数
@@ -1106,35 +1093,32 @@ void GLWidget::paintGL() {
 ```
 场景渲染:
   shader_        → scene.vert + scene.frag
-  vao_           → 主 VAO（位置+法线+颜色+标量 4 个属性）
-  vbo_           → 主 VBO（顶点数据，每顶点 6 float）
-  ibo_           → 主 IBO（三角形索引，按部件可见性过滤）
-  colorVbo_      → per-vertex 颜色 VBO（location 2）
-  scalarVbo_     → per-vertex 标量 VBO（location 3）
-  triPartTbo_    → 三角形→部件索引 texture buffer
-  triPartTex_    → 上述 TBO 对应的纹理对象
+  meshResource_  → 后端托管主 VAO/VBO/IBO/颜色 VBO/标量 VBO
+  triPartTextureBuffer_ → 后端托管三角形→部件索引 texture buffer
 
 边线渲染:
-  edgeVao_       → 边线 VAO
-  edgeVbo_       → 边线 VBO
-  edgeIbo_       → 边线 IBO（按部件可见性过滤）
+  edgeResource_  → 后端托管普通边线 VAO/VBO/IBO（按部件可见性过滤）
 
 选中高亮:
-  selEdgeVao_    → 高亮边线 VAO
-  selEdgeVbo_    → 高亮边线 VBO
+  selectionEdgeResource_ → 后端托管高亮边线/轮廓点 VAO/VBO
+
+后处理叠加:
+  overlayResource_ → 后端托管未变形叠加线框 VAO/VBO
+  sliceResource_   → 后端托管切片交线 VAO/VBO
+  isoResource_     → 后端托管等值面 VAO/VBO/IBO
+  clipPreviewResource_     → 后端托管裁剪/切片预览平面 VAO/VBO/IBO
+  clipPreviewEdgeResource_ → 后端托管裁剪/切片预览轮廓线 VAO/VBO
 
 渐变背景:
   bgShader_      → background.vert + background.frag
-  bgVao_         → 背景 VAO
-  bgVbo_         → 背景 VBO（全屏四边形 6 顶点）
+  backgroundGeometry_ → 后端托管背景 VAO/VBO（全屏四边形 6 顶点）
 
 坐标轴:
   axesShader_    → axes.vert + axes.frag
-  axesVao_       → 坐标轴 VAO
-  axesVbo_       → 坐标轴 VBO（圆柱+圆锥+球体）
+  axesGeometry_  → 后端托管坐标轴 VAO/VBO（圆柱+圆锥+球体）
 
 拾取:
   pickShader_    → pick.vert + pick.frag
-  pickFbo_       → 离屏 FBO（与窗口同尺寸）
-  pickVao_       → 拾取专用 VAO（避免污染主 VAO）
+  pickFramebuffer_ → 后端托管离屏 FBO（与窗口同尺寸）
+  pickVertexArray_ → 后端托管拾取专用 VAO（避免污染主 VAO）
 ```

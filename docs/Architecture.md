@@ -19,7 +19,7 @@
 
 ## 1. 项目概览
 
-**FEModelViewer** 是一个基于 **Qt5 + OpenGL 4.1** 的有限元（FEM）模型查看器，用于加载、显示和交互式查看有限元分析模型及其结果。
+**FEModelViewer** 是一个基于 **Qt6.8 + OpenGL 4.1** 的有限元（FEM）模型查看器，用于加载、显示和交互式查看有限元分析模型及其结果。
 
 ### 核心能力
 
@@ -48,6 +48,21 @@
 └─────────────────────────────────────────────────┘
 ```
 
+源码按职责放在 `source/` 下：
+
+| 目录 | 说明 |
+|------|------|
+| `source/data/` | FEM 纯数据结构与结果数据结构 |
+| `source/io/` | INP/BDF/OP2/UNV 文件解析 |
+| `source/convert/` | FEModel 到渲染 Mesh 的转换 |
+| `source/rhi/` | 渲染后端抽象和具体图形 API 后端（OpenGL，可选 Vulkan，未来 QRhi） |
+| `source/render/` | 渲染控件、相机、几何网格和拾取数据 |
+| `source/post/` | 结果映射、变形、动画、探针、过滤和等值面 |
+| `source/app/` | FEModelViewer GUI 应用入口、主窗口和面板 |
+| `source/common/` | 主题和应用状态等共享轻量结构 |
+
+安装后的 FERender 公开头文件仍平铺到 `include/FERender`，保持第三方项目的 `#include "GLWidget.h"` 等用法稳定。
+
 ---
 
 ## 2. 整体架构
@@ -62,6 +77,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │                      渲染层                                  │
 │  GLWidget (QOpenGLWidget + QOpenGLFunctions)                 │
+│  IRenderBackend / OpenGLRenderBackend (source/rhi)           │
 │  Camera (轨道相机)                                           │
 │  4 套 Shader (scene / pick / background / axes)              │
 ├─────────────────────────────────────────────────────────────┤
@@ -93,7 +109,7 @@
 
 ### 3.1 FENode — 节点
 
-**文件**: `FENode.h`
+**文件**: `source/data/FENode.h`
 
 有限元模型的最基本单元。每个节点有全局唯一 ID 和三维坐标。
 
@@ -110,7 +126,7 @@ struct FENode {
 
 ### 3.2 FEElement — 单元
 
-**文件**: `FEElement.h`
+**文件**: `source/data/FEElement.h`
 
 单元定义节点之间的连接关系（拓扑），是有限元网格的核心。
 
@@ -147,7 +163,7 @@ struct FEElement {
 
 ### 3.3 FEGroup — 分组
 
-**文件**: `FEGroup.h`
+**文件**: `source/data/FEGroup.h`
 
 节点和单元的逻辑分组，三种类型：
 
@@ -174,7 +190,7 @@ struct FEPart {                       // 部件（模型的一个零件）
 
 ### 3.4 FEModel — 模型顶层容器
 
-**文件**: `FEModel.h` / `FEModel.cpp`
+**文件**: `source/data/FEModel.h` / `source/data/FEModel.cpp`
 
 整个有限元数据的统一入口：
 
@@ -198,7 +214,7 @@ FEModel
 
 ### 3.5 FEField — 结果场与色谱
 
-**文件**: `FEField.h` / `FEField.cpp`
+**文件**: `source/data/FEField.h` / `source/data/FEField.cpp`
 
 后处理的核心：将 FEM 求解结果映射到颜色。
 
@@ -245,7 +261,7 @@ struct FEVectorField {
 
 ### 3.6 FEResultData — 结果数据层级
 
-**文件**: `FEResultData.h`
+**文件**: `source/data/FEResultData.h`
 
 多级层次结构，对应 FEM 后处理的组织方式：
 
@@ -259,7 +275,7 @@ FEResultData              顶层容器
 
 ### 3.7 FEPickResult — 拾取结果
 
-**文件**: `FEPickResult.h`
+**文件**: `source/render/FEPickResult.h`
 
 三个拾取模式：
 ```cpp
@@ -290,7 +306,7 @@ struct FESelection {
 
 ### 3.8 Geometry / Mesh — 渲染网格
 
-**文件**: `Geometry.h` / `Geometry.cpp`
+**文件**: `source/render/Geometry.h` / `source/render/Geometry.cpp`
 
 `Mesh` 是最底层的渲染数据结构：
 
@@ -311,7 +327,7 @@ struct Mesh {
 
 ### 3.9 FERenderData — 渲染数据包
 
-**文件**: `FERenderData.h`
+**文件**: `source/render/FERenderData.h`
 
 FEMeshConverter 的输出，捆绑了渲染数据 + 反向映射表：
 
@@ -335,7 +351,7 @@ FERenderData
 
 ### FEParser — 无状态静态工具类
 
-**文件**: `FEParser.h` + 5 个实现文件
+**文件**: `source/io/FEParser.h` + 5 个实现文件
 
 ```cpp
 class FEParser {
@@ -352,11 +368,11 @@ public:
 
 | 格式 | 文件后缀 | 实现文件 | 解析内容 |
 |------|----------|----------|----------|
-| Abaqus INP | .inp | `FEParser_inp.cpp` | 节点/单元/部件/集合（支持 INCLUDE 展开） |
-| Nastran BDF | .bdf/.fem | `FEParser_bdf.cpp` | 节点/单元（固定/自由格式，CORD2R 坐标系变换） |
-| Nastran OP2 几何 | .op2 | `FEParser_op2.cpp` | 二进制格式的节点/单元/部件 |
-| Nastran OP2 结果 | .op2 | `FEParser_op2results.cpp` | 位移/应力结果（多工况） |
-| UNV 结果 | .unv | `FEParser_unv.cpp` | Dataset 2414/55 结果数据 |
+| Abaqus INP | .inp | `source/io/FEParser_inp.cpp` | 节点/单元/部件/集合（支持 INCLUDE 展开） |
+| Nastran BDF | .bdf/.fem | `source/io/FEParser_bdf.cpp` | 节点/单元（固定/自由格式，CORD2R 坐标系变换） |
+| Nastran OP2 几何 | .op2 | `source/io/FEParser_op2.cpp` | 二进制格式的节点/单元/部件 |
+| Nastran OP2 结果 | .op2 | `source/io/FEParser_op2results.cpp` | 位移/应力结果（多工况） |
+| UNV 结果 | .unv | `source/io/FEParser_unv.cpp` | Dataset 2414/55 结果数据 |
 
 ### 解析流程
 
@@ -375,7 +391,7 @@ public:
 
 ### FEMeshConverter — FEModel → FERenderData
 
-**文件**: `FEMeshConverter.h` / `FEMeshConverter.cpp`
+**文件**: `source/convert/FEMeshConverter.h` / `source/convert/FEMeshConverter.cpp`
 
 这是数据层和渲染层之间的桥梁。
 
@@ -445,36 +461,124 @@ static FERenderData toColoredRenderData(
 
 ## 6. 渲染层（OpenGL 渲染）
 
-### 6.1 GLWidget — OpenGL 渲染组件
+### 6.1 RenderViewport / GLWidget — 渲染视口
 
-**文件**: `GLWidget.h` / `GLWidget.cpp`
+**文件**: `source/render/RenderViewport.h` / `source/render/RenderViewport.cpp`
+
+`RenderViewport` 是主窗口依赖的渲染视口宿主层。它转发 `setMesh()`、`fitToModel()`、`setObjectColor()`、`setTriangleToPartMap()`、`setEdgeToPartMap()`、`setPartVisibility()`、拾取、色标、后处理叠加、RHI 设置和监控查询等公开接口，并把 `GLWidget::selectionChanged`、`partsPicked` 等信号重新暴露给应用层。OpenGL 路径承载 `GLWidget`；Vulkan 路径在 macOS 上承载 `VulkanViewport`，通过 `QWindow` 创建原生 `VkSurfaceKHR`，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，使用 push constant MVP 接入相机适配，并在上传阶段按部件可见性过滤三角形/边线、把部件颜色写入 mesh 顶点属性，主网格/普通边线几何通过 staging buffer 和 fence 同步的 copy command 复制到 device-local vertex/index buffer，把 per-vertex scalar 写入独立 storage buffer。窗口 resize 会标记 swapchain 重建，present/acquire 返回 out-of-date 或 suboptimal 时也会让下一帧自动重建。当前 Vulkan 路径已有左下角坐标轴和离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 模式点选、框选添加和点选/框选取消会转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；`setVertexScalars()` 已可由 descriptor set 绑定 scalar SSBO，并由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射；mesh 已上传后再次切换云图 field 只更新 scalar buffer 和 contour 参数，不重传 mesh geometry。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可通过独立 Vulkan line buffer 绘制未变形半透明线框，供变形显示叠加原始模型使用；`setSliceLines()` / `clearSliceLines()` 已可通过独立 Vulkan line buffer 绘制和清除基础切片交线；`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可通过独立 Vulkan 半透明三角面 pipeline 绘制和清除等值面叠加；`setClipPlanePreview()` / `clearClipPlanePreview()` 已可通过半透明三角面 pipeline 和 line pipeline 绘制/清除裁剪或切片平面预览。
+
+### 6.2 GLWidget — OpenGL 渲染组件
+
+**文件**: `source/render/GLWidget.h` / `source/render/GLWidget.cpp`
 
 继承自 `QOpenGLWidget + QOpenGLFunctions`，是整个渲染系统的核心。
+
+`GLWidget` 当前负责 OpenGL Widget 生命周期、交互事件、相机和选择状态；具体图形 API
+通过 `IRenderBackend` 建立抽象边界。`RenderSettings` 使用 `QSettings` 记录全局首选
+RHI，工具栏可切换 OpenGL/Vulkan；OpenGL 完整模型渲染仍通过 `createRenderBackend()`
+创建 `OpenGLRenderBackend`，
+并由后端查询 GPU/驱动信息、创建 shader program、设置默认 OpenGL 状态、
+创建基础 GL 资源、绑定顶点属性，并负责常规 VAO/VBO/IBO 和 texture buffer 上传。
+基础 viewport/clear/depth/blend/cull 状态切换和常规 draw 调用也已由后端承接。
+拾取 framebuffer 创建、绘制和像素读取的底层状态保护也已迁入后端；`GLWidget` 仍保留
+矩阵计算、渲染顺序，以及按 FEM 单元/部件组织拾取 draw item 的业务逻辑。
+scene/axes shader 的 uniform 写入已由后端封装，scene/background/axes 绘制入口
+使用通用 `ScenePrimitive` 和 `ScenePassState` 描述，由 OpenGL 后端映射到底层 API。
+`VulkanRenderBackend` 已作为可选编译的传统 Vulkan 图形管线骨架加入，当前组合
+`VulkanContext`、`VulkanDevice`、`VulkanSurface` 和 `VulkanSwapchain`：已可创建
+instance、处理 portability enumeration、选择物理设备、创建逻辑设备和基础队列，并提供
+外部 `VkSurfaceKHR` 接入协议。当前 Qt 6.8.3 macOS 包禁用了 QtGui 的 Vulkan 特性，
+因此不依赖 `QVulkanInstance`/`QVulkanWindow`；平台层使用后端 instance 创建原生
+surface，再交回后端创建 swapchain。macOS 已提供 `VulkanMacOSSurfaceFactory`，通过
+`QWindow` 的原生 `NSView/CAMetalLayer` 创建 `VK_EXT_metal_surface`，并有测试验证 surface
+可用于 present-capable device 初始化、`VkSwapchainKHR` 创建和 swapchain image 获取。
+`VulkanContext` 会优先请求 SDK 与 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
+`FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 回退。
+`VulkanClearFrameRenderer` 已能创建 image view、render pass、framebuffer、command pool
+和同步对象；CMake 会用 `glslc` 将 `source/rhi/shaders/vulkan_background.*`、
+`source/rhi/shaders/vulkan_triangle.*`、
+`source/rhi/shaders/vulkan_mesh.*`、`source/rhi/shaders/vulkan_iso.*` 和
+`source/rhi/shaders/vulkan_line.*` 编译为 SPIR-V，并创建 background pipeline、最小 triangle pipeline、mesh pipeline、iso surface pipeline 和 line pipeline。当前 mesh
+pipeline 使用 device-local vertex/index buffer 绘制主网格，line pipeline 使用
+edge vertex/index buffer 上传普通边线；两者通过 push constant 传入 MVP 矩阵。当前 Vulkan
+上传阶段会根据 `triangleToPart` / `edgeToPart` 和部件可见性重建可见索引，并把部件颜色或
+per-vertex scalar 写入独立 storage buffer，并通过 descriptor set 绑定到 mesh pipeline；vertex shader 用 `gl_VertexIndex` 读取 scalar，mesh fragment shader 做 Jet 分段云图映射。pick pipeline 使用离屏 color/depth framebuffer 和
+`triangleToElement` 编码颜色，支持单像素 staging buffer 读回并解码为单元 ID；`VulkanViewport`
+在 CPU 侧利用 `vertexToNode`、`triangleToPart` 和部件反查表解释为节点/单元/部件点选、框选添加和点选/框选取消；
+选中单元会把 `Mesh::elemEdgeVertices` 中对应边线上传为金色高亮线，选中部件会基于三角形邻接关系筛选边界/开放/特征/视角轮廓边，选中节点会上传一个小型三轴标记；
+Vulkan 已有独立 overlay line buffer、slice line buffer、iso surface buffer 和 clip preview buffer，可用于变形显示中的未变形半透明线框、基础切片交线绘制、半透明等值面叠加和裁剪/切片平面预览。主网格、普通边线、iso surface 和 clip preview 三角面几何已通过 staging buffer 上传到 device-local buffer，copy 等待使用单次 fence 而不是等待整个 graphics queue idle；scalar SSBO、overlay、slice、selection line、clip preview 边框线和 pick readback 仍通过 `VulkanBufferResource` 管理 host-visible buffer 生命周期；scalar descriptor pool/set 已通过 `VulkanDescriptorResource` 管理，scalar descriptor set layout 已通过 `VulkanDescriptorSetLayoutResource` 管理；主视口和拾取路径的 render pass / framebuffer 已通过 `VulkanRenderPassResource` / `VulkanFramebufferResource` 管理，graphics pipeline / pipeline layout 已通过 `VulkanPipelineResource` 管理，主 command pool / command buffer 已通过 `VulkanCommandResource` 管理。mesh frame 内的 iso、clip preview、overlay、普通边线、slice 和 selection 录制已收敛到 `VulkanMeshFramePass`；拾取绘制、readback image barrier 和 1x1 copy 录制已收敛到 `VulkanPickPass`。
+
+#### 后端边界
+
+```
+RenderViewport
+  ├── 全局 RHI 状态: requested / active
+  ├── 应用层公开接口和信号转发
+  ├── GLWidget
+  │   ├── Qt 生命周期: initializeGL / paintGL / resizeGL
+  │   ├── 交互状态: Camera / selection / rubber band / labels
+  │   └── IRenderBackend
+  │       ├── RenderBackendFactory
+  │       ├── OpenGLRenderBackend
+  │       │   ├── OpenGL 上下文信息
+  │       │   ├── shader program 创建
+  │       │   ├── 默认 OpenGL 状态
+  │       │   ├── VAO/VBO/IBO/texture buffer 创建
+  │       │   ├── 网格、边线、云图标量和部件 texture buffer 上传
+  │       │   ├── scene / axes shader uniform 写入
+  │       │   ├── viewport/clear/depth/blend/cull 状态切换
+  │       │   ├── 通用 Scene* 描述映射到 OpenGL pass
+  │       │   ├── 后端托管资源 scene pass 执行
+  │       │   ├── ScenePrimitive -> OpenGL primitive 映射
+  │       │   ├── 常规 drawArrays / drawElements
+  │       │   ├── 拾取 framebuffer 托管、绘制、像素读取和 GL 状态保存恢复
+  │       │   ├── 固定 position+color 几何资源托管
+  │       │   ├── 主网格 VAO/VBO/IBO/颜色/标量缓冲资源托管
+  │       │   ├── 普通边线 VAO/VBO/IBO 资源托管
+  │       │   ├── 选中高亮/轮廓边 VAO/VBO 资源托管
+  │       │   ├── 叠加线框和切片交线 VAO/VBO 资源托管
+  │       │   └── 等值面和裁剪/切片平面预览资源托管
+  │       └── VulkanRenderBackend (可选)
+  │           ├── VulkanContext: instance 创建
+  │           ├── portability enumeration 扩展探测
+  │           ├── VulkanDevice: 物理设备、逻辑设备和队列
+  │           ├── VulkanSurface: VkSurfaceKHR 生命周期封装
+  │           ├── VulkanMacOSSurfaceFactory: QWindow -> CAMetalLayer -> VkSurfaceKHR
+  │           ├── VulkanSwapchain: surface 绑定后的 swapchain 和 image 查询
+  │           ├── Vulkan GLSL -> SPIR-V: 构建期 shader 编译
+  │           └── VulkanClearFrameRenderer: 清屏/三角形/主网格/边线/拾取帧提交和 present
+  └── VulkanViewport (macOS): QWindow 宿主 + Vulkan 主网格 present + 点选/框选 + shader 端基础云图
+```
 
 #### OpenGL 资源管理
 
 ```
 场景渲染:
   ├── shader_     (QOpenGLShaderProgram) — scene.vert + scene.frag
-  ├── vao_/vbo_/ibo_ — 主网格 VAO/VBO/IBO
-  ├── colorVbo_   — per-vertex 颜色（部件色/云图色）
-  ├── scalarVbo_  — per-vertex 标量值（GPU 端色谱映射）
-  └── triPartTbo_/triPartTex_ — 三角形→部件索引 texture buffer
+  ├── meshResource_ — 后端托管主网格 VAO/VBO/IBO/颜色/标量缓冲
+  └── triPartTextureBuffer_ — 后端托管三角形→部件索引 texture buffer
 
 边线渲染:
-  ├── edgeVao_/edgeVbo_/edgeIbo_ — 网格边线
-  └── selEdgeVao_/selEdgeVbo_ — 选中高亮边线
+  ├── edgeResource_ — 后端托管普通网格边线 VAO/VBO/IBO
+  └── selectionEdgeResource_ — 后端托管选中高亮/轮廓边 VAO/VBO
 
 背景渲染:
-  └── bgShader_ + bgVao_/bgVbo_ — 渐变背景
+  └── bgShader_ + backgroundGeometry_ — 后端托管渐变背景几何
+
+后处理叠加:
+  ├── overlayResource_ — 后端托管未变形叠加线框 VAO/VBO
+  ├── sliceResource_ — 后端托管切片交线 VAO/VBO
+  ├── isoResource_ — 后端托管等值面 VAO/VBO/IBO
+  ├── clipPreviewResource_ — 后端托管裁剪/切片预览平面 VAO/VBO/IBO
+  └── clipPreviewEdgeResource_ — 后端托管裁剪/切片预览轮廓线 VAO/VBO
 
 坐标轴:
-  └── axesShader_ + axesVao_/axesVbo_ — 角落坐标轴指示器
+  └── axesShader_ + axesGeometry_ — 后端托管角落坐标轴几何
 
 拾取:
   ├── pickShader_ — pick.vert + pick.frag
-  ├── pickFbo_    — 离屏 FBO（颜色ID编码）
-  └── pickVao_    — 拾取专用 VAO
+  ├── pickFramebuffer_ — 后端托管离屏 FBO（颜色ID编码）
+  └── pickVertexArray_ — 后端托管拾取专用 VAO
 ```
 
 #### 渲染流程 (paintGL)
@@ -517,7 +621,7 @@ setPartVisibility(partIndex, visible)
 
 ### 6.2 Camera — 轨道相机
 
-**文件**: `Camera.h` / `Camera.cpp`
+**文件**: `source/render/Camera.h` / `source/render/Camera.cpp`
 
 球坐标系相机，围绕目标点旋转：
 
@@ -567,6 +671,28 @@ glReadPixels 读取点击处像素
 重建选中高亮边线 → 重绘
 ```
 
+Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 将可见三角形按
+`triangleToElement` 写入颜色附件，随后把点击位置的 1 个像素复制到 staging buffer，
+同步读回并解码为单元 ID。该路径已经接入 `VulkanViewport` 的 Node / Element / Part 模式点选、框选添加和点选/框选取消；
+选中线段、部件轮廓边和节点标记已由 Vulkan 线管线绘制。
+
+### Vulkan 传统管线能力
+
+| 功能 | 当前状态 |
+|------|----------|
+| 主网格/普通边线 | 已完成 |
+| 部件颜色/显隐 | 已完成，上传阶段过滤可见三角形/边线 |
+| Node / Element / Part 点选 | 已完成，离屏 color picking + CPU 映射 |
+| Node / Element / Part 框选添加/取消 | 已完成，Ctrl/Shift 左键添加、Ctrl/Shift 右键取消 |
+| 选中高亮 | 已完成，Element 完整单元边、Part 边界/开放/特征/视角轮廓边、Node 三轴标记 |
+| shader 端云图 | 已完成，scalar SSBO + descriptor set，切换 field 不重传 mesh geometry |
+| 渐变背景 | 已完成，独立 fullscreen triangle pipeline |
+| 角落坐标轴 | 已完成，复用 line pipeline 绘制左下角 XYZ 轴线，并用 Qt overlay 显示 X/Y/Z 标签 |
+| 色标、overlay、切片、等值面、裁剪/切片平面预览 | 已完成基础显示链路 |
+| resize / swapchain 过期恢复 | 已完成，窗口 resize 和 acquire/present out-of-date/suboptimal 会触发下一帧重建 |
+| 正式资源模型 | 已开始，device-local/staging buffer、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制已独立 |
+| Vulkan 集成测试 | 已补充隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
+
 ### 拾取模式
 
 | 模式 | 编码方式 | 结果 |
@@ -589,7 +715,7 @@ glReadPixels 读取点击处像素
 ### 框选
 
 - 左键拖拽：框选添加（`QRubberBand` 显示框选矩形）
-- 中键拖拽：框选取消
+- Ctrl/Shift + 右键拖拽：框选取消
 - 框选时批量读取 FBO 矩形区域内的颜色 ID
 
 ### 延迟拾取机制
@@ -609,7 +735,7 @@ QPoint pendingPickPos_;
 
 ### 8.1 MainWindow — 主窗口
 
-**文件**: `MainWindow.h` / `MainWindow.cpp`
+**文件**: `source/app/MainWindow.h` / `source/app/MainWindow.cpp`
 
 布局结构：
 
@@ -636,7 +762,7 @@ QPoint pendingPickPos_;
 
 ### 8.2 FEModelPanel — 模型信息面板
 
-**文件**: `FEModelPanel.h`
+**文件**: `source/app/FEModelPanel.h`
 
 功能：
 - 显示模型统计（节点数、单元数、三角面数、尺寸）
@@ -652,7 +778,7 @@ QPoint pendingPickPos_;
 
 ### 8.3 PartsPanel — 部件模型树
 
-**文件**: `PartsPanel.h`
+**文件**: `source/app/PartsPanel.h`
 
 以树形结构显示模型部件：
 ```
@@ -668,7 +794,7 @@ QPoint pendingPickPos_;
 
 ### 8.4 ResultPanel — 结果面板
 
-**文件**: `ResultPanel.h`
+**文件**: `source/app/ResultPanel.h`
 
 级联选择云图数据：
 ```
@@ -679,7 +805,7 @@ QPoint pendingPickPos_;
 
 ### 8.5 PickPanel — 拾取控制面板
 
-**文件**: `PickPanel.h`
+**文件**: `source/app/PickPanel.h`
 
 - 拾取模式切换（节点/单元/部件）
 - 显示/隐藏控制
@@ -687,7 +813,7 @@ QPoint pendingPickPos_;
 
 ### 8.6 ControlPanel — 控制面板
 
-**文件**: `ControlPanel.h`
+**文件**: `source/app/ControlPanel.h`
 
 - 形状选择（7 种基础几何体，用于演示）
 - 显示模式（实体/线框/混合）
@@ -695,7 +821,7 @@ QPoint pendingPickPos_;
 
 ### 8.7 MonitorPanel — 性能监控
 
-**文件**: `MonitorPanel.h`
+**文件**: `source/app/MonitorPanel.h`
 
 实时显示：
 - FPS 帧率 / 每帧耗时
@@ -762,7 +888,7 @@ QPoint pendingPickPos_;
 
 ## 10. 主题系统
 
-**文件**: `Theme.h`
+**文件**: `source/common/Theme.h`
 
 6 种内置主题，每个主题定义：
 
@@ -835,7 +961,7 @@ MainWindow 接收信号
   │   （通过 vertexToNode 映射表：渲染顶点 → 节点 → 标量值）
   │
   ├── GLWidget::setVertexScalars(scalars, min, max, bands)
-  │   └── 上传标量到 scalarVbo_（GPU 端做量化+色谱映射）
+  │   └── 上传标量到 meshResource_ 的标量缓冲（GPU 端做量化+色谱映射）
   │
   ├── GLWidget::setColorBarVisible(true)
   ├── GLWidget::setColorBarRange(min, max)
@@ -849,7 +975,7 @@ MainWindow 接收信号
   │
   ├── 左键：记录位置 → 拖拽 = 旋转，点击 = 拾取
   ├── 右键：平移
-  └── 中键：框选取消
+  └── Ctrl/Shift + 右键：框选取消
   │
 鼠标释放 (mouseReleaseEvent)
   │
@@ -860,7 +986,7 @@ MainWindow 接收信号
 paintGL()
   │
   ├── 检查 pickPointPending_ → renderPickBuffer() + pickAtPoint()
-  │   ├── 用 pickShader 渲染到 pickFbo_
+  │   ├── 用 pickShader 渲染到 pickFramebuffer_
   │   ├── glReadPixels 读像素颜色
   │   ├── colorToId() 解码
   │   ├── 更新 selection_
@@ -879,14 +1005,19 @@ paintGL()
 ```
 FEModelViewer (项目)
 ├── FERender (SHARED 库)
-│   ├── 头文件：Camera.h, GLWidget.h, FEModel.h, FEParser.h, ...
-│   ├── 源文件：Camera.cpp, GLWidget.cpp, FEModel.cpp, FEParser_*.cpp, ...
+│   ├── 头文件：source/render/Camera.h, source/render/GLWidget.h, source/render/RenderViewport.h, ...
+│   ├── 数据层：source/data/FEModel.h, source/data/FEField.h, ...
+│   ├── 解析层：source/io/FEParser.h, source/io/FEParser_*.cpp
+│   ├── 转换层：source/convert/FEMeshConverter.h/.cpp
+│   ├── RHI 层：source/rhi/RenderBackend.h, source/rhi/RenderBackendFactory.cpp,
+│   │           source/rhi/OpenGLRenderBackend.cpp, source/rhi/Vulkan*.cpp(可选)
+│   ├── 后处理：source/post/FEResultMapper.h/.cpp, ...
 │   ├── Shader 资源：shaders.qrc
-│   ├── 依赖：OpenGL, Qt5(Core/Gui/Widgets/OpenGL), GLM(header-only)
+│   ├── 依赖：OpenGL, Qt6(Core/Gui/Widgets/OpenGL/OpenGLWidgets), GLM(header-only), Vulkan(可选)
 │   └── 导出宏：FERENDER_EXPORT（由 GenerateExportHeader 生成）
 │
 └── FEModelViewer (EXECUTABLE)
-    ├── main.cpp, MainWindow.cpp, *Panel.cpp
+    ├── source/app/main.cpp, source/app/MainWindow.cpp, source/app/*Panel.cpp
     └── 链接 FERender
 ```
 
@@ -894,10 +1025,11 @@ FEModelViewer (项目)
 
 - **C++ 标准**: C++17
 - **OpenGL**: 4.1 Core Profile（macOS 支持的最高版本）
-- **Qt**: 5.x（自动探测路径，支持 MinGW/MSVC/Homebrew）
+- **Vulkan RHI**: `FEMODELVIEWER_ENABLE_VULKAN_RHI=ON` 时自动探测 Vulkan SDK，找到后编译传统图形管线后端、设备层、macOS surface 工厂、swapchain 封装、主网格/边线绘制、点选/框选添加/取消和选中高亮线
+- **Qt**: 6.8+（自动探测路径，支持 MinGW/MSVC/Homebrew）
 - **GLM**: 0.9.9.8（通过 FetchContent 自动下载）
 - **MSVC**: `/utf-8`（中文注释支持）
-- **macOS**: `GL_SILENCE_DEPRECATION`（抑制 OpenGL 弃用警告）
+- **macOS**: `GL_SILENCE_DEPRECATION`（抑制 OpenGL 弃用警告）；若当前 Xcode SDK 缺少 `AGL.framework`，需指定包含 AGL 的 CommandLineTools SDK
 - **安装**: `find_package(FERender)` 可被其他项目引用
 
 ### CLI 模式

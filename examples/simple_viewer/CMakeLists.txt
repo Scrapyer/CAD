@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets)
 find_package(FERender REQUIRED CONFIG)
 
 add_executable(simple_viewer
@@ -14,6 +15,7 @@ add_executable(simple_viewer
 
 target_link_libraries(simple_viewer PRIVATE
     FERender::FERender
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets
 )
 
 if(APPLE)
