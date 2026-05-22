@@ -13,6 +13,7 @@ std::unique_ptr<IRenderBackend> createRenderBackend(RenderBackendKind kind)
         return std::make_unique<VulkanRenderBackend>();
 #endif
     case RenderBackendKind::OpenGL:
+    case RenderBackendKind::Metal:
     default:
         return std::make_unique<OpenGLRenderBackend>();
     }
@@ -29,6 +30,8 @@ bool isRenderBackendAvailable(RenderBackendKind kind)
 #else
         return false;
 #endif
+    case RenderBackendKind::Metal:
+        return false;
     default:
         return false;
     }
@@ -41,6 +44,8 @@ const char* renderBackendName(RenderBackendKind kind)
         return "OpenGL";
     case RenderBackendKind::Vulkan:
         return "Vulkan";
+    case RenderBackendKind::Metal:
+        return "Metal";
     default:
         return "Unknown";
     }

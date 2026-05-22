@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ferender_export.h"
+
 #include <QMatrix3x3>
 #include <QMatrix4x4>
 #include <QString>
@@ -8,7 +10,7 @@
 /**
  * @brief 渲染后端硬件/驱动信息。
  */
-struct RenderBackendInfo {
+struct FERENDER_EXPORT RenderBackendInfo {
     QString renderer;
     QString version;
     QString shadingLanguageVersion;
@@ -17,7 +19,8 @@ struct RenderBackendInfo {
 
 enum class RenderBackendKind {
     OpenGL,
-    Vulkan
+    Vulkan,
+    Metal
 };
 
 enum class ModelDisplayMode {
@@ -114,9 +117,10 @@ struct ScenePassState {
  * @brief 渲染后端接口。
  *
  * GLWidget 负责 Qt Widget 生命周期和交互；后端负责具体图形 API。
- * 当前 OpenGL 后端承担实际绘制；Vulkan 后端先作为传统图形管线的 RHI 落脚点逐步接入。
+ * 当前 OpenGL 后端承担实际绘制；Vulkan 后端先作为传统图形管线的 RHI 落脚点逐步接入；
+ * Metal 枚举先用于配置预留，后端接入后再标记可用。
  */
-class IRenderBackend {
+class FERENDER_EXPORT IRenderBackend {
 public:
     virtual ~IRenderBackend() = default;
 

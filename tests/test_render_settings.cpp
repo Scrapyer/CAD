@@ -26,11 +26,17 @@ int main(int argc, char** argv)
     if (RenderSettings::backendKey(RenderBackendKind::Vulkan) != QStringLiteral("vulkan")) {
         return 4;
     }
+    if (RenderSettings::backendKey(RenderBackendKind::Metal) != QStringLiteral("metal")) {
+        return 11;
+    }
     if (RenderSettings::backendFromKey(QStringLiteral("VK")) != RenderBackendKind::Vulkan) {
         return 5;
     }
     if (RenderSettings::backendFromKey(QStringLiteral("gl")) != RenderBackendKind::OpenGL) {
         return 6;
+    }
+    if (RenderSettings::backendFromKey(QStringLiteral("mtl")) != RenderBackendKind::Metal) {
+        return 12;
     }
 
     RenderSettings::setPreferredBackend(RenderBackendKind::Vulkan);
@@ -46,6 +52,14 @@ int main(int argc, char** argv)
         : RenderBackendKind::OpenGL;
     if (RenderSettings::effectiveBackend() != expectedEffective) {
         return 8;
+    }
+
+    RenderSettings::setPreferredBackend(RenderBackendKind::Metal);
+    if (RenderSettings::preferredBackend() != RenderBackendKind::Metal) {
+        return 13;
+    }
+    if (RenderSettings::effectiveBackend() != RenderBackendKind::OpenGL) {
+        return 14;
     }
 
     RenderSettings::setPreferredBackend(RenderBackendKind::OpenGL);

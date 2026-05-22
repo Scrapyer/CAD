@@ -31,7 +31,7 @@
   - [4.1 Camera — 轨道相机](#41-camera--轨道相机)
   - [4.2 GLWidget — OpenGL 渲染窗口](#42-glwidget--opengl-渲染窗口)
   - [4.3 RenderViewport — 渲染视口宿主](#43-renderviewport--渲染视口宿主)
-  - [4.4 RenderSettings — 全局 RHI 设置](#44-rendersettings--全局-rhi-设置)
+  - [4.4 RHI 公共类型与设置](#44-rhi-公共类型与设置)
 - [5. 交互层 API](#5-交互层-api)
   - [5.1 PickMode — 拾取模式](#51-pickmode--拾取模式)
   - [5.2 FEPickResult — 拾取结果](#52-fpickresult--拾取结果)
@@ -1177,13 +1177,26 @@ void partsPicked(const std::vector<int>& partIndices);
 
 ---
 
-### 4.4 RenderSettings — 全局 RHI 设置
+### 4.4 RHI 公共类型与设置
 
-**头文件**：`RenderSettings.h`
+**头文件**：`RenderBackend.h`、`RenderBackendFactory.h`、`RenderSettings.h`
 
-使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。
+使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。`RenderBackendKind` 当前包含 `OpenGL`、`Vulkan`、`Metal`；Metal 首选项已可保存，后端接入前实际启动会回退到 OpenGL。
 
-`RenderBackend.h` 公开 `ModelDisplayMode` 枚举，取值为 `Solid`、`Wireframe`、`SolidWireframe`、`Points`，由 `GLWidget` 和 `RenderViewport` 统一接收并转发到当前 OpenGL 或 Vulkan 视口。
+`RenderBackend.h` 公开 `RenderBackendInfo`、`RenderBackendKind`、`ModelDisplayMode`、`IRenderBackend` 和 scene pass 描述结构。`IRenderBackend` 是后端最小生命周期边界，目前暴露 `initialize()` 和 `info()`；OpenGL 完整模型绘制由 `OpenGLRenderBackend` 实现，Vulkan/Metal 可沿同一边界接入。`ModelDisplayMode` 取值为 `Solid`、`Wireframe`、`SolidWireframe`、`Points`，由 `GLWidget` 和 `RenderViewport` 统一接收并转发到当前 OpenGL 或 Vulkan 视口。
+
+```cpp
+std::unique_ptr<IRenderBackend> createRenderBackend(
+    RenderBackendKind kind = RenderBackendKind::OpenGL);
+bool isRenderBackendAvailable(RenderBackendKind kind);
+const char* renderBackendName(RenderBackendKind kind);
+```
+
+| 函数 | 说明 |
+|------|------|
+| `createRenderBackend(kind)` | 创建指定 RHI 后端实例；当前 Metal 请求会回退创建 OpenGL 后端 |
+| `isRenderBackendAvailable(kind)` | 查询后端是否已编译并可用；Metal 预留期返回 `false` |
+| `renderBackendName(kind)` | 返回用于界面和日志的稳定后端名称 |
 
 ```cpp
 class RenderSettings {
@@ -1202,8 +1215,8 @@ public:
 | `preferredBackend()` | 从 `config/settings.ini` 读取用户首选 RHI，默认 OpenGL |
 | `setPreferredBackend(kind)` | 写入用户首选 RHI，下次启动生效 |
 | `effectiveBackend()` | 首选 RHI 已编译可用时返回首选，否则回退 OpenGL |
-| `backendKey(kind)` | 转换为稳定配置字符串：`"opengl"` / `"vulkan"` |
-| `backendFromKey(key, fallback)` | 从配置字符串解析 RHI，支持 `gl` / `vk` 简写 |
+| `backendKey(kind)` | 转换为稳定配置字符串：`"opengl"` / `"vulkan"` / `"metal"` |
+| `backendFromKey(key, fallback)` | 从配置字符串解析 RHI，支持 `gl` / `vk` / `mtl` 简写 |
 
 ---
 

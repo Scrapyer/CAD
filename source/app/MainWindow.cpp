@@ -1074,14 +1074,18 @@ void MainWindow::setupToolBar() {
     const RenderBackendKind preferredRhi = RenderSettings::preferredBackend();
     const RenderBackendKind rhiKinds[] = {
         RenderBackendKind::OpenGL,
-        RenderBackendKind::Vulkan
+        RenderBackendKind::Vulkan,
+        RenderBackendKind::Metal
     };
     for (RenderBackendKind kind : rhiKinds) {
         QAction* act = rhiMenu_->addAction(QString::fromLatin1(renderBackendName(kind)));
         act->setCheckable(true);
-        act->setEnabled(isRenderBackendAvailable(kind));
+        act->setEnabled(kind == RenderBackendKind::Metal || isRenderBackendAvailable(kind));
         act->setChecked(kind == preferredRhi);
         act->setData(static_cast<int>(kind));
+        if (kind == RenderBackendKind::Metal && !isRenderBackendAvailable(kind)) {
+            act->setToolTip(QStringLiteral("Metal 后端预留：保存首选项，后端接入后重启生效"));
+        }
         rhiGroup_->addAction(act);
     }
     rhiAction_ = new QAction(style()->standardIcon(QStyle::SP_ComputerIcon), "RHI", this);
@@ -1102,6 +1106,9 @@ void MainWindow::setupToolBar() {
         if (kind == (renderViewport_ ? renderViewport_->activeRenderBackendKind() : RenderSettings::effectiveBackend())) {
             statusLabel_->setText(QStringLiteral("  RHI 当前已是 %1；配置已保存")
                                       .arg(QString::fromLatin1(requestedName)));
+        } else if (!isRenderBackendAvailable(kind)) {
+            statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，后端可用后重启生效")
+                                      .arg(QString::fromLatin1(requestedName), QString::fromLatin1(activeName)));
         } else {
             statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，重启后生效")
                                       .arg(QString::fromLatin1(requestedName), QString::fromLatin1(activeName)));

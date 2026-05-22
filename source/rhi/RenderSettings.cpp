@@ -65,6 +65,8 @@ QString RenderSettings::backendKey(RenderBackendKind kind)
     switch (kind) {
     case RenderBackendKind::Vulkan:
         return QStringLiteral("vulkan");
+    case RenderBackendKind::Metal:
+        return QStringLiteral("metal");
     case RenderBackendKind::OpenGL:
     default:
         return QStringLiteral("opengl");
@@ -79,6 +81,9 @@ RenderBackendKind RenderSettings::backendFromKey(const QString& key, RenderBacke
     }
     if (normalized == QStringLiteral("vulkan") || normalized == QStringLiteral("vk")) {
         return RenderBackendKind::Vulkan;
+    }
+    if (normalized == QStringLiteral("metal") || normalized == QStringLiteral("mtl")) {
+        return RenderBackendKind::Metal;
     }
     return fallback;
 }

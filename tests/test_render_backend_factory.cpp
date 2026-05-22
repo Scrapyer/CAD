@@ -24,6 +24,12 @@ int main()
     if (std::strcmp(renderBackendName(RenderBackendKind::Vulkan), "Vulkan") != 0) {
         return 3;
     }
+    if (std::strcmp(renderBackendName(RenderBackendKind::Metal), "Metal") != 0) {
+        return 13;
+    }
+    if (isRenderBackendAvailable(RenderBackendKind::Metal)) {
+        return 14;
+    }
 
     std::unique_ptr<IRenderBackend> glBackend = createRenderBackend(RenderBackendKind::OpenGL);
     if (!glBackend) {
