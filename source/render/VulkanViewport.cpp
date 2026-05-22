@@ -121,7 +121,8 @@ VulkanViewport::VulkanViewport(QWidget* parent)
     windowContainer_->installEventFilter(this);
     nativeWindow_->installEventFilter(this);
 
-    frameTimer_.setInterval(16);
+    frameTimer_.setTimerType(Qt::PreciseTimer);
+    frameTimer_.setInterval(0);
     connect(&frameTimer_, &QTimer::timeout, this, &VulkanViewport::renderFrame);
     fpsTimer_.start();
 }
@@ -175,7 +176,7 @@ void VulkanViewport::renderFrame()
     const QMatrix4x4 axesMvp = currentAxesMvp();
     const bool rendered = hasMesh_
         ? backend_.renderMeshFrame(currentMvp(), 0.04f, 0.05f, 0.07f, 1.0f, axesMvp)
-        : backend_.renderTriangleFrame(0.04f, 0.05f, 0.07f, 1.0f, axesMvp);
+        : backend_.renderClearFrame(0.04f, 0.05f, 0.07f, 1.0f);
     if (!rendered) {
         if (backend_.needsSwapchainRecreate()) {
             swapchainDirty_ = true;
@@ -515,7 +516,7 @@ bool VulkanViewport::recreateSwapchain()
     const uint32_t height = static_cast<uint32_t>(std::max(1, size.height()));
 
     backend_.destroySwapchain();
-    if (!backend_.initializeSwapchain(surface_.handle(), width, height)) {
+    if (!backend_.initializeSwapchain(surface_.handle(), width, height, false)) {
         lastError_ = backend_.lastError();
         return false;
     }

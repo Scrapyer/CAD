@@ -17,6 +17,8 @@
 #include <cstring>
 
 namespace {
+constexpr size_t kMaxInteractiveEdgeIndices = 8000000;
+
 struct VulkanMeshVertex {
     float position[3];
     float normal[3];
@@ -353,51 +355,58 @@ bool VulkanClearFrameRenderer::uploadMesh(
     }
 
     if (!mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0) {
-        std::vector<uint32_t> edgeIndices;
-        edgeIndices.reserve(mesh.edgeIndices.size());
-        const size_t edgeCount = mesh.edgeIndices.size() / 2;
-        for (size_t edge = 0; edge < edgeCount; ++edge) {
-            const int part = edge < options.edgeToPart.size()
-                ? options.edgeToPart[edge]
-                : -1;
-            if (!isPartVisible(options, part)) {
-                continue;
-            }
-            edgeIndices.push_back(mesh.edgeIndices[edge * 2]);
-            edgeIndices.push_back(mesh.edgeIndices[edge * 2 + 1]);
-        }
-        if (edgeIndices.empty()) {
+        if (mesh.edgeIndices.size() > kMaxInteractiveEdgeIndices) {
+            // 超大模型的全量边线会带来第二遍海量 draw，默认只保留表面和选中高亮线。
             meshResources_.edgeVertexResource.destroy(device);
             meshResources_.edgeIndexResource.destroy(device);
             meshResources_.edgeIndexCount = 0;
         } else {
-            const VkDeviceSize edgeVertexSize =
-                static_cast<VkDeviceSize>(mesh.edgeVertices.size() * sizeof(float));
-            if (!uploadContext.uploadBuffer(device,
-                                            meshResources_.edgeVertexResource,
-                                            mesh.edgeVertices.data(),
-                                            edgeVertexSize,
-                                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                            "edge vertex",
-                                            lastError_)) {
-                uploadContext.discard(device);
-                destroyMeshBuffers(device);
-                return false;
+            std::vector<uint32_t> edgeIndices;
+            edgeIndices.reserve(mesh.edgeIndices.size());
+            const size_t edgeCount = mesh.edgeIndices.size() / 2;
+            for (size_t edge = 0; edge < edgeCount; ++edge) {
+                const int part = edge < options.edgeToPart.size()
+                    ? options.edgeToPart[edge]
+                    : -1;
+                if (!isPartVisible(options, part)) {
+                    continue;
+                }
+                edgeIndices.push_back(mesh.edgeIndices[edge * 2]);
+                edgeIndices.push_back(mesh.edgeIndices[edge * 2 + 1]);
             }
-            const VkDeviceSize edgeIndexSize =
-                static_cast<VkDeviceSize>(edgeIndices.size() * sizeof(uint32_t));
-            if (!uploadContext.uploadBuffer(device,
-                                            meshResources_.edgeIndexResource,
-                                            edgeIndices.data(),
-                                            edgeIndexSize,
-                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                            "edge index",
-                                            lastError_)) {
-                uploadContext.discard(device);
-                destroyMeshBuffers(device);
-                return false;
+            if (edgeIndices.empty()) {
+                meshResources_.edgeVertexResource.destroy(device);
+                meshResources_.edgeIndexResource.destroy(device);
+                meshResources_.edgeIndexCount = 0;
+            } else {
+                const VkDeviceSize edgeVertexSize =
+                    static_cast<VkDeviceSize>(mesh.edgeVertices.size() * sizeof(float));
+                if (!uploadContext.uploadBuffer(device,
+                                                meshResources_.edgeVertexResource,
+                                                mesh.edgeVertices.data(),
+                                                edgeVertexSize,
+                                                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                                "edge vertex",
+                                                lastError_)) {
+                    uploadContext.discard(device);
+                    destroyMeshBuffers(device);
+                    return false;
+                }
+                const VkDeviceSize edgeIndexSize =
+                    static_cast<VkDeviceSize>(edgeIndices.size() * sizeof(uint32_t));
+                if (!uploadContext.uploadBuffer(device,
+                                                meshResources_.edgeIndexResource,
+                                                edgeIndices.data(),
+                                                edgeIndexSize,
+                                                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                                "edge index",
+                                                lastError_)) {
+                    uploadContext.discard(device);
+                    destroyMeshBuffers(device);
+                    return false;
+                }
+                meshResources_.edgeIndexCount = static_cast<uint32_t>(edgeIndices.size());
             }
-            meshResources_.edgeIndexCount = static_cast<uint32_t>(edgeIndices.size());
         }
     }
 
@@ -714,7 +723,7 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
         return false;
     }
     if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
-        return renderTriangleFrame(device, swapchain, clearColor, axesMvp);
+        return renderClearFrame(device, swapchain, clearColor);
     }
 
     VkDevice vkDevice = device.device();

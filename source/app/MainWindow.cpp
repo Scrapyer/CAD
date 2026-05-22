@@ -33,6 +33,7 @@
 #include "RenderSettings.h"
 
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <set>
 #include <utility>
 #include <vector>
@@ -55,6 +56,7 @@
 #include <QMessageBox>
 #include <QFileInfo>
 #include <QSettings>
+#include <QCoreApplication>
 #include <QDir>
 #include <QCloseEvent>
 #include <QStorageInfo>
@@ -62,9 +64,52 @@
 
 namespace {
 
+constexpr const char* kThemeIndexKey = "appearance/themeIndex";
+constexpr const char* kConfigEnvVar = "FEMODELVIEWER_CONFIG_DIR";
+constexpr const char* kConfigDirName = "config";
+constexpr const char* kSettingsFileName = "settings.ini";
+
 QIcon toolbarIcon(const QString& name)
 {
     return QIcon(QStringLiteral(":/icons/toolbar/") + name + QStringLiteral(".svg"));
+}
+
+QString configDirectoryPath()
+{
+    const QByteArray overridePath = qgetenv(kConfigEnvVar);
+    if (!overridePath.isEmpty()) {
+        return QString::fromLocal8Bit(overridePath);
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    if (!appDir.isEmpty()) {
+        return QDir(appDir).filePath(QString::fromLatin1(kConfigDirName));
+    }
+    return QDir::current().filePath(QString::fromLatin1(kConfigDirName));
+}
+
+QSettings makeAppSettings()
+{
+    const QString configDirPath = configDirectoryPath();
+    QDir dir;
+    dir.mkpath(configDirPath);
+    return QSettings(QDir(configDirPath).filePath(QString::fromLatin1(kSettingsFileName)),
+                     QSettings::IniFormat);
+}
+
+int loadThemeIndex()
+{
+    QSettings settings = makeAppSettings();
+    const int index = settings.value(QString::fromLatin1(kThemeIndexKey), 0).toInt();
+    return std::clamp(index, 0, Theme::count() - 1);
+}
+
+void saveThemeIndex(int index)
+{
+    QSettings settings = makeAppSettings();
+    settings.setValue(QString::fromLatin1(kThemeIndexKey),
+                      std::clamp(index, 0, Theme::count() - 1));
+    settings.sync();
 }
 
 void configureFileDialog(QFileDialog& dialog)
@@ -368,8 +413,9 @@ MainWindow::MainWindow() {
     connect(thresholdPanel_, &ResultPanel::planePreviewCleared,
             renderViewport_, &RenderViewport::clearClipPlanePreview);
 
-    // ── 初始主题（默认深色）──
-    currentTheme_ = Theme::dark();
+    // ── 初始主题 ──
+    themeIndex_ = loadThemeIndex();
+    currentTheme_ = Theme::byIndex(themeIndex_);
     applyTheme(currentTheme_);
 }
 
@@ -499,27 +545,6 @@ QWidget* MainWindow::createModelNavigatorPanel() {
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(6);
 
-    projectTree_ = new QTreeWidget;
-    projectTree_->setHeaderLabel("Project");
-    projectTree_->setIndentation(16);
-    projectTree_->setUniformRowHeights(true);
-    projectTree_->setAnimated(true);
-    projectTree_->setMinimumHeight(130);
-
-    auto* root = new QTreeWidgetItem(projectTree_, {"FEModelViewer"});
-    root->setFlags(root->flags() | Qt::ItemIsEnabled);
-    QFont rootFont = root->font(0);
-    rootFont.setBold(true);
-    root->setFont(0, rootFont);
-
-    const QStringList nodes = {"Model", "Parts", "Fields", "Results"};
-    for (const QString& name : nodes) {
-        auto* item = new QTreeWidgetItem(root, {name});
-        item->setFlags(item->flags() | Qt::ItemIsEnabled);
-    }
-    projectTree_->expandAll();
-
-    layout->addWidget(projectTree_, 0);
     layout->addWidget(partsPanel_, 1);
     return panel;
 }
@@ -1032,6 +1057,7 @@ void MainWindow::setupToolBar() {
     });
 
     // ── 主题切换（下拉菜单） ──
+    themeIndex_ = loadThemeIndex();
     themeMenu_ = new QMenu(this);
     themeMenu_->setTitle("Theme");
     themeMenu_->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
@@ -1042,6 +1068,10 @@ void MainWindow::setupToolBar() {
             themeIndex_ = i;
             currentTheme_ = Theme::byIndex(i);
             applyTheme(currentTheme_);
+            saveThemeIndex(i);
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  Theme 已保存为 %1").arg(currentTheme_.name));
+            }
         });
     }
     themeAction_ = new QAction(style()->standardIcon(QStyle::SP_FileDialogContentsView), "Theme", this);

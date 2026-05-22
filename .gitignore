@@ -1,4 +1,5 @@
 build/
+build-qt6/
 build-vs/
 .DS_Store
 *.o
