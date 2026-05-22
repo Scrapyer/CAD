@@ -135,11 +135,13 @@ endif()
 if(APPLE AND FEMODELVIEWER_ENABLE_METAL_RHI)
     find_library(METAL_FRAMEWORK Metal)
     find_library(FOUNDATION_FRAMEWORK Foundation)
-    if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
+    find_library(APPKIT_FRAMEWORK AppKit)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore)
+    if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK AND APPKIT_FRAMEWORK AND QUARTZCORE_FRAMEWORK)
         set(FERENDER_HAS_METAL_RHI ON)
         message(STATUS "Metal RHI enabled: ${METAL_FRAMEWORK}")
     else()
-        message(STATUS "Metal RHI disabled: Metal/Foundation framework was not found")
+        message(STATUS "Metal RHI disabled: Metal/Foundation/AppKit/QuartzCore framework was not found")
     endif()
 elseif(FEMODELVIEWER_ENABLE_METAL_RHI)
     message(STATUS "Metal RHI disabled: Metal is only available on Apple platforms")
@@ -293,6 +295,32 @@ set(RENDER_SOURCES
 
 if(FERENDER_HAS_METAL_RHI)
     list(APPEND RENDER_SOURCES
+        ${SOURCE_DIR}/render/MetalViewport.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalAttachmentResourceBuilder.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalBufferResource.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalClearFramePass.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalDepthStencilFactory.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalDeviceFactory.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalDrawableFrameSubmitter.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalLayerHost.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalLineUpload.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalMeshFramePass.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalMeshFramePassBuilder.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalMeshScalarUpdater.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalMeshUploadBuilder.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalMeshUploader.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalObjectResource.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalPipelineFactory.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalPickPass.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalPickPassBuilder.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalPickUtils.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalRenderPassFactory.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalShaderSources.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalStateResource.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalSurfaceUploadBuilder.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalSurfaceUploader.cpp
+        ${SOURCE_DIR}/rhi/Metal/MetalTextureResource.mm
+        ${SOURCE_DIR}/rhi/Metal/MetalUniformUtils.cpp
         ${SOURCE_DIR}/rhi/Metal/MetalRenderBackend.mm
     )
 endif()
@@ -380,6 +408,8 @@ if(FERENDER_HAS_METAL_RHI)
     target_link_libraries(FERender PRIVATE
         ${METAL_FRAMEWORK}
         ${FOUNDATION_FRAMEWORK}
+        ${APPKIT_FRAMEWORK}
+        ${QUARTZCORE_FRAMEWORK}
     )
 endif()
 
@@ -800,6 +830,32 @@ if(BUILD_TESTING)
         )
         add_test(NAME macos_vulkan_surface
             COMMAND test_macos_vulkan_surface
+        )
+        set_tests_properties(render_backend_factory PROPERTIES
+            DEPENDS macos_vulkan_surface
+        )
+        if(TARGET test_render_viewport_state)
+            # 先跑底层 Vulkan surface smoke test，再跑更宽的 Qt/RHI 视口集成测试。
+            set_tests_properties(render_viewport_state PROPERTIES
+                DEPENDS macos_vulkan_surface
+            )
+        endif()
+    endif()
+
+    if(FERENDER_HAS_METAL_RHI AND APPLE)
+        add_executable(test_macos_metal_layer
+            tests/test_macos_metal_layer.cpp
+        )
+        target_include_directories(test_macos_metal_layer PRIVATE
+            ${SOURCE_DIR}/rhi
+            ${SOURCE_DIR}/rhi/Metal
+        )
+        target_compile_definitions(test_macos_metal_layer PRIVATE FERENDER_HAS_METAL_RHI=1)
+        target_link_libraries(test_macos_metal_layer PRIVATE
+            FERender Qt6::Gui
+        )
+        add_test(NAME macos_metal_layer
+            COMMAND test_macos_metal_layer
         )
     endif()
 

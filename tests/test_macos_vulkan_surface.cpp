@@ -3,7 +3,10 @@
 #include "VulkanRenderBackend.h"
 #include "VulkanSurface.h"
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QGuiApplication>
+#include <QThread>
 #include <QWindow>
 
 #include <cstdio>
@@ -96,11 +99,32 @@ VulkanMeshUploadOptions makeGridOptions(const Mesh& mesh, bool hideOddParts)
     return options;
 }
 
+bool uploadMeshWithRetry(VulkanRenderBackend& backend,
+                         const Mesh& mesh,
+                         const VulkanMeshUploadOptions& options,
+                         const char* label)
+{
+    constexpr int maxAttempts = 3;
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+        if (backend.uploadMesh(mesh, options)) {
+            return true;
+        }
+        if (attempt == maxAttempts) {
+            std::fprintf(stderr, "%s failed: %s\n", label, backend.lastError().toUtf8().constData());
+            return false;
+        }
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(500);
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
+    QThread::msleep(500);
 
     VulkanRenderBackend backend;
     if (!backend.initializeContext(VulkanMacOSSurfaceFactory::requiredInstanceExtensions())) {
@@ -199,9 +223,7 @@ int main(int argc, char** argv)
     uploadOptions.scalarMin = 0.0f;
     uploadOptions.scalarMax = static_cast<float>(uploadOptions.vertexScalars.size() - 1);
     uploadOptions.numBands = 9;
-    if (!backend.uploadMesh(cube, uploadOptions)) {
-        std::fprintf(stderr, "uploadMesh failed: %s\n",
-                     backend.lastError().toUtf8().constData());
+    if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh")) {
         return 9;
     }
     for (size_t i = 0; i < uploadOptions.vertexScalars.size(); ++i) {
@@ -241,9 +263,7 @@ int main(int argc, char** argv)
                      backend.lastError().toUtf8().constData());
         return 50;
     }
-    if (!backend.uploadMesh(cube, uploadOptions)) {
-        std::fprintf(stderr, "uploadMesh(after pick resize) failed: %s\n",
-                     backend.lastError().toUtf8().constData());
+    if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh(after pick resize)")) {
         return 51;
     }
     if (!backend.renderPickFrame(QMatrix4x4(), 128, 96)) {
@@ -264,18 +284,14 @@ int main(int argc, char** argv)
     VulkanMeshUploadOptions hiddenOptions = uploadOptions;
     hiddenOptions.partVisibility[0] = false;
     hiddenOptions.partVisibility[1] = false;
-    if (!backend.uploadMesh(cube, hiddenOptions)) {
-        std::fprintf(stderr, "uploadMesh(hidden parts) failed: %s\n",
-                     backend.lastError().toUtf8().constData());
+    if (!uploadMeshWithRetry(backend, cube, hiddenOptions, "uploadMesh(hidden parts)")) {
         return 40;
     }
     if (backend.renderPickFrame(QMatrix4x4(), 64, 64)) {
         std::fprintf(stderr, "renderPickFrame(hidden parts) unexpectedly succeeded\n");
         return 41;
     }
-    if (!backend.uploadMesh(cube, uploadOptions)) {
-        std::fprintf(stderr, "uploadMesh(restore visible parts) failed: %s\n",
-                     backend.lastError().toUtf8().constData());
+    if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh(restore visible parts)")) {
         return 42;
     }
     const std::vector<float> overlayLine = {
@@ -446,10 +462,9 @@ int main(int argc, char** argv)
     for (int iteration = 0; iteration < 4; ++iteration) {
         const bool hideOddParts = (iteration % 2) == 1;
         VulkanMeshUploadOptions gridOptions = makeGridOptions(grid, hideOddParts);
-        if (!backend.uploadMesh(grid, gridOptions)) {
-            std::fprintf(stderr, "uploadMesh(grid stress %d) failed: %s\n",
-                         iteration,
-                         backend.lastError().toUtf8().constData());
+        char uploadLabel[64];
+        std::snprintf(uploadLabel, sizeof(uploadLabel), "uploadMesh(grid stress %d)", iteration);
+        if (!uploadMeshWithRetry(backend, grid, gridOptions, uploadLabel)) {
             return 55;
         }
         if (!backend.uploadVertexScalars(gridOptions.vertexScalars,
@@ -499,8 +514,10 @@ int main(int argc, char** argv)
         app.processEvents();
     }
     VulkanMeshUploadOptions finalGridOptions = makeGridOptions(grid, false);
-    if (!backend.uploadMesh(grid, finalGridOptions) ||
-        !backend.uploadOverlayLines({}) ||
+    if (!uploadMeshWithRetry(backend, grid, finalGridOptions, "uploadMesh(final grid stress restore)")) {
+        return 61;
+    }
+    if (!backend.uploadOverlayLines({}) ||
         !backend.uploadSliceLines({}) ||
         !backend.uploadSelectionLines({}) ||
         !backend.renderMeshFrame()) {

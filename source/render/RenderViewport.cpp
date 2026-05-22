@@ -2,6 +2,9 @@
 
 #include "ColorBarOverlay.h"
 #include "GLWidget.h"
+#if defined(FERENDER_HAS_METAL_RHI)
+#include "MetalViewport.h"
+#endif
 #include "RenderBackendFactory.h"
 #include "RenderSettings.h"
 #include "Theme.h"
@@ -47,6 +50,11 @@ void RenderViewport::setMesh(const Mesh& mesh)
     edgeToPart_.clear();
     partVisibility_.clear();
     glWidget_->setMesh(mesh);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setMesh(mesh);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setMesh(mesh);
@@ -59,6 +67,11 @@ void RenderViewport::setVertexColors(const std::vector<float>& colors)
     vertexScalars_.clear();
     useVertexColor_ = true;
     glWidget_->setVertexColors(colors);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setVertexColors(colors);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setVertexColors(colors);
@@ -69,6 +82,11 @@ void RenderViewport::setObjectColor(const glm::vec3& c)
 {
     objectColor_ = c;
     glWidget_->setObjectColor(c);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setObjectColor(c);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setObjectColor(c);
@@ -79,6 +97,11 @@ void RenderViewport::setModelDisplayMode(ModelDisplayMode mode)
 {
     displayMode_ = mode;
     glWidget_->setModelDisplayMode(mode);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setModelDisplayMode(mode);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setModelDisplayMode(mode);
@@ -91,6 +114,11 @@ void RenderViewport::fitToModel(const glm::vec3& center, float size)
     modelSize_ = size;
     hasModelFit_ = true;
     glWidget_->fitToModel(center, size);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->fitToModel(center, size);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->fitToModel(center, size);
@@ -147,6 +175,11 @@ void RenderViewport::setTriangleToElementMap(const std::vector<int>& map)
         vulkanViewport_->setTriangleToElementMap(map);
     }
 #endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setTriangleToElementMap(map);
+    }
+#endif
 }
 void RenderViewport::setTriangleToFaceMap(const std::vector<int>& map) { glWidget_->setTriangleToFaceMap(map); }
 void RenderViewport::setVertexToNodeMap(const std::vector<int>& map)
@@ -158,6 +191,11 @@ void RenderViewport::setVertexToNodeMap(const std::vector<int>& map)
         vulkanViewport_->setVertexToNodeMap(map);
     }
 #endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setVertexToNodeMap(map);
+    }
+#endif
 }
 void RenderViewport::setPickMode(PickMode mode)
 {
@@ -166,6 +204,11 @@ void RenderViewport::setPickMode(PickMode mode)
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setPickMode(mode);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setPickMode(mode);
     }
 #endif
 }
@@ -179,11 +222,21 @@ void RenderViewport::selectByIds(PickMode mode, const std::vector<int>& ids)
         vulkanViewport_->selectByIds(mode, ids);
     }
 #endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->selectByIds(mode, ids);
+    }
+#endif
 }
 void RenderViewport::setOverlayMesh(const Mesh& mesh)
 {
     overlayMesh_ = mesh;
     glWidget_->setOverlayMesh(mesh);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setOverlayMesh(mesh);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setOverlayMesh(mesh);
@@ -194,6 +247,11 @@ void RenderViewport::setOverlayVisible(bool visible)
 {
     overlayVisible_ = visible;
     glWidget_->setOverlayVisible(visible);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setOverlayVisible(visible);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setOverlayVisible(visible);
@@ -204,6 +262,11 @@ void RenderViewport::setUseVertexColor(bool use)
 {
     useVertexColor_ = use;
     glWidget_->setUseVertexColor(use);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setUseVertexColor(use);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setUseVertexColor(use);
@@ -214,6 +277,11 @@ void RenderViewport::setSliceLines(const std::vector<float>& lineVertices)
 {
     sliceLineVertices_ = lineVertices;
     glWidget_->setSliceLines(lineVertices);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setSliceLines(lineVertices);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setSliceLines(lineVertices);
@@ -224,6 +292,11 @@ void RenderViewport::clearSliceLines()
 {
     sliceLineVertices_.clear();
     glWidget_->clearSliceLines();
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->clearSliceLines();
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->clearSliceLines();
@@ -235,6 +308,11 @@ void RenderViewport::setIsoSurfaceMesh(const Mesh& mesh)
     isoSurfaceMesh_ = mesh;
     isoSurfaceVisible_ = !mesh.vertices.empty() && !mesh.indices.empty();
     glWidget_->setIsoSurfaceMesh(mesh);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setIsoSurfaceMesh(mesh);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setIsoSurfaceMesh(mesh);
@@ -246,6 +324,11 @@ void RenderViewport::clearIsoSurface()
     isoSurfaceMesh_ = Mesh{};
     isoSurfaceVisible_ = false;
     glWidget_->clearIsoSurface();
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->clearIsoSurface();
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->clearIsoSurface();
@@ -263,6 +346,11 @@ void RenderViewport::setClipPlanePreview(const glm::vec3& bbMin,
     clipPreviewOrigin_ = origin;
     clipPreviewNormal_ = normal;
     glWidget_->setClipPlanePreview(bbMin, bbMax, origin, normal);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setClipPlanePreview(bbMin, bbMax, origin, normal);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setClipPlanePreview(bbMin, bbMax, origin, normal);
@@ -273,6 +361,11 @@ void RenderViewport::clearClipPlanePreview()
 {
     clipPreviewVisible_ = false;
     glWidget_->clearClipPlanePreview();
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->clearClipPlanePreview();
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->clearClipPlanePreview();
@@ -291,6 +384,11 @@ void RenderViewport::setVertexScalars(const std::vector<float>& scalars,
     numBands_ = numBands;
     useVertexColor_ = true;
     glWidget_->setVertexScalars(scalars, minVal, maxVal, numBands);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setVertexScalars(scalars, minVal, maxVal, numBands);
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setVertexScalars(scalars, minVal, maxVal, numBands);
@@ -306,6 +404,11 @@ void RenderViewport::setTriangleToPartMap(const std::vector<int>& map)
         vulkanViewport_->setTriangleToPartMap(map);
     }
 #endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setTriangleToPartMap(map);
+    }
+#endif
 }
 void RenderViewport::setEdgeToPartMap(const std::vector<int>& map)
 {
@@ -314,6 +417,11 @@ void RenderViewport::setEdgeToPartMap(const std::vector<int>& map)
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setEdgeToPartMap(map);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setEdgeToPartMap(map);
     }
 #endif
 }
@@ -338,6 +446,11 @@ RenderBackendKind RenderViewport::activeRenderBackendKind() const
 
 QString RenderViewport::glRenderer() const
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        return metalViewport_->backendInfo().renderer;
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         return vulkanViewport_->backendInfo().renderer;
@@ -348,6 +461,11 @@ QString RenderViewport::glRenderer() const
 
 QString RenderViewport::glVersion() const
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        return metalViewport_->backendInfo().version;
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         return vulkanViewport_->backendInfo().version;
@@ -358,6 +476,11 @@ QString RenderViewport::glVersion() const
 
 QString RenderViewport::glslVersion() const
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        return metalViewport_->backendInfo().shadingLanguageVersion;
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         return vulkanViewport_->backendInfo().shadingLanguageVersion;
@@ -368,6 +491,11 @@ QString RenderViewport::glslVersion() const
 
 QString RenderViewport::gpuVendor() const
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        return metalViewport_->backendInfo().vendor;
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         return vulkanViewport_->backendInfo().vendor;
@@ -380,6 +508,11 @@ int RenderViewport::vertexCount() const { return glWidget_->vertexCount(); }
 int RenderViewport::triangleCount() const { return glWidget_->triangleCount(); }
 float RenderViewport::currentFps() const
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        return metalViewport_->currentFps();
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         return vulkanViewport_->currentFps();
@@ -390,6 +523,11 @@ float RenderViewport::currentFps() const
 
 float RenderViewport::frameTimeMs() const
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        return metalViewport_->frameTimeMs();
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         return vulkanViewport_->frameTimeMs();
@@ -413,6 +551,11 @@ void RenderViewport::setPartVisibility(int partIndex, bool visible)
         vulkanViewport_->setPartVisibility(partIndex, visible);
     }
 #endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setPartVisibility(partIndex, visible);
+    }
+#endif
 }
 void RenderViewport::highlightParts(const std::vector<int>& partIndices)
 {
@@ -426,6 +569,12 @@ void RenderViewport::highlightParts(const std::vector<int>& partIndices)
 }
 void RenderViewport::refresh()
 {
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        metalViewport_->renderFrame();
+        return;
+    }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
         vulkanViewport_->renderFrame();
@@ -445,9 +594,12 @@ void RenderViewport::updateColorBarOverlay()
     colorBarOverlay_->raise();
     const bool showOverlay =
         colorBarVisible_ &&
-        activeBackendKind_ == RenderBackendKind::Vulkan &&
-        vulkanViewport_ != nullptr &&
-        vulkanViewport_->isVisible();
+        ((activeBackendKind_ == RenderBackendKind::Vulkan &&
+          vulkanViewport_ != nullptr &&
+          vulkanViewport_->isVisible()) ||
+         (activeBackendKind_ == RenderBackendKind::Metal &&
+          metalViewport_ != nullptr &&
+          metalViewport_->isVisible()));
     colorBarOverlay_->setVisible(showOverlay);
     if (showOverlay) {
         colorBarOverlay_->setRange(colorBarMin_, colorBarMax_);
@@ -468,10 +620,92 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
     RenderBackendKind resolved = RenderBackendKind::OpenGL;
     if (kind == RenderBackendKind::Vulkan && canUseVulkanViewport()) {
         resolved = RenderBackendKind::Vulkan;
+    } else if (kind == RenderBackendKind::Metal && canUseMetalViewport()) {
+        resolved = RenderBackendKind::Metal;
     }
+    activeBackendKind_ = resolved;
 
-    if (resolved == RenderBackendKind::Vulkan) {
+    if (resolved == RenderBackendKind::Metal) {
+#if defined(FERENDER_HAS_METAL_RHI)
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+        if (vulkanViewport_) {
+            vulkanViewport_->stopRendering();
+            vulkanViewport_->hide();
+        }
+#endif
+        if (!metalViewport_) {
+            metalViewport_ = new MetalViewport(this);
+            layout()->addWidget(metalViewport_);
+            connect(metalViewport_, &MetalViewport::initialized,
+                    this, &RenderViewport::renderInitialized);
+            connect(metalViewport_, &MetalViewport::selectionChanged,
+                    this, &RenderViewport::selectionChanged);
+            connect(metalViewport_, &MetalViewport::partsPicked,
+                    this, &RenderViewport::partsPicked);
+        }
+        if (hasCurrentMesh_) {
+            metalViewport_->setMesh(currentMesh_);
+        }
+        metalViewport_->setObjectColor(objectColor_);
+        metalViewport_->setModelDisplayMode(displayMode_);
+        metalViewport_->setOverlayMesh(overlayMesh_);
+        metalViewport_->setOverlayVisible(overlayVisible_);
+        if (!sliceLineVertices_.empty()) {
+            metalViewport_->setSliceLines(sliceLineVertices_);
+        } else {
+            metalViewport_->clearSliceLines();
+        }
+        if (isoSurfaceVisible_) {
+            metalViewport_->setIsoSurfaceMesh(isoSurfaceMesh_);
+        } else {
+            metalViewport_->clearIsoSurface();
+        }
+        if (clipPreviewVisible_) {
+            metalViewport_->setClipPlanePreview(clipPreviewBbMin_,
+                                                clipPreviewBbMax_,
+                                                clipPreviewOrigin_,
+                                                clipPreviewNormal_);
+        } else {
+            metalViewport_->clearClipPlanePreview();
+        }
+        metalViewport_->setUseVertexColor(useVertexColor_);
+        if (useVertexColor_ && !vertexScalars_.empty()) {
+            metalViewport_->setVertexScalars(vertexScalars_, scalarMin_, scalarMax_, numBands_);
+        } else if (useVertexColor_ && !vertexColors_.empty()) {
+            metalViewport_->setVertexColors(vertexColors_);
+        }
+        metalViewport_->setPickMode(currentPickMode_);
+        if (!triangleToElement_.empty()) {
+            metalViewport_->setTriangleToElementMap(triangleToElement_);
+        }
+        if (!vertexToNode_.empty()) {
+            metalViewport_->setVertexToNodeMap(vertexToNode_);
+        }
+        if (!triangleToPart_.empty()) {
+            metalViewport_->setTriangleToPartMap(triangleToPart_);
+        }
+        if (!edgeToPart_.empty()) {
+            metalViewport_->setEdgeToPartMap(edgeToPart_);
+        }
+        for (const auto& [partIndex, visible] : partVisibility_) {
+            metalViewport_->setPartVisibility(partIndex, visible);
+        }
+        if (hasModelFit_) {
+            metalViewport_->fitToModel(modelCenter_, modelSize_);
+        }
+        glWidget_->hide();
+        metalViewport_->show();
+        metalViewport_->startRendering();
+        if (!metalViewport_->backendInfo().renderer.isEmpty()) {
+            emit renderInitialized();
+        }
+#endif
+    } else if (resolved == RenderBackendKind::Vulkan) {
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+        if (metalViewport_) {
+            metalViewport_->stopRendering();
+            metalViewport_->hide();
+        }
         if (!vulkanViewport_) {
             vulkanViewport_ = new VulkanViewport(this);
             layout()->addWidget(vulkanViewport_);
@@ -540,6 +774,12 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
 #endif
     } else {
+#if defined(FERENDER_HAS_METAL_RHI)
+        if (metalViewport_) {
+            metalViewport_->stopRendering();
+            metalViewport_->hide();
+        }
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
         if (vulkanViewport_) {
             vulkanViewport_->stopRendering();
@@ -554,7 +794,6 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
     }
 
-    activeBackendKind_ = resolved;
     updateColorBarOverlay();
 }
 
@@ -562,6 +801,15 @@ bool RenderViewport::canUseVulkanViewport() const
 {
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     return isRenderBackendAvailable(RenderBackendKind::Vulkan);
+#else
+    return false;
+#endif
+}
+
+bool RenderViewport::canUseMetalViewport() const
+{
+#if defined(FERENDER_HAS_METAL_RHI)
+    return isRenderBackendAvailable(RenderBackendKind::Metal);
 #else
     return false;
 #endif

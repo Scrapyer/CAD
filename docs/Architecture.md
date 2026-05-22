@@ -469,7 +469,7 @@ static FERenderData toColoredRenderData(
 
 **文件**: `source/render/RenderViewport.h` / `source/render/RenderViewport.cpp`
 
-`RenderViewport` 是主窗口依赖的渲染视口宿主层。它转发 `setMesh()`、`fitToModel()`、`setObjectColor()`、`setTriangleToPartMap()`、`setEdgeToPartMap()`、`setPartVisibility()`、拾取、色标、后处理叠加、RHI 设置和监控查询等公开接口，并把 `GLWidget::selectionChanged`、`partsPicked` 等信号重新暴露给应用层。OpenGL 路径承载 `GLWidget`；Vulkan 路径在 macOS 上承载 `VulkanViewport`，通过 `QWindow` 创建原生 `VkSurfaceKHR`，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，使用 push constant MVP 接入相机适配，并在上传阶段按部件可见性过滤三角形/边线、把部件颜色写入 mesh 顶点属性，主网格/普通边线几何通过 staging buffer 和 fence 同步的 copy command 复制到 device-local vertex/index buffer，把 per-vertex scalar 写入独立 storage buffer。窗口 resize 会标记 swapchain 重建，present/acquire 返回 out-of-date 或 suboptimal 时也会让下一帧自动重建。当前 Vulkan 路径已有左下角坐标轴和离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 模式点选、框选添加和点选/框选取消会转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；`setVertexScalars()` 已可由 descriptor set 绑定 scalar SSBO，并由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射；mesh 已上传后再次切换云图 field 只更新 scalar buffer 和 contour 参数，不重传 mesh geometry。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可通过独立 Vulkan line buffer 绘制未变形半透明线框，供变形显示叠加原始模型使用；`setSliceLines()` / `clearSliceLines()` 已可通过独立 Vulkan line buffer 绘制和清除基础切片交线；`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可通过独立 Vulkan 半透明三角面 pipeline 绘制和清除等值面叠加；`setClipPlanePreview()` / `clearClipPlanePreview()` 已可通过半透明三角面 pipeline 和 line pipeline 绘制/清除裁剪或切片平面预览。
+`RenderViewport` 是主窗口依赖的渲染视口宿主层。它转发 `setMesh()`、`fitToModel()`、`setObjectColor()`、`setTriangleToPartMap()`、`setEdgeToPartMap()`、`setPartVisibility()`、拾取、色标、后处理叠加、RHI 设置和监控查询等公开接口，并把 `GLWidget::selectionChanged`、`partsPicked` 等信号重新暴露给应用层。OpenGL 路径承载 `GLWidget`；Metal 路径在 macOS 上承载 `MetalViewport`，通过 `QWindow` 原生 `NSView/CAMetalLayer` 创建 Metal drawable，当前可创建 `MTLDevice` / command queue、上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，并用运行时 MSL pipeline 结合 depth attachment 绘制渐变背景、主网格三角面、普通边线、点显示、云图标量映射、左下角坐标轴、选中高亮线、未变形叠加线框、切片交线、半透明等值面和裁剪/切片平面预览；Metal 上传阶段会按部件可见性过滤三角形/边线、把部件颜色和 per-vertex scalar 写入 mesh 顶点属性，并通过 RGBA8 离屏 pick texture + blit readback 支持 Element / Part 单点拾取和选择信号，Node 模式会在命中单元后用 `vertexToNode` 选取屏幕最近节点，Ctrl/Shift 左键框选添加和 Ctrl/Shift 右键点选/框选取消会按当前 PickMode 更新选择状态，选中 Node 会绘制小型三轴标记，选中 Element 会绘制完整单元边，选中 Part 会绘制边界/开放/特征/视角轮廓边，支持左键旋转、中键/右键平移和滚轮缩放；Vulkan 路径在 macOS 上承载 `VulkanViewport`，通过 `QWindow` 创建原生 `VkSurfaceKHR`，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，使用 push constant MVP 接入相机适配，并在上传阶段按部件可见性过滤三角形/边线、把部件颜色写入 mesh 顶点属性，主网格/普通边线几何通过 staging buffer 和 fence 同步的 copy command 复制到 device-local vertex/index buffer，把 per-vertex scalar 写入独立 storage buffer。窗口 resize 会标记 swapchain 重建，present/acquire 返回 out-of-date 或 suboptimal 时也会让下一帧自动重建。当前 Vulkan 路径已有左下角坐标轴和离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 模式点选、框选添加和点选/框选取消会转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；Vulkan 的 `setVertexScalars()` 由 descriptor set 绑定 scalar SSBO 并由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射，Metal 的 `setVertexScalars()` 会更新 shared vertex buffer 中的 scalar 字段并由 MSL shader 做同样的 Jet 分段映射；mesh 已上传后再次切换云图 field 只更新 scalar 数据和 contour 参数，不重传 mesh geometry。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 和 Metal 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可在 Vulkan 和 Metal 路径绘制变形显示使用的未变形线框，`setSliceLines()` / `clearSliceLines()` 已可在 Vulkan 和 Metal 路径绘制和清除基础切片交线，`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可在 Vulkan 和 Metal 路径绘制和清除半透明等值面叠加；`setClipPlanePreview()` / `clearClipPlanePreview()` 已可在 Vulkan 和 Metal 路径绘制/清除裁剪或切片平面预览。
 
 ### 6.2 GLWidget — OpenGL 渲染组件
 
@@ -480,7 +480,7 @@ static FERenderData toColoredRenderData(
 `GLWidget` 当前负责 OpenGL Widget 生命周期、交互事件、相机和选择状态；具体图形 API
 通过 `IRenderBackend` 建立抽象边界。`RenderSettings` 使用应用目录下的
 `config/settings.ini` 记录全局首选 RHI，启动时读取并激活对应后端；工具栏运行时只保存
-OpenGL/Vulkan/Metal 首选项，重启后生效，避免运行中销毁/重建 RHI 视口导致崩溃；Metal 后端已可在 macOS 上探测 `MTLDevice` 并提供设备信息，当前主视口尚未接入 `CAMetalLayer`，因此显示路径仍回退到 OpenGL。OpenGL 完整模型渲染仍通过 `createRenderBackend()`
+OpenGL/Vulkan/Metal 首选项，重启后生效，避免运行中销毁/重建 RHI 视口导致崩溃；Metal 后端已可在 macOS 上探测 `MTLDevice`、创建 command queue，并通过 `CAMetalLayer` 执行基础 clear/present、渐变背景、深度测试、主网格三角面、普通边线、点绘制、云图标量映射、部件颜色/显隐、Node/Element/Part 点选/框选、选中高亮、叠加线框、切片交线、等值面、裁剪预览、左下角坐标轴和轨道相机交互。OpenGL 完整模型渲染仍通过 `createRenderBackend()`
 创建 `OpenGLRenderBackend`，
 并由后端查询 GPU/驱动信息、创建 shader program、设置默认 OpenGL 状态、
 创建基础 GL 资源、绑定顶点属性，并负责常规 VAO/VBO/IBO 和 texture buffer 上传。
@@ -552,7 +552,8 @@ RenderViewport
   │           ├── VulkanSwapchain: surface 绑定后的 swapchain 和 image 查询
   │           ├── Vulkan GLSL -> SPIR-V: 构建期 shader 编译
   │           └── VulkanClearFrameRenderer: 清屏/三角形/主网格/边线/拾取帧提交和 present
-  └── VulkanViewport (macOS): QWindow 宿主 + Vulkan 主网格 present + 点选/框选 + shader 端基础云图
+  ├── VulkanViewport (macOS): QWindow 宿主 + Vulkan 主网格 present + 点选/框选 + shader 端基础云图
+  └── MetalViewport (macOS): QWindow 宿主 + CAMetalLayer + Metal 渐变背景/主网格/普通边线/点/云图/部件显隐 + Node/Element/Part 点选/框选 + 基础选中高亮 + 左下角坐标轴 + 轨道相机
 ```
 
 #### OpenGL 资源管理
@@ -690,12 +691,12 @@ Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 
 | Node / Element / Part 点选 | 已完成，离屏 color picking + CPU 映射 |
 | Node / Element / Part 框选添加/取消 | 已完成，Ctrl/Shift 左键添加、Ctrl/Shift 右键取消 |
 | 选中高亮 | 已完成，Element 完整单元边、Part 边界/开放/特征/视角轮廓边、Node 三轴标记 |
-| shader 端云图 | 已完成，scalar SSBO + descriptor set，切换 field 不重传 mesh geometry |
+| shader 端云图 | Vulkan 已完成 scalar SSBO + descriptor set；Metal 已完成 vertex scalar 字段 + MSL Jet 映射，切换 field 不重传 mesh geometry |
 | 渐变背景 | 已完成，独立 fullscreen triangle pipeline |
 | 角落坐标轴 | 已完成，复用 line pipeline 绘制左下角 XYZ 轴线，并用 Qt overlay 显示 X/Y/Z 标签 |
 | 色标、overlay、切片、等值面、裁剪/切片平面预览 | 已完成基础显示链路 |
 | resize / swapchain 过期恢复 | 已完成，窗口 resize 和 acquire/present out-of-date/suboptimal 会触发下一帧重建 |
-| 正式资源模型 | 已开始，device-local/staging buffer、mesh buffer group、frame pipeline group、depth、pick resources、swapchain frame resources、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制和批量 staging 上传已独立 |
+| 正式资源模型 | 已开始，Vulkan device-local/staging buffer、mesh buffer group、frame pipeline group、depth、pick resources、swapchain frame resources、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制和批量 staging 上传已独立；Metal 已用 `MetalAttachmentResourceBuilder` 管理主 depth、overlay/depth state、pick color/depth 和 pick readback 的确保逻辑，用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MetalLayerHost` 管理 `QWindow` 到 `CAMetalLayer` 的宿主配置，用 `MetalObjectResource` 管理 device、command queue 和 layer，用 `MetalShaderSources` 管理 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建 |
 | Vulkan 集成测试 | 已补充连续加载网格模型、快速 swapchain recreate、pick 后 recreate、隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
 
 ### 拾取模式

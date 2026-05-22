@@ -1085,7 +1085,7 @@ void MainWindow::setupToolBar() {
         act->setData(static_cast<int>(kind));
         if (kind == RenderBackendKind::Metal) {
             act->setToolTip(isRenderBackendAvailable(kind)
-                                ? QStringLiteral("Metal 后端已可创建；视口接入后启用")
+                                ? QStringLiteral("Metal 基础模型视口、渐变背景、云图、坐标轴、部件显隐、点选/框选、高亮、叠加线框、切片交线、等值面、裁剪预览和轨道相机已可用")
                                 : QStringLiteral("Metal 后端预留：保存首选项，后端接入后启用"));
         }
         rhiGroup_->addAction(act);
@@ -1109,7 +1109,7 @@ void MainWindow::setupToolBar() {
             statusLabel_->setText(QStringLiteral("  RHI 当前已是 %1；配置已保存")
                                       .arg(QString::fromLatin1(requestedName)));
         } else if (kind == RenderBackendKind::Metal) {
-            statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，Metal 视口接入后启用")
+            statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，重启后启用 Metal 视口")
                                       .arg(QString::fromLatin1(requestedName), QString::fromLatin1(activeName)));
         } else if (!isRenderBackendAvailable(kind)) {
             statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，后端可用后重启生效")

@@ -18,6 +18,7 @@
 struct Theme;
 class ColorBarOverlay;
 class GLWidget;
+class MetalViewport;
 class QResizeEvent;
 class VulkanViewport;
 
@@ -100,10 +101,12 @@ protected:
 private:
     void activateBackend(RenderBackendKind kind);
     bool canUseVulkanViewport() const;
+    bool canUseMetalViewport() const;
     void updateColorBarOverlay();
 
     GLWidget* glWidget_ = nullptr;
     ColorBarOverlay* colorBarOverlay_ = nullptr;
+    MetalViewport* metalViewport_ = nullptr;
     VulkanViewport* vulkanViewport_ = nullptr;
     RenderBackendKind requestedBackendKind_ = RenderBackendKind::OpenGL;
     RenderBackendKind activeBackendKind_ = RenderBackendKind::OpenGL;
