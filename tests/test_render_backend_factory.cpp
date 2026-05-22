@@ -27,9 +27,6 @@ int main()
     if (std::strcmp(renderBackendName(RenderBackendKind::Metal), "Metal") != 0) {
         return 13;
     }
-    if (isRenderBackendAvailable(RenderBackendKind::Metal)) {
-        return 14;
-    }
 
     std::unique_ptr<IRenderBackend> glBackend = createRenderBackend(RenderBackendKind::OpenGL);
     if (!glBackend) {
@@ -47,6 +44,23 @@ int main()
         }
         vulkanBackend.reset();
     }
+
+    std::unique_ptr<IRenderBackend> metalBackend = createRenderBackend(RenderBackendKind::Metal);
+    if (!metalBackend) {
+        return 14;
+    }
+    metalBackend->initialize();
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (isRenderBackendAvailable(RenderBackendKind::Metal) &&
+        (metalBackend->info().renderer.isEmpty() || metalBackend->info().version.isEmpty())) {
+        return 15;
+    }
+#else
+    if (isRenderBackendAvailable(RenderBackendKind::Metal)) {
+        return 16;
+    }
+#endif
+    metalBackend.reset();
 
 #if defined(FERENDER_HAS_VULKAN_RHI)
     VulkanRenderBackend directVulkanBackend;

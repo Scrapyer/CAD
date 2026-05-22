@@ -1,7 +1,7 @@
 # FERender 渲染库 API 参考文档
 
 > **版本**：1.0
-> **依赖**：Qt 6.8+ (Core, Gui, Widgets, OpenGL, OpenGLWidgets) · OpenGL 4.1+ · GLM 0.9.9+ · Vulkan SDK 1.4+（可选 RHI 后端，老 SDK 可通过 CMake cache 回退 shader target env）
+> **依赖**：Qt 6.8+ (Core, Gui, Widgets, OpenGL, OpenGLWidgets) · OpenGL 4.1+ · GLM 0.9.9+ · Vulkan SDK 1.4+（可选 RHI 后端，老 SDK 可通过 CMake cache 回退 shader target env）· Metal.framework（macOS 可选 RHI 后端）
 > **语言标准**：C++17
 > **构建产物**：共享库 `FERender.dll` / `libFERender.so` / `libFERender.dylib`
 
@@ -84,6 +84,7 @@ target_link_libraries(MyApp PRIVATE FERender::FERender)
 - OpenGL::GL
 - GLM 头文件路径
 - 可选 Vulkan SDK 1.4+（仅在构建 FERender 时启用 Vulkan RHI 后端；shader target env 默认 `vulkan1.4`）
+- macOS 可选 Metal.framework / Foundation.framework（仅在构建 FERender 时启用 Metal RHI 后端）
 
 仓库内的 `examples/simple_viewer` 是完整的外部调用示例：它通过
 `find_package(FERender REQUIRED CONFIG)` 链接安装后的 `FERender::FERender`，
@@ -1181,7 +1182,7 @@ void partsPicked(const std::vector<int>& partIndices);
 
 **头文件**：`RenderBackend.h`、`RenderBackendFactory.h`、`RenderSettings.h`
 
-使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。`RenderBackendKind` 当前包含 `OpenGL`、`Vulkan`、`Metal`；Metal 首选项已可保存，后端接入前实际启动会回退到 OpenGL。
+使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。`RenderBackendKind` 当前包含 `OpenGL`、`Vulkan`、`Metal`；Metal 后端在 macOS 构建中会探测默认 `MTLDevice` 并返回设备信息，但当前 Qt 主视口尚未承载 `CAMetalLayer`，因此 `RenderViewport` 仍会回退到 OpenGL 视口。
 
 `RenderBackend.h` 公开 `RenderBackendInfo`、`RenderBackendKind`、`ModelDisplayMode`、`IRenderBackend` 和 scene pass 描述结构。`IRenderBackend` 是后端最小生命周期边界，目前暴露 `initialize()` 和 `info()`；OpenGL 完整模型绘制由 `OpenGLRenderBackend` 实现，Vulkan/Metal 可沿同一边界接入。`ModelDisplayMode` 取值为 `Solid`、`Wireframe`、`SolidWireframe`、`Points`，由 `GLWidget` 和 `RenderViewport` 统一接收并转发到当前 OpenGL 或 Vulkan 视口。
 
@@ -1194,8 +1195,8 @@ const char* renderBackendName(RenderBackendKind kind);
 
 | 函数 | 说明 |
 |------|------|
-| `createRenderBackend(kind)` | 创建指定 RHI 后端实例；当前 Metal 请求会回退创建 OpenGL 后端 |
-| `isRenderBackendAvailable(kind)` | 查询后端是否已编译并可用；Metal 预留期返回 `false` |
+| `createRenderBackend(kind)` | 创建指定 RHI 后端实例；macOS Metal 构建会返回 Metal 后端骨架 |
+| `isRenderBackendAvailable(kind)` | 查询后端是否已编译并可用；Metal 会尝试创建系统默认 `MTLDevice` |
 | `renderBackendName(kind)` | 返回用于界面和日志的稳定后端名称 |
 
 ```cpp

@@ -480,7 +480,7 @@ static FERenderData toColoredRenderData(
 `GLWidget` 当前负责 OpenGL Widget 生命周期、交互事件、相机和选择状态；具体图形 API
 通过 `IRenderBackend` 建立抽象边界。`RenderSettings` 使用应用目录下的
 `config/settings.ini` 记录全局首选 RHI，启动时读取并激活对应后端；工具栏运行时只保存
-OpenGL/Vulkan/Metal 首选项，重启后生效，避免运行中销毁/重建 RHI 视口导致崩溃；Metal 当前是预留项，后端接入前启动会回退到 OpenGL。OpenGL 完整模型渲染仍通过 `createRenderBackend()`
+OpenGL/Vulkan/Metal 首选项，重启后生效，避免运行中销毁/重建 RHI 视口导致崩溃；Metal 后端已可在 macOS 上探测 `MTLDevice` 并提供设备信息，当前主视口尚未接入 `CAMetalLayer`，因此显示路径仍回退到 OpenGL。OpenGL 完整模型渲染仍通过 `createRenderBackend()`
 创建 `OpenGLRenderBackend`，
 并由后端查询 GPU/驱动信息、创建 shader program、设置默认 OpenGL 状态、
 创建基础 GL 资源、绑定顶点属性，并负责常规 VAO/VBO/IBO 和 texture buffer 上传。

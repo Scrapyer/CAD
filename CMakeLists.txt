@@ -90,11 +90,13 @@ if(NOT APPLE)
 endif()
 
 option(FEMODELVIEWER_ENABLE_VULKAN_RHI "Build the optional Vulkan RHI backend when a Vulkan SDK is available" ON)
+option(FEMODELVIEWER_ENABLE_METAL_RHI "Build the optional Metal RHI backend on macOS" ON)
 option(FEMODELVIEWER_ENABLE_OPENCASCADE_IMPORT "Build optional STEP/IGES CAD import support with OpenCASCADE" ON)
 set(FERENDER_VULKAN_SHADER_TARGET_ENV "vulkan1.4" CACHE STRING
     "glslc --target-env value used when compiling FERender Vulkan shaders")
 set(FERENDER_HAS_VULKAN_RHI OFF)
 set(FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE OFF)
+set(FERENDER_HAS_METAL_RHI OFF)
 set(FERENDER_HAS_OPENCASCADE_IMPORT OFF)
 if(FEMODELVIEWER_ENABLE_VULKAN_RHI)
     find_package(Vulkan QUIET)
@@ -128,6 +130,19 @@ if(FEMODELVIEWER_ENABLE_VULKAN_RHI)
     else()
         message(STATUS "Vulkan RHI disabled: Vulkan SDK was not found")
     endif()
+endif()
+
+if(APPLE AND FEMODELVIEWER_ENABLE_METAL_RHI)
+    find_library(METAL_FRAMEWORK Metal)
+    find_library(FOUNDATION_FRAMEWORK Foundation)
+    if(METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK)
+        set(FERENDER_HAS_METAL_RHI ON)
+        message(STATUS "Metal RHI enabled: ${METAL_FRAMEWORK}")
+    else()
+        message(STATUS "Metal RHI disabled: Metal/Foundation framework was not found")
+    endif()
+elseif(FEMODELVIEWER_ENABLE_METAL_RHI)
+    message(STATUS "Metal RHI disabled: Metal is only available on Apple platforms")
 endif()
 
 if(FEMODELVIEWER_ENABLE_OPENCASCADE_IMPORT)
@@ -208,6 +223,7 @@ set(RENDER_INCLUDE_DIRS
     ${SOURCE_DIR}/post
     ${SOURCE_DIR}/rhi
     ${SOURCE_DIR}/rhi/OpenGL
+    ${SOURCE_DIR}/rhi/Metal
     ${SOURCE_DIR}/rhi/Vulkan
     ${SOURCE_DIR}/render
 )
@@ -274,6 +290,12 @@ set(RENDER_SOURCES
     ${SOURCE_DIR}/post/FEPostFilter.cpp
     ${SOURCE_DIR}/post/FEIsoSurface.cpp
 )
+
+if(FERENDER_HAS_METAL_RHI)
+    list(APPEND RENDER_SOURCES
+        ${SOURCE_DIR}/rhi/Metal/MetalRenderBackend.mm
+    )
+endif()
 
 if(FERENDER_HAS_VULKAN_RHI)
     list(APPEND RENDER_SOURCES
@@ -350,6 +372,14 @@ if(FERENDER_HAS_OPENCASCADE_IMPORT)
         ${OpenCASCADE_ModelingData_LIBRARIES}
         ${OpenCASCADE_ModelingAlgorithms_LIBRARIES}
         ${OpenCASCADE_DataExchange_LIBRARIES}
+    )
+endif()
+
+if(FERENDER_HAS_METAL_RHI)
+    target_compile_definitions(FERender PRIVATE FERENDER_HAS_METAL_RHI=1)
+    target_link_libraries(FERender PRIVATE
+        ${METAL_FRAMEWORK}
+        ${FOUNDATION_FRAMEWORK}
     )
 endif()
 
@@ -718,6 +748,9 @@ if(BUILD_TESTING)
             target_compile_definitions(test_render_backend_factory PRIVATE FERENDER_HAS_MACOS_VULKAN_SURFACE=1)
         endif()
     endif()
+    if(FERENDER_HAS_METAL_RHI)
+        target_compile_definitions(test_render_backend_factory PRIVATE FERENDER_HAS_METAL_RHI=1)
+    endif()
     add_test(NAME render_backend_factory
         COMMAND test_render_backend_factory
     )
@@ -729,6 +762,9 @@ if(BUILD_TESTING)
         ${SOURCE_DIR}/rhi
     )
     target_link_libraries(test_render_settings PRIVATE FERender Qt6::Core)
+    if(FERENDER_HAS_METAL_RHI)
+        target_compile_definitions(test_render_settings PRIVATE FERENDER_HAS_METAL_RHI=1)
+    endif()
     add_test(NAME render_settings
         COMMAND test_render_settings
     )

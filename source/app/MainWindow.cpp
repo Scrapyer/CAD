@@ -1083,8 +1083,10 @@ void MainWindow::setupToolBar() {
         act->setEnabled(kind == RenderBackendKind::Metal || isRenderBackendAvailable(kind));
         act->setChecked(kind == preferredRhi);
         act->setData(static_cast<int>(kind));
-        if (kind == RenderBackendKind::Metal && !isRenderBackendAvailable(kind)) {
-            act->setToolTip(QStringLiteral("Metal 后端预留：保存首选项，后端接入后重启生效"));
+        if (kind == RenderBackendKind::Metal) {
+            act->setToolTip(isRenderBackendAvailable(kind)
+                                ? QStringLiteral("Metal 后端已可创建；视口接入后启用")
+                                : QStringLiteral("Metal 后端预留：保存首选项，后端接入后启用"));
         }
         rhiGroup_->addAction(act);
     }
@@ -1106,6 +1108,9 @@ void MainWindow::setupToolBar() {
         if (kind == (renderViewport_ ? renderViewport_->activeRenderBackendKind() : RenderSettings::effectiveBackend())) {
             statusLabel_->setText(QStringLiteral("  RHI 当前已是 %1；配置已保存")
                                       .arg(QString::fromLatin1(requestedName)));
+        } else if (kind == RenderBackendKind::Metal) {
+            statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，Metal 视口接入后启用")
+                                      .arg(QString::fromLatin1(requestedName), QString::fromLatin1(activeName)));
         } else if (!isRenderBackendAvailable(kind)) {
             statusLabel_->setText(QStringLiteral("  RHI 首选已保存为 %1；当前仍使用 %2，后端可用后重启生效")
                                       .arg(QString::fromLatin1(requestedName), QString::fromLatin1(activeName)));

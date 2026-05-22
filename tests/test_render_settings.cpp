@@ -58,7 +58,10 @@ int main(int argc, char** argv)
     if (RenderSettings::preferredBackend() != RenderBackendKind::Metal) {
         return 13;
     }
-    if (RenderSettings::effectiveBackend() != RenderBackendKind::OpenGL) {
+    const RenderBackendKind expectedMetalEffective = isRenderBackendAvailable(RenderBackendKind::Metal)
+        ? RenderBackendKind::Metal
+        : RenderBackendKind::OpenGL;
+    if (RenderSettings::effectiveBackend() != expectedMetalEffective) {
         return 14;
     }
 

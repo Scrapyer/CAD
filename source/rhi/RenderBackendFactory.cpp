@@ -1,6 +1,9 @@
 #include "RenderBackendFactory.h"
 
 #include "OpenGLRenderBackend.h"
+#if defined(FERENDER_HAS_METAL_RHI)
+#include "MetalRenderBackend.h"
+#endif
 #if defined(FERENDER_HAS_VULKAN_RHI)
 #include "VulkanRenderBackend.h"
 #endif
@@ -12,8 +15,13 @@ std::unique_ptr<IRenderBackend> createRenderBackend(RenderBackendKind kind)
     case RenderBackendKind::Vulkan:
         return std::make_unique<VulkanRenderBackend>();
 #endif
-    case RenderBackendKind::OpenGL:
     case RenderBackendKind::Metal:
+#if defined(FERENDER_HAS_METAL_RHI)
+        return std::make_unique<MetalRenderBackend>();
+#else
+        return std::make_unique<OpenGLRenderBackend>();
+#endif
+    case RenderBackendKind::OpenGL:
     default:
         return std::make_unique<OpenGLRenderBackend>();
     }
@@ -31,7 +39,11 @@ bool isRenderBackendAvailable(RenderBackendKind kind)
         return false;
 #endif
     case RenderBackendKind::Metal:
+#if defined(FERENDER_HAS_METAL_RHI)
+        return MetalRenderBackend::isSystemAvailable();
+#else
         return false;
+#endif
     default:
         return false;
     }

@@ -119,9 +119,9 @@ RenderBackendKind GLWidget::resolveRenderBackendForWidget(RenderBackendKind requ
         return RenderBackendKind::OpenGL;
     }
 
-    // 当前主视口继承自 QOpenGLWidget，只能承载 OpenGL 上下文。
-    // Vulkan 已具备独立 QWindow surface 链路；后续替换视口宿主后可在这里切换到 Vulkan。
-    if (requested == RenderBackendKind::Vulkan) {
+    // 当前 GLWidget 继承自 QOpenGLWidget，只能承载 OpenGL 上下文。
+    // Vulkan/Metal 需要由 RenderViewport 提供独立平台视口宿主。
+    if (requested != RenderBackendKind::OpenGL) {
         return RenderBackendKind::OpenGL;
     }
 

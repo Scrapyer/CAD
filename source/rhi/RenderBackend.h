@@ -118,7 +118,7 @@ struct ScenePassState {
  *
  * GLWidget 负责 Qt Widget 生命周期和交互；后端负责具体图形 API。
  * 当前 OpenGL 后端承担实际绘制；Vulkan 后端先作为传统图形管线的 RHI 落脚点逐步接入；
- * Metal 枚举先用于配置预留，后端接入后再标记可用。
+ * Metal 后端当前负责设备探测，后续接入 CAMetalLayer 视口和 draw pass。
  */
 class FERENDER_EXPORT IRenderBackend {
 public:
