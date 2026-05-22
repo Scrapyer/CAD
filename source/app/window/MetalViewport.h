@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MacOSMetalLayerHost.h"
+
 #include "Camera.h"
 #include "FEPickResult.h"
 #include "Geometry.h"
@@ -12,7 +14,9 @@
 #include <QPointF>
 #include <QRubberBand>
 #include <QRect>
+#include <QSize>
 #include <QTimer>
+#include <QVector3D>
 #include <QWidget>
 #include <QWindow>
 
@@ -63,9 +67,12 @@ public:
     void setPartVisibility(int partIndex, bool visible);
     void fitToModel(const glm::vec3& center, float size);
     void setClearColor(float red, float green, float blue, float alpha = 1.0f);
+    void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
 
     const RenderBackendInfo& backendInfo() const { return backend_.info(); }
     QString lastError() const { return lastError_; }
+    bool hasNativeLayer() const { return metalLayerHost_.hasLayer(); }
+    QSize drawableSize() const { return metalLayerHost_.drawableSize(); }
     float currentFps() const { return fps_; }
     float frameTimeMs() const { return frameTimeMs_; }
 
@@ -109,9 +116,11 @@ private:
     bool isElementVisibleForSelection(int elementId) const;
     void updateAxesLabels();
     void updateFrameStats(qint64 frameNs);
+    void resetFrameStats();
 
     QWindow* nativeWindow_ = nullptr;
     QWidget* windowContainer_ = nullptr;
+    MacOSMetalLayerHost metalLayerHost_;
     MetalRenderBackend backend_;
     QTimer frameTimer_;
     QElapsedTimer fpsTimer_;

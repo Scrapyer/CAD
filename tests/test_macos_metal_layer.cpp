@@ -1,4 +1,5 @@
 #include "Geometry.h"
+#include "MacOSMetalLayerHost.h"
 #include "MetalRenderBackend.h"
 
 #include <QGuiApplication>
@@ -25,8 +26,16 @@ int main(int argc, char** argv)
     app.processEvents();
 
     MetalRenderBackend backend;
-    if (!backend.initializeLayer(&window, window.width(), window.height(), window.devicePixelRatio())) {
-        std::fprintf(stderr, "initializeLayer failed: %s\n",
+    backend.initialize();
+    MacOSMetalLayerHost layerHost;
+    QString layerError;
+    if (!layerHost.prepare(&window, backend.deviceHandle(), layerError)) {
+        std::fprintf(stderr, "MacOSMetalLayerHost::prepare failed: %s\n",
+                     layerError.toUtf8().constData());
+        return 2;
+    }
+    if (!backend.attachLayer(layerHost.layer(), layerHost.drawableSize())) {
+        std::fprintf(stderr, "attachLayer failed: %s\n",
                      backend.lastError().toUtf8().constData());
         return 2;
     }
@@ -219,7 +228,8 @@ int main(int argc, char** argv)
 
     window.resize(96, 80);
     app.processEvents();
-    backend.resizeLayer(window.width(), window.height(), window.devicePixelRatio());
+    layerHost.resize(window.width(), window.height(), window.devicePixelRatio());
+    backend.updateDrawableSize(layerHost.drawableSize());
     if (!backend.renderClearFrame(0.16f, 0.09f, 0.12f, 1.0f)) {
         std::fprintf(stderr, "renderClearFrame(resize) failed: %s\n",
                      backend.lastError().toUtf8().constData());

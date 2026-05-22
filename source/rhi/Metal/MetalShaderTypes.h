@@ -8,6 +8,11 @@ struct MetalMeshUniforms {
     float contour[4];
 };
 
+struct MetalBackgroundUniforms {
+    float bottomColor[4];
+    float topColor[4];
+};
+
 struct MetalMeshVertex {
     float position[3];
     float normal[3];

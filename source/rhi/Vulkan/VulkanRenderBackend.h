@@ -63,6 +63,7 @@ public:
     bool uploadIsoSurfaceMesh(const Mesh& mesh);
     bool uploadClipPreviewMesh(const Mesh& mesh);
     bool uploadSelectionLines(const std::vector<float>& lineVertices);
+    void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
     bool renderClearFrame(float red, float green, float blue, float alpha = 1.0f);
     bool renderTriangleFrame(float red = 0.04f,
                              float green = 0.05f,
@@ -100,6 +101,8 @@ private:
     std::unique_ptr<VulkanDevice> device_;
     std::unique_ptr<VulkanSwapchain> swapchain_;
     std::unique_ptr<VulkanClearFrameRenderer> clearFrameRenderer_;
+    QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
+    QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
     bool initialized_ = false;
     QString lastError_;
 };

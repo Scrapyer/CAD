@@ -218,6 +218,15 @@ bool VulkanRenderBackend::uploadSelectionLines(const std::vector<float>& lineVer
     return true;
 }
 
+void VulkanRenderBackend::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
+{
+    backgroundTopColor_ = topColor;
+    backgroundBottomColor_ = bottomColor;
+    if (clearFrameRenderer_) {
+        clearFrameRenderer_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
+    }
+}
+
 bool VulkanRenderBackend::renderClearFrame(float red, float green, float blue, float alpha)
 {
     lastError_.clear();

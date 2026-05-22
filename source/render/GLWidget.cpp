@@ -707,18 +707,10 @@ void GLWidget::renderMeshEdges() {
     auto* glBackend = openGLBackend();
 
     int count = activeIndexCount_;
-    int numTri = count / 3;
-    float wireAlpha = 1.0f;
-    if (numTri > 0 && count > 0) {
-        float modelSize = cam_.maxDist * 0.1f;
-        float avgEdgeLen = modelSize * 2.0f / std::sqrt(static_cast<float>(numTri));
-        float fovFactor = height() / (2.0f * std::tan(glm::radians(22.5f)));
-        float screenEdgePx = avgEdgeLen / cam_.distance * fovFactor;
-        wireAlpha = glm::clamp((screenEdgePx - 3.0f) / 7.0f, 0.0f, 1.0f);
-    }
+    const float wireAlpha = displayMode_ == ModelDisplayMode::Wireframe ? 1.0f : 0.85f;
 
     if (activeEdgeIndexCount_ > 0) {
-        float lineW = (count == 0) ? 3.0f : 1.0f;
+        float lineW = (count == 0) ? 3.0f : 1.25f;
         float alpha = (count == 0) ? 1.0f : wireAlpha;
         SceneDrawUniforms drawUniforms;
         drawUniforms.color = (count == 0)

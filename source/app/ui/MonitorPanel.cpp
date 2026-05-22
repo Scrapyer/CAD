@@ -6,10 +6,28 @@
 #include "MonitorPanel.h"
 #include "RenderViewport.h"
 
-#include <QVBoxLayout>
 #include <QLabel>
 #include <QTimer>
+#include <QVBoxLayout>
+
 #include "Theme.h"
+
+namespace {
+
+QString backendName(RenderBackendKind kind)
+{
+    switch (kind) {
+    case RenderBackendKind::OpenGL:
+        return QStringLiteral("OpenGL");
+    case RenderBackendKind::Vulkan:
+        return QStringLiteral("Vulkan");
+    case RenderBackendKind::Metal:
+        return QStringLiteral("Metal");
+    }
+    return QStringLiteral("--");
+}
+
+} // namespace
 
 MonitorPanel::MonitorPanel(QWidget* parent) : QGroupBox("监控", parent) {
     // 默认主题在 MainWindow 中统一调用 applyTheme() 设置
@@ -20,6 +38,8 @@ MonitorPanel::MonitorPanel(QWidget* parent) : QGroupBox("监控", parent) {
     // 创建各行信息标签（初始显示 "标签: --"）
     fpsLabel_       = makeRow(layout, "FPS");
     frameTimeLabel_ = makeRow(layout, "帧时间");
+    backendLabel_   = makeRow(layout, "后端");
+    viewportLabel_  = makeRow(layout, "视口");
     vertexLabel_    = makeRow(layout, "顶点数");
     triangleLabel_  = makeRow(layout, "三角面");
     rendererLabel_  = makeRow(layout, "GPU");
@@ -51,6 +71,8 @@ void MonitorPanel::refresh() {
     // 更新动态性能数据
     fpsLabel_->setText(QString("FPS: %1").arg(viewport_->currentFps(), 0, 'f', 1));
     frameTimeLabel_->setText(QString("帧时间: %1 ms").arg(viewport_->frameTimeMs(), 0, 'f', 2));
+    backendLabel_->setText(QString("后端: %1").arg(backendName(viewport_->activeRenderBackendKind())));
+    viewportLabel_->setText(QString("视口: %1").arg(viewport_->renderDiagnostics()));
     vertexLabel_->setText(QString("顶点数: %1").arg(viewport_->vertexCount()));
     triangleLabel_->setText(QString("三角面: %1").arg(viewport_->triangleCount()));
 }

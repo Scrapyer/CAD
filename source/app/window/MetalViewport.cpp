@@ -136,6 +136,7 @@ MetalViewport::~MetalViewport()
 
 void MetalViewport::startRendering()
 {
+    resetFrameStats();
     if (!frameTimer_.isActive()) {
         frameTimer_.start();
     }
@@ -215,6 +216,7 @@ void MetalViewport::setModelDisplayMode(ModelDisplayMode mode)
         return;
     }
     displayMode_ = mode;
+    resetFrameStats();
     renderFrame();
 }
 
@@ -453,6 +455,12 @@ void MetalViewport::setClearColor(float red, float green, float blue, float alph
     renderFrame();
 }
 
+void MetalViewport::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
+{
+    backend_.setBackgroundGradient(topColor, bottomColor);
+    renderFrame();
+}
+
 bool MetalViewport::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched == windowContainer_ || watched == nativeWindow_) {
@@ -466,8 +474,9 @@ bool MetalViewport::eventFilter(QObject* watched, QEvent* event)
 void MetalViewport::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    if (backend_.hasLayer()) {
-        backend_.resizeLayer(width(), height(), devicePixelRatioF());
+    if (metalLayerHost_.hasLayer() && backend_.hasLayer()) {
+        metalLayerHost_.resize(width(), height(), devicePixelRatioF());
+        backend_.updateDrawableSize(metalLayerHost_.drawableSize());
     }
     updateAxesLabels();
 }
@@ -487,7 +496,20 @@ bool MetalViewport::initializeIfNeeded()
 
     const int layerWidth = std::max(1, width());
     const int layerHeight = std::max(1, height());
-    if (!backend_.initializeLayer(nativeWindow_, layerWidth, layerHeight, devicePixelRatioF())) {
+    nativeWindow_->resize(layerWidth, layerHeight);
+    backend_.initialize();
+    if (!backend_.isInitialized()) {
+        lastError_ = backend_.lastError();
+        if (lastError_.isEmpty()) {
+            lastError_ = QStringLiteral("Metal backend is not initialized");
+        }
+        return false;
+    }
+
+    if (!metalLayerHost_.prepare(nativeWindow_, backend_.deviceHandle(), lastError_)) {
+        return false;
+    }
+    if (!backend_.attachLayer(metalLayerHost_.layer(), metalLayerHost_.drawableSize())) {
         lastError_ = backend_.lastError();
         return false;
     }
@@ -1434,9 +1456,17 @@ void MetalViewport::updateFrameStats(qint64 frameNs)
 {
     frameTimeMs_ = static_cast<float>(frameNs) / 1'000'000.0f;
     ++frameCounter_;
-    if (fpsTimer_.elapsed() >= 1000) {
+    if (fpsTimer_.elapsed() >= 250) {
         fps_ = frameCounter_ * 1000.0f / static_cast<float>(fpsTimer_.elapsed());
         frameCounter_ = 0;
         fpsTimer_.restart();
     }
+}
+
+void MetalViewport::resetFrameStats()
+{
+    frameCounter_ = 0;
+    fps_ = 0.0f;
+    frameTimeMs_ = 0.0f;
+    fpsTimer_.restart();
 }

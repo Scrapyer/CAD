@@ -55,6 +55,8 @@ private:
     // ── 各项数据的显示标签 ──
     QLabel* fpsLabel_ = nullptr;         // FPS 帧率
     QLabel* frameTimeLabel_ = nullptr;   // 每帧耗时
+    QLabel* backendLabel_ = nullptr;     // 当前渲染后端
+    QLabel* viewportLabel_ = nullptr;    // 视口/原生 layer 诊断
     QLabel* vertexLabel_ = nullptr;      // 顶点数
     QLabel* triangleLabel_ = nullptr;    // 三角面数
     QLabel* rendererLabel_ = nullptr;    // GPU 型号

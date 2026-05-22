@@ -1,4 +1,4 @@
-#include "MetalLayerHost.h"
+#include "MacOSMetalLayerHost.h"
 
 #include <QWindow>
 
@@ -53,10 +53,33 @@ CAMetalLayer* metalLayerFromWindow(QWindow* window, QString& error)
 
 } // namespace
 
-bool prepareMetalLayerForWindow(QWindow* window,
-                                void* device,
-                                void*& metalLayer,
-                                QString& lastError)
+bool MacOSMetalLayerHost::prepare(QWindow* window, void* device, QString& lastError)
+{
+    return prepareMacOSMetalLayerForWindow(window,
+                                          device,
+                                          metalLayer_,
+                                          drawableSize_,
+                                          lastError);
+}
+
+void MacOSMetalLayerHost::resize(int width, int height, double devicePixelRatio)
+{
+    if (!metalLayer_) {
+        return;
+    }
+
+    resizeMacOSMetalLayerDrawable(metalLayer_,
+                                  width,
+                                  height,
+                                  devicePixelRatio,
+                                  drawableSize_);
+}
+
+bool prepareMacOSMetalLayerForWindow(QWindow* window,
+                                     void* device,
+                                     void*& metalLayer,
+                                     QSize& drawableSize,
+                                     QString& lastError)
 {
     metalLayer = nullptr;
     if (!device) {
@@ -73,16 +96,27 @@ bool prepareMetalLayerForWindow(QWindow* window,
         layer.device = static_cast<id<MTLDevice>>(device);
         layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         layer.framebufferOnly = YES;
+        if ([layer respondsToSelector:@selector(setDisplaySyncEnabled:)]) {
+            layer.displaySyncEnabled = NO;
+        }
+        if ([layer respondsToSelector:@selector(setMaximumDrawableCount:)]) {
+            layer.maximumDrawableCount = 3;
+        }
+        resizeMacOSMetalLayerDrawable(layer,
+                                      window ? window->width() : 1,
+                                      window ? window->height() : 1,
+                                      window ? window->devicePixelRatio() : 1.0,
+                                      drawableSize);
         metalLayer = layer;
     }
     return true;
 }
 
-void resizeMetalLayerDrawable(void* metalLayer,
-                              int width,
-                              int height,
-                              double devicePixelRatio,
-                              QSize& drawableSize)
+void resizeMacOSMetalLayerDrawable(void* metalLayer,
+                                   int width,
+                                   int height,
+                                   double devicePixelRatio,
+                                   QSize& drawableSize)
 {
     const double scale = std::max(devicePixelRatio, 1.0);
     const int drawableWidth = std::max(1, static_cast<int>(std::ceil(width * scale)));

@@ -49,6 +49,7 @@ bool validateMetalClipPreviewLineTargets(const MetalClipPreviewLineTargets& targ
 } // namespace
 
 bool uploadMetalSurfaceBuffers(void* device,
+                               void* commandQueue,
                                const MetalSurfaceUploadData& uploadData,
                                const MetalSurfaceBufferTargets& targets,
                                const QString& label,
@@ -64,16 +65,17 @@ bool uploadMetalSurfaceBuffers(void* device,
     }
 
     *targets.indexCount = static_cast<int>(uploadData.indices.size());
-    if (!targets.vertexBuffer->upload(device,
-                                      uploadData.vertices.data(),
-                                      uploadData.vertices.size() * sizeof(MetalMeshVertex),
-                                      QStringLiteral("%1 vertex").arg(label),
-                                      lastError) ||
-        !targets.indexBuffer->upload(device,
-                                     uploadData.indices.data(),
-                                     uploadData.indices.size() * sizeof(unsigned int),
-                                     QStringLiteral("%1 index").arg(label),
-                                     lastError)) {
+    const std::vector<MetalPrivateBufferUpload> uploads = {
+        {targets.vertexBuffer,
+         uploadData.vertices.data(),
+         uploadData.vertices.size() * sizeof(MetalMeshVertex),
+         QStringLiteral("%1 vertex").arg(label)},
+        {targets.indexBuffer,
+         uploadData.indices.data(),
+         uploadData.indices.size() * sizeof(unsigned int),
+         QStringLiteral("%1 index").arg(label)}
+    };
+    if (!MetalBufferResource::uploadPrivateBatch(device, commandQueue, uploads, lastError)) {
         resetMetalSurfaceTargets(targets);
         return false;
     }
@@ -82,6 +84,7 @@ bool uploadMetalSurfaceBuffers(void* device,
 }
 
 bool uploadMetalClipPreviewBuffers(void* device,
+                                   void* commandQueue,
                                    const Mesh& mesh,
                                    const MetalSurfaceUploadData& uploadData,
                                    const MetalSurfaceBufferTargets& surfaceTargets,
@@ -92,6 +95,7 @@ bool uploadMetalClipPreviewBuffers(void* device,
         return false;
     }
     if (!uploadMetalSurfaceBuffers(device,
+                                   commandQueue,
                                    uploadData,
                                    surfaceTargets,
                                    QStringLiteral("clip preview"),

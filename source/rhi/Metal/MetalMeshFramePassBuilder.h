@@ -26,6 +26,8 @@ struct MetalMeshFrameResourceHandles {
     void* depthStencilState = nullptr;
     void* overlayDepthStencilState = nullptr;
     QSize drawableSize;
+    QVector3D backgroundTopColor{0.38f, 0.45f, 0.58f};
+    QVector3D backgroundBottomColor{0.68f, 0.74f, 0.82f};
     void* meshVertexBuffer = nullptr;
     void* meshIndexBuffer = nullptr;
     int meshVertexCount = 0;

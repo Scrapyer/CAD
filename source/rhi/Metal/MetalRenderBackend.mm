@@ -1,10 +1,8 @@
 #include "MetalRenderBackend.h"
 
 #include "MetalAttachmentResourceBuilder.h"
-#include "MetalClearFramePass.h"
 #include "MetalDeviceFactory.h"
 #include "MetalDrawableFrameSubmitter.h"
-#include "MetalLayerHost.h"
 #include "MetalLineUpload.h"
 #include "MetalMeshFramePass.h"
 #include "MetalMeshFramePassBuilder.h"
@@ -16,14 +14,47 @@
 #include "MetalShaderTypes.h"
 #include "MetalSurfaceUploadBuilder.h"
 #include "MetalSurfaceUploader.h"
-
-#include <QWindow>
+#include "MetalUniformUtils.h"
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <vector>
 
 #import <Metal/Metal.h>
+
+namespace {
+
+constexpr size_t kMetalFrameUniformAlignment = 256;
+constexpr int kMetalFrameUniformSlotCount = 3;
+
+size_t alignMetalUniformOffset(size_t size)
+{
+    return (size + kMetalFrameUniformAlignment - 1) &
+        ~(kMetalFrameUniformAlignment - 1);
+}
+
+size_t writeFrameUniform(void* contents, size_t baseOffset, size_t& cursor, const void* data, size_t size)
+{
+    const size_t offset = baseOffset + cursor;
+    std::memcpy(static_cast<char*>(contents) + offset, data, size);
+    cursor += alignMetalUniformOffset(size);
+    return offset;
+}
+
+void writeDrawUniform(void* contents,
+                      size_t baseOffset,
+                      size_t& cursor,
+                      MetalMeshFramePassDraw& draw)
+{
+    draw.uniformOffset = writeFrameUniform(contents,
+                                           baseOffset,
+                                           cursor,
+                                           &draw.uniforms,
+                                           sizeof(draw.uniforms));
+}
+
+} // namespace
 
 MetalRenderBackend::~MetalRenderBackend()
 {
@@ -182,10 +213,7 @@ bool MetalRenderBackend::ensurePickResources()
                                               lastError_);
 }
 
-bool MetalRenderBackend::initializeLayer(QWindow* window,
-                                         int width,
-                                         int height,
-                                         qreal devicePixelRatio)
+bool MetalRenderBackend::attachLayer(void* metalLayer, const QSize& drawableSize)
 {
     lastError_.clear();
     initialize();
@@ -195,31 +223,33 @@ bool MetalRenderBackend::initializeLayer(QWindow* window,
         }
         return false;
     }
-
-    void* layer = nullptr;
-    if (!prepareMetalLayerForWindow(window, device_.handle(), layer, lastError_)) {
+    if (!metalLayer) {
+        lastError_ = QStringLiteral("Metal layer is null");
         return false;
     }
 
     destroyLayer();
-    metalLayer_.retain(layer);
-    resizeLayer(width, height, devicePixelRatio);
+    metalLayer_.retain(metalLayer);
+    updateDrawableSize(drawableSize);
     return true;
 }
 
-void MetalRenderBackend::resizeLayer(int width, int height, qreal devicePixelRatio)
+void MetalRenderBackend::updateDrawableSize(const QSize& drawableSize)
 {
     if (!metalLayer_.isValid()) {
         return;
     }
 
-    resizeMetalLayerDrawable(metalLayer_.handle(),
-                             width,
-                             height,
-                             devicePixelRatio,
-                             drawableSize_);
+    drawableSize_ = QSize(std::max(1, drawableSize.width()),
+                          std::max(1, drawableSize.height()));
     destroyDepthResources();
     destroyPickResources();
+}
+
+void MetalRenderBackend::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
+{
+    backgroundTopColor_ = topColor;
+    backgroundBottomColor_ = bottomColor;
 }
 
 bool MetalRenderBackend::uploadMesh(const Mesh& mesh, const MetalMeshUploadOptions& options)
@@ -244,6 +274,7 @@ bool MetalRenderBackend::uploadMesh(const Mesh& mesh, const MetalMeshUploadOptio
     meshScalarMax_ = options.scalarMax;
     meshNumBands_ = std::max(1, options.numBands);
     MetalMeshUploadData uploadData = buildMetalMeshUploadData(mesh, options);
+    meshVertexCpuCache_ = uploadData.vertices;
     meshScalarSourceIndices_ = uploadData.scalarSourceIndices;
     const MetalMeshBufferTargets targets{
         &meshVertexBuffer_,
@@ -256,7 +287,12 @@ bool MetalRenderBackend::uploadMesh(const Mesh& mesh, const MetalMeshUploadOptio
         &edgeVertexCount_,
         &edgeIndexCount_
     };
-    if (!uploadMetalMeshBuffers(device_.handle(), mesh, uploadData, targets, lastError_)) {
+    if (!uploadMetalMeshBuffers(device_.handle(),
+                                commandQueue_.handle(),
+                                mesh,
+                                uploadData,
+                                targets,
+                                lastError_)) {
         destroyMeshResources();
         destroyEdgeResources();
         return false;
@@ -282,6 +318,28 @@ bool MetalRenderBackend::uploadVertexScalars(const std::vector<float>& scalars,
     if (!meshVertexBuffer_.isValid() || meshScalarSourceIndices_.empty()) {
         lastError_ = QStringLiteral("Metal mesh scalar buffer is not initialized");
         return false;
+    }
+
+    const size_t count = std::min(meshScalarSourceIndices_.size(),
+                                  static_cast<size_t>(std::max(0, meshVertexCount_)));
+    if (!meshVertexCpuCache_.empty()) {
+        for (size_t i = 0; i < count && i < meshVertexCpuCache_.size(); ++i) {
+            const unsigned int sourceIndex = meshScalarSourceIndices_[i];
+            meshVertexCpuCache_[i].scalar = sourceIndex < scalars.size() ? scalars[sourceIndex] : 0.0f;
+        }
+    }
+
+    if (!meshVertexBuffer_.isHostVisible()) {
+        if (meshVertexCpuCache_.empty()) {
+            lastError_ = QStringLiteral("Metal mesh vertex CPU cache is empty");
+            return false;
+        }
+        return meshVertexBuffer_.uploadPrivate(device_.handle(),
+                                               commandQueue_.handle(),
+                                               meshVertexCpuCache_.data(),
+                                               meshVertexCpuCache_.size() * sizeof(MetalMeshVertex),
+                                               QStringLiteral("mesh vertex scalar update"),
+                                               lastError_);
     }
 
     @autoreleasepool {
@@ -350,6 +408,7 @@ bool MetalRenderBackend::uploadIsoSurfaceMesh(const Mesh& mesh)
         &isoSurfaceIndexCount_
     };
     if (!uploadMetalSurfaceBuffers(device_.handle(),
+                                   commandQueue_.handle(),
                                    uploadData,
                                    targets,
                                    QStringLiteral("iso surface"),
@@ -389,6 +448,7 @@ bool MetalRenderBackend::uploadClipPreviewMesh(const Mesh& mesh)
         &clipPreviewLineVertexCount_
     };
     if (!uploadMetalClipPreviewBuffers(device_.handle(),
+                                       commandQueue_.handle(),
                                        mesh,
                                        uploadData,
                                        surfaceTargets,
@@ -421,14 +481,45 @@ bool MetalRenderBackend::renderClearFrame(float red, float green, float blue, fl
         return false;
     }
 
+    if (!ensureBackgroundPipeline() || !ensureDepthResources()) {
+        return false;
+    }
+
+    MetalMeshFrameResourceHandles resources;
+    resources.backgroundPipelineState = backgroundPipelineState_.handle();
+    resources.depthStencilState = depthStencilState_.handle();
+    resources.overlayDepthStencilState = overlayDepthStencilState_.handle();
+    resources.drawableSize = drawableSize_;
+    resources.backgroundTopColor = backgroundTopColor_;
+    resources.backgroundBottomColor = backgroundBottomColor_;
+
+    MetalMeshFramePassInputs framePass;
+    framePass.backgroundPipelineState = resources.backgroundPipelineState;
+    framePass.depthStencilState = resources.depthStencilState;
+    framePass.overlayDepthStencilState = resources.overlayDepthStencilState;
+    framePass.drawableSize = resources.drawableSize;
+    framePass.backgroundUniforms.bottomColor[0] = resources.backgroundBottomColor.x();
+    framePass.backgroundUniforms.bottomColor[1] = resources.backgroundBottomColor.y();
+    framePass.backgroundUniforms.bottomColor[2] = resources.backgroundBottomColor.z();
+    framePass.backgroundUniforms.bottomColor[3] = 1.0f;
+    framePass.backgroundUniforms.topColor[0] = resources.backgroundTopColor.x();
+    framePass.backgroundUniforms.topColor[1] = resources.backgroundTopColor.y();
+    framePass.backgroundUniforms.topColor[2] = resources.backgroundTopColor.z();
+    framePass.backgroundUniforms.topColor[3] = 1.0f;
+    if (!prepareFrameUniformBuffer(framePass)) {
+        return false;
+    }
+
     @autoreleasepool {
-        return executeMetalClearFramePass(metalLayer_.handle(),
-                                          commandQueue_.handle(),
-                                          red,
-                                          green,
-                                          blue,
-                                          alpha,
-                                          lastError_);
+        return submitMetalDrawableFrame(metalLayer_.handle(),
+                                        commandQueue_.handle(),
+                                        depthTexture_.handle(),
+                                        red,
+                                        green,
+                                        blue,
+                                        alpha,
+                                        framePass,
+                                        lastError_);
     }
 }
 
@@ -500,6 +591,8 @@ MetalMeshFrameResourceHandles MetalRenderBackend::buildMeshFrameResourceHandles(
     frameResources.depthStencilState = depthStencilState_.handle();
     frameResources.overlayDepthStencilState = overlayDepthStencilState_.handle();
     frameResources.drawableSize = drawableSize_;
+    frameResources.backgroundTopColor = backgroundTopColor_;
+    frameResources.backgroundBottomColor = backgroundBottomColor_;
     frameResources.meshVertexBuffer = meshVertexBuffer_.handle();
     frameResources.meshIndexBuffer = meshIndexBuffer_.handle();
     frameResources.meshVertexCount = meshVertexCount_;
@@ -548,6 +641,74 @@ MetalPickPassResourceHandles MetalRenderBackend::buildPickPassResourceHandles() 
     return resources;
 }
 
+bool MetalRenderBackend::prepareFrameUniformBuffer(MetalMeshFramePassInputs& framePass)
+{
+    const size_t uniformStride = alignMetalUniformOffset(sizeof(MetalMeshUniforms));
+    const size_t backgroundStride = alignMetalUniformOffset(sizeof(MetalBackgroundUniforms));
+    const size_t slotSize = backgroundStride + uniformStride * 12;
+    const size_t totalSize = slotSize * kMetalFrameUniformSlotCount;
+
+    if (!frameUniformBuffer_.isValid() || frameUniformBuffer_.sizeBytes() < totalSize) {
+        if (!frameUniformBuffer_.allocate(device_.handle(),
+                                          totalSize,
+                                          QStringLiteral("frame uniforms"),
+                                          lastError_)) {
+            return false;
+        }
+        frameUniformSlotSize_ = slotSize;
+        frameUniformSlotIndex_ = 0;
+    }
+
+    id<MTLBuffer> buffer = static_cast<id<MTLBuffer>>(frameUniformBuffer_.handle());
+    void* contents = [buffer contents];
+    if (!contents) {
+        lastError_ = QStringLiteral("Metal frame uniform buffer is not mappable");
+        return false;
+    }
+
+    const size_t baseOffset = frameUniformSlotSize_ *
+        static_cast<size_t>(frameUniformSlotIndex_);
+    frameUniformSlotIndex_ = (frameUniformSlotIndex_ + 1) % kMetalFrameUniformSlotCount;
+    size_t cursor = 0;
+
+    framePass.uniformBuffer = frameUniformBuffer_.handle();
+    framePass.backgroundUniformOffset = writeFrameUniform(contents,
+                                                          baseOffset,
+                                                          cursor,
+                                                          &framePass.backgroundUniforms,
+                                                          sizeof(framePass.backgroundUniforms));
+    writeDrawUniform(contents, baseOffset, cursor, framePass.surface);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.edges);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.points);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.isoSurface);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.clipPreview);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.overlay);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.slice);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.clipPreviewLines);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.selection);
+
+    const std::array<std::array<float, 4>, 3> axisColors = {{
+        {{0.95f, 0.30f, 0.30f, 1.0f}},
+        {{0.35f, 0.90f, 0.35f, 1.0f}},
+        {{0.35f, 0.55f, 1.00f, 1.0f}}
+    }};
+    for (size_t axis = 0; axis < axisColors.size(); ++axis) {
+        MetalMeshUniforms axesUniforms = framePass.axes.uniforms;
+        setMetalUniformColor(axesUniforms,
+                             axisColors[axis][0],
+                             axisColors[axis][1],
+                             axisColors[axis][2],
+                             axisColors[axis][3]);
+        framePass.axesUniformOffsets[axis] = writeFrameUniform(contents,
+                                                               baseOffset,
+                                                               cursor,
+                                                               &axesUniforms,
+                                                               sizeof(axesUniforms));
+    }
+
+    return true;
+}
+
 bool MetalRenderBackend::renderMeshFrame(const QMatrix4x4& mvp,
                                          const QVector3D& objectColor,
                                          ModelDisplayMode displayMode,
@@ -585,6 +746,9 @@ bool MetalRenderBackend::renderMeshFrame(const QMatrix4x4& mvp,
     const MetalMeshFrameResourceHandles frameResources = buildMeshFrameResourceHandles();
     MetalMeshFramePassInputs framePass =
         buildMetalMeshFramePassInputs(drawFlags, frameResources, frameUniforms);
+    if (!prepareFrameUniformBuffer(framePass)) {
+        return false;
+    }
 
     @autoreleasepool {
         return submitMetalDrawableFrame(metalLayer_.handle(),
@@ -648,6 +812,7 @@ void MetalRenderBackend::destroyMeshResources()
     meshScalarMin_ = 0.0f;
     meshScalarMax_ = 1.0f;
     meshNumBands_ = 10;
+    meshVertexCpuCache_.clear();
     meshScalarSourceIndices_.clear();
 }
 
@@ -724,6 +889,9 @@ void MetalRenderBackend::destroy()
     destroySliceResources();
     destroySelectionResources();
     destroyAxesResources();
+    frameUniformBuffer_.destroy();
+    frameUniformSlotSize_ = 0;
+    frameUniformSlotIndex_ = 0;
     backgroundPipelineState_.destroy();
     meshPipelineState_.destroy();
     isoSurfacePipelineState_.destroy();

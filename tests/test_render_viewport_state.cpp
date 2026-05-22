@@ -185,6 +185,8 @@ int main(int argc, char** argv)
         metalViewport.refresh();
         pumpEvents(app, 100);
         assert(!metalViewport.glRenderer().isEmpty());
+        assert(metalViewport.renderDiagnostics().contains(QStringLiteral("Drawable:")));
+        assert(metalViewport.renderDiagnostics().contains(QStringLiteral("Layer: OK")));
         metalViewport.clearSliceLines();
         metalViewport.clearIsoSurface();
         metalViewport.clearClipPlanePreview();

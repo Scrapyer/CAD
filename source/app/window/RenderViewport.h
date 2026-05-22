@@ -5,9 +5,11 @@
 #include "RenderBackend.h"
 #include "ferender_export.h"
 
+#include <QSize>
 #include <QString>
 #include <QWidget>
 #include <QColor>
+#include <QVector3D>
 
 #include <glm/glm.hpp>
 
@@ -80,6 +82,7 @@ public:
     QString glVersion() const;
     QString glslVersion() const;
     QString gpuVendor() const;
+    QString renderDiagnostics() const;
     int vertexCount() const;
     int triangleCount() const;
     float currentFps() const;
@@ -129,6 +132,8 @@ private:
     float colorBarMaxValue_ = 0.0f;
     QString colorBarIdLabel_ = QStringLiteral("ID");
     QColor colorBarTextColor_{30, 30, 30};
+    QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
+    QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
     bool useVertexColor_ = false;
     Mesh overlayMesh_;
     bool overlayVisible_ = false;

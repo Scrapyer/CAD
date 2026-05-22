@@ -92,20 +92,24 @@ struct VertexOut {
     float3 color;
 };
 
-vertex VertexOut vertex_main(uint vertexId [[vertex_id]])
+struct BackgroundUniforms {
+    float4 bottomColor;
+    float4 topColor;
+};
+
+vertex VertexOut vertex_main(uint vertexId [[vertex_id]],
+                             constant BackgroundUniforms& uniforms [[buffer(0)]])
 {
     float2 positions[3] = {
         float2(-1.0, -1.0),
         float2(3.0, -1.0),
         float2(-1.0, 3.0)
     };
-    float3 bottomColor = float3(0.68, 0.74, 0.82);
-    float3 topColor = float3(0.38, 0.45, 0.58);
     float2 pos = positions[vertexId];
     float t = clamp(pos.y * 0.5 + 0.5, 0.0, 1.0);
     VertexOut out;
     out.position = float4(pos, 0.0, 1.0);
-    out.color = mix(bottomColor, topColor, t);
+    out.color = mix(uniforms.bottomColor.xyz, uniforms.topColor.xyz, t);
     return out;
 }
 

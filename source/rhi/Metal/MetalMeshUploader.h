@@ -19,6 +19,7 @@ struct MetalMeshBufferTargets {
 };
 
 bool uploadMetalMeshBuffers(void* device,
+                            void* commandQueue,
                             const Mesh& mesh,
                             const MetalMeshUploadData& uploadData,
                             const MetalMeshBufferTargets& targets,

@@ -58,7 +58,7 @@
 | `source/rhi/` | 渲染后端抽象和具体图形 API 后端；公共抽象在根目录，具体后端分到 `OpenGL/`、`Vulkan/`、`Metal/` |
 | `source/render/` | 渲染控件、相机、几何网格和拾取数据 |
 | `source/post/` | 结果映射、变形、动画、探针、过滤和等值面 |
-| `source/app/` | FEModelViewer GUI 应用入口、主窗口和面板 |
+| `source/app/` | FEModelViewer GUI 应用入口、主窗口和面板；`ui/` 保持单套 Qt UI，`window/` 放窗口宿主边界，`platform/macos/` 放 macOS 原生桥接 |
 | `source/common/` | 主题和应用状态等共享轻量结构 |
 
 安装后的 FERender 公开头文件仍平铺到 `include/FERender`，保持第三方项目的 `#include "GLWidget.h"` 等用法稳定。
@@ -467,7 +467,7 @@ static FERenderData toColoredRenderData(
 
 ### 6.1 RenderViewport / GLWidget — 渲染视口
 
-**文件**: `source/render/RenderViewport.h` / `source/render/RenderViewport.cpp`
+**文件**: `source/app/window/RenderViewport.h` / `source/app/window/RenderViewport.cpp`
 
 `RenderViewport` 是主窗口依赖的渲染视口宿主层。它转发 `setMesh()`、`fitToModel()`、`setObjectColor()`、`setTriangleToPartMap()`、`setEdgeToPartMap()`、`setPartVisibility()`、拾取、色标、后处理叠加、RHI 设置和监控查询等公开接口，并把 `GLWidget::selectionChanged`、`partsPicked` 等信号重新暴露给应用层。OpenGL 路径承载 `GLWidget`；Metal 路径在 macOS 上承载 `MetalViewport`，通过 `QWindow` 原生 `NSView/CAMetalLayer` 创建 Metal drawable，当前可创建 `MTLDevice` / command queue、上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，并用运行时 MSL pipeline 结合 depth attachment 绘制渐变背景、主网格三角面、普通边线、点显示、云图标量映射、左下角坐标轴、选中高亮线、未变形叠加线框、切片交线、半透明等值面和裁剪/切片平面预览；Metal 上传阶段会按部件可见性过滤三角形/边线、把部件颜色和 per-vertex scalar 写入 mesh 顶点属性，并通过 RGBA8 离屏 pick texture + blit readback 支持 Element / Part 单点拾取和选择信号，Node 模式会在命中单元后用 `vertexToNode` 选取屏幕最近节点，Ctrl/Shift 左键框选添加和 Ctrl/Shift 右键点选/框选取消会按当前 PickMode 更新选择状态，选中 Node 会绘制小型三轴标记，选中 Element 会绘制完整单元边，选中 Part 会绘制边界/开放/特征/视角轮廓边，支持左键旋转、中键/右键平移和滚轮缩放；Vulkan 路径在 macOS 上承载 `VulkanViewport`，通过 `QWindow` 创建原生 `VkSurfaceKHR`，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，使用 push constant MVP 接入相机适配，并在上传阶段按部件可见性过滤三角形/边线、把部件颜色写入 mesh 顶点属性，主网格/普通边线几何通过 staging buffer 和 fence 同步的 copy command 复制到 device-local vertex/index buffer，把 per-vertex scalar 写入独立 storage buffer。窗口 resize 会标记 swapchain 重建，present/acquire 返回 out-of-date 或 suboptimal 时也会让下一帧自动重建。当前 Vulkan 路径已有左下角坐标轴和离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 模式点选、框选添加和点选/框选取消会转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；Vulkan 的 `setVertexScalars()` 由 descriptor set 绑定 scalar SSBO 并由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射，Metal 的 `setVertexScalars()` 会更新 shared vertex buffer 中的 scalar 字段并由 MSL shader 做同样的 Jet 分段映射；mesh 已上传后再次切换云图 field 只更新 scalar 数据和 contour 参数，不重传 mesh geometry。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 和 Metal 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可在 Vulkan 和 Metal 路径绘制变形显示使用的未变形线框，`setSliceLines()` / `clearSliceLines()` 已可在 Vulkan 和 Metal 路径绘制和清除基础切片交线，`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可在 Vulkan 和 Metal 路径绘制和清除半透明等值面叠加；`setClipPlanePreview()` / `clearClipPlanePreview()` 已可在 Vulkan 和 Metal 路径绘制/清除裁剪或切片平面预览。
 
@@ -696,7 +696,7 @@ Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 
 | 角落坐标轴 | 已完成，复用 line pipeline 绘制左下角 XYZ 轴线，并用 Qt overlay 显示 X/Y/Z 标签 |
 | 色标、overlay、切片、等值面、裁剪/切片平面预览 | 已完成基础显示链路 |
 | resize / swapchain 过期恢复 | 已完成，窗口 resize 和 acquire/present out-of-date/suboptimal 会触发下一帧重建 |
-| 正式资源模型 | 已开始，Vulkan device-local/staging buffer、mesh buffer group、frame pipeline group、depth、pick resources、swapchain frame resources、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制和批量 staging 上传已独立；Metal 已用 `MetalAttachmentResourceBuilder` 管理主 depth、overlay/depth state、pick color/depth 和 pick readback 的确保逻辑，用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MetalLayerHost` 管理 `QWindow` 到 `CAMetalLayer` 的宿主配置，用 `MetalObjectResource` 管理 device、command queue 和 layer，用 `MetalShaderSources` 管理 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建 |
+| 正式资源模型 | 已开始，Vulkan device-local/staging buffer、mesh buffer group、frame pipeline group、depth、pick resources、swapchain frame resources、readback buffer、scalar descriptor/set layout、render pass、framebuffer、pipeline/layout、command pool/buffer 生命周期已独立封装，mesh/pick pass 录制和批量 staging 上传已独立；Metal 已用 `MetalAttachmentResourceBuilder` 管理主 depth、overlay/depth state、pick color/depth 和 pick readback 的确保逻辑，用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MacOSMetalLayerHost` 管理 `QWindow` 到 `NSView/CAMetalLayer` 的宿主配置，`MetalRenderBackend` 只接收已准备好的 layer 和 drawable size，用 `MetalObjectResource` 管理 device、command queue 和 layer，用 `MetalShaderSources` 管理 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建 |
 | Vulkan 集成测试 | 已补充连续加载网格模型、快速 swapchain recreate、pick 后 recreate、隐藏部件 pick、overlay/slice/iso/clip/selection 组合、错误输入恢复路径 |
 
 ### 拾取模式
@@ -741,7 +741,7 @@ QPoint pendingPickPos_;
 
 ### 8.1 MainWindow — 主窗口
 
-**文件**: `source/app/MainWindow.h` / `source/app/MainWindow.cpp`
+**文件**: `source/app/ui/MainWindow.h` / `source/app/ui/MainWindow.cpp`
 
 布局结构：
 
@@ -768,7 +768,7 @@ QPoint pendingPickPos_;
 
 ### 8.2 FEModelPanel — 模型信息面板
 
-**文件**: `source/app/FEModelPanel.h`
+**文件**: `source/app/ui/FEModelPanel.h`
 
 功能：
 - 显示模型统计（节点数、单元数、三角面数、尺寸）
@@ -784,7 +784,7 @@ QPoint pendingPickPos_;
 
 ### 8.3 PartsPanel — 部件模型树
 
-**文件**: `source/app/PartsPanel.h`
+**文件**: `source/app/ui/PartsPanel.h`
 
 以树形结构显示模型部件：
 ```
@@ -800,7 +800,7 @@ QPoint pendingPickPos_;
 
 ### 8.4 ResultPanel — 结果面板
 
-**文件**: `source/app/ResultPanel.h`
+**文件**: `source/app/ui/ResultPanel.h`
 
 级联选择云图数据：
 ```
@@ -811,7 +811,7 @@ QPoint pendingPickPos_;
 
 ### 8.5 PickPanel — 拾取控制面板
 
-**文件**: `source/app/PickPanel.h`
+**文件**: `source/app/ui/PickPanel.h`
 
 - 拾取模式切换（节点/单元/部件）
 - 显示/隐藏控制
@@ -819,7 +819,7 @@ QPoint pendingPickPos_;
 
 ### 8.6 ControlPanel — 控制面板
 
-**文件**: `source/app/ControlPanel.h`
+**文件**: `source/app/ui/ControlPanel.h`
 
 - 形状选择（7 种基础几何体，用于演示）
 - 显示模式（实体/线框/混合）
@@ -827,7 +827,7 @@ QPoint pendingPickPos_;
 
 ### 8.7 MonitorPanel — 性能监控
 
-**文件**: `source/app/MonitorPanel.h`
+**文件**: `source/app/ui/MonitorPanel.h`
 
 实时显示：
 - FPS 帧率 / 每帧耗时
@@ -1013,7 +1013,7 @@ paintGL()
 ```
 FEModelViewer (项目)
 ├── FERender (SHARED 库)
-│   ├── 头文件：source/render/Camera.h, source/render/GLWidget.h, source/render/RenderViewport.h, ...
+│   ├── 头文件：source/render/Camera.h, source/render/GLWidget.h, source/app/window/RenderViewport.h, ...
 │   ├── 数据层：source/data/FEModel.h, source/data/FEField.h, ...
 │   ├── 解析层：source/io/FEParser.h, source/io/FEParser_*.cpp
 │   ├── 转换层：source/convert/FEMeshConverter.h/.cpp
@@ -1025,7 +1025,7 @@ FEModelViewer (项目)
 │   └── 导出宏：FERENDER_EXPORT（由 GenerateExportHeader 生成）
 │
 └── FEModelViewer (EXECUTABLE)
-    ├── source/app/main.cpp, source/app/MainWindow.cpp, source/app/*Panel.cpp
+    ├── source/app/main.cpp, source/app/ui/MainWindow.cpp, source/app/ui/*Panel.cpp
     └── 链接 FERender
 ```
 

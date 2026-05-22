@@ -14,6 +14,7 @@
 #include <QRubberBand>
 #include <QRect>
 #include <QTimer>
+#include <QVector3D>
 #include <QWidget>
 #include <QWindow>
 
@@ -56,6 +57,7 @@ public:
     void selectByIds(PickMode mode, const std::vector<int>& ids);
     void highlightParts(const std::vector<int>& partIndices);
     void fitToModel(const glm::vec3& center, float size);
+    void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
 
     const RenderBackendInfo& backendInfo() const { return backend_.info(); }
     QString lastError() const { return lastError_; }
@@ -102,6 +104,7 @@ private:
     bool rebuildSelectionHighlight();
     void updateAxesLabels();
     void updateFrameStats(qint64 frameNs);
+    void resetFrameStats();
 
     QWindow* nativeWindow_ = nullptr;
     QWidget* windowContainer_ = nullptr;

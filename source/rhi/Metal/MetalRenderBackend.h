@@ -16,14 +16,13 @@
 #include <QString>
 #include <QVector3D>
 
+#include <cstddef>
 #include <vector>
-
-class QWindow;
 
 /**
  * @brief Metal 渲染后端骨架。
  *
- * 当前负责探测系统 Metal 设备、创建 command queue，并通过 CAMetalLayer
+ * 当前负责探测系统 Metal 设备、创建 command queue，并通过外部宿主提供的 CAMetalLayer
  * 执行基础 clear/present、渐变背景、深度测试、主网格三角面、普通边线/点、部件显隐、云图标量映射、
  * Element 离屏拾取 draw pass、叠加线、切片交线、等值面、裁剪预览和基础选中高亮线。
  */
@@ -34,8 +33,9 @@ public:
     void initialize() override;
     const RenderBackendInfo& info() const override { return info_; }
 
-    bool initializeLayer(QWindow* window, int width, int height, qreal devicePixelRatio);
-    void resizeLayer(int width, int height, qreal devicePixelRatio);
+    bool attachLayer(void* metalLayer, const QSize& drawableSize);
+    void updateDrawableSize(const QSize& drawableSize);
+    void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
     bool uploadMesh(const Mesh& mesh, const MetalMeshUploadOptions& options = {});
     bool uploadVertexScalars(const std::vector<float>& scalars,
                              float minVal,
@@ -62,6 +62,7 @@ public:
 
     bool isInitialized() const { return initialized_; }
     bool hasLayer() const { return metalLayer_.isValid(); }
+    void* deviceHandle() const { return device_.handle(); }
     const QString& lastError() const { return lastError_; }
 
     /** @brief 当前系统是否可创建默认 Metal 设备。 */
@@ -84,6 +85,7 @@ private:
                                                     const QMatrix4x4& axesMvp) const;
     MetalMeshFrameResourceHandles buildMeshFrameResourceHandles() const;
     MetalPickPassResourceHandles buildPickPassResourceHandles() const;
+    bool prepareFrameUniformBuffer(MetalMeshFramePassInputs& framePass);
 
     // Upload helpers
     bool uploadLineBuffer(const std::vector<float>& lineVertices,
@@ -139,6 +141,9 @@ private:
     float meshScalarMin_ = 0.0f;
     float meshScalarMax_ = 1.0f;
     int meshNumBands_ = 10;
+    QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
+    QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
+    std::vector<MetalMeshVertex> meshVertexCpuCache_;
     std::vector<unsigned int> meshScalarSourceIndices_;
 
     // Edge and overlay resources
@@ -162,6 +167,9 @@ private:
     MetalBufferResource sliceVertexBuffer_;
     MetalBufferResource selectionVertexBuffer_;
     MetalBufferResource axesLineVertexBuffer_;
+    MetalBufferResource frameUniformBuffer_;
+    size_t frameUniformSlotSize_ = 0;
+    int frameUniformSlotIndex_ = 0;
     int overlayVertexCount_ = 0;
     int sliceVertexCount_ = 0;
     int selectionVertexCount_ = 0;

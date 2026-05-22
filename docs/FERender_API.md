@@ -1112,6 +1112,7 @@ public slots:
 | `glVersion()` | `QString` | OpenGL 版本 |
 | `glslVersion()` | `QString` | GLSL 版本 |
 | `gpuVendor()` | `QString` | GPU 厂商 |
+| `renderDiagnostics()` | `QString` | 当前视口诊断文本；Metal 路径包含 layer 状态、drawable size、DPR 和最近错误 |
 | `vertexCount()` | `int` | 当前渲染顶点数 |
 | `triangleCount()` | `int` | 当前渲染三角形数 |
 | `currentFps()` | `float` | 当前帧率 |
@@ -1161,12 +1162,13 @@ void setModelDisplayMode(ModelDisplayMode mode);
 void setPreferredRenderBackend(RenderBackendKind kind);
 RenderBackendKind requestedRenderBackendKind() const;
 RenderBackendKind activeRenderBackendKind() const;
+QString renderDiagnostics() const;
 ```
 
 Vulkan 路径当前实现 `PickMode::Node` / `PickMode::Element` / `PickMode::Part` 的单点拾取、框选添加和点选/框选取消。Metal 路径当前提供基础主网格三角面、普通边线、点显示绘制、云图标量映射、部件颜色/显隐、Node / Element / Part 点选/框选、选中高亮、未变形叠加线框、切片交线、等值面、裁剪/切片平面预览和轨道相机交互。`RenderViewport` 启动时读取全局 RHI 配置并激活对应视口；运行时调用 `setPreferredRenderBackend()` 只写入下次启动的首选 RHI，不再立即销毁/重建当前视口。
 运行时 `VulkanContext` 会优先请求 SDK 和 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
 `FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 改为较低 target env。
-Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readback buffer、scalar descriptor/set layout、主视口/拾取 render pass、framebuffer、graphics pipeline / pipeline layout 和 command pool / command buffer 从裸 handle 收敛到独立资源对象；主网格帧录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。Metal 内部资源模型已开始用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer 的 `MTLBuffer` 生命周期，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture 生命周期，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state 生命周期，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MetalLayerHost` 管理 `QWindow` 到 `CAMetalLayer` 的宿主配置，用 `MetalObjectResource` 管理 device、command queue 和 layer 生命周期，用 `MetalShaderSources` 管理运行时 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建。公开 `RenderViewport` API 不暴露这些实现细节。
+Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readback buffer、scalar descriptor/set layout、主视口/拾取 render pass、framebuffer、graphics pipeline / pipeline layout 和 command pool / command buffer 从裸 handle 收敛到独立资源对象；主网格帧录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。Metal 内部资源模型已开始用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer 的 `MTLBuffer` 生命周期，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture 生命周期，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state 生命周期，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MacOSMetalLayerHost` 管理 `QWindow` 到 `NSView/CAMetalLayer` 的宿主配置，`MetalRenderBackend` 只接收已准备好的 layer 和 drawable size，用 `MetalObjectResource` 管理 device、command queue 和 layer 生命周期，用 `MetalShaderSources` 管理运行时 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建。公开 `RenderViewport` API 不暴露这些实现细节。
 
 信号：
 
@@ -1897,7 +1899,7 @@ glWidget->setIsoSurfaceMesh(iso);
 | `RenderBackendFactory.h` | `source/rhi/RenderBackendFactory.h` | `createRenderBackend`, `isRenderBackendAvailable` | 渲染后端创建与可用性查询 |
 | `RenderSettings.h` | `source/rhi/RenderSettings.h` | `RenderSettings` | 全局首选 RHI 持久化设置 |
 | `GLWidget.h` | `source/render/GLWidget.h` | `GLWidget` | OpenGL 渲染窗口 |
-| `RenderViewport.h` | `source/render/RenderViewport.h` | `RenderViewport` | 渲染视口宿主层 |
+| `RenderViewport.h` | `source/app/window/RenderViewport.h` | `RenderViewport` | 渲染视口宿主层 |
 | `FEPickResult.h` | `source/render/FEPickResult.h` | `PickMode`, `FEPickResult`, `FESelection` | 拾取与选中 |
 | `ferender_export.h` | 构建目录生成 | `FERENDER_EXPORT` 宏 | DLL 导出宏（自动生成） |
 

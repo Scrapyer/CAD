@@ -12,8 +12,9 @@
 #include "VulkanSwapchainFrameResources.h"
 #include "RenderBackend.h"
 
-#include <QString>
 #include <QMatrix4x4>
+#include <QString>
+#include <QVector3D>
 
 #include <vulkan/vulkan.h>
 
@@ -61,6 +62,7 @@ public:
     bool uploadIsoSurfaceMesh(const VulkanDevice& device, const Mesh& mesh);
     bool uploadClipPreviewMesh(const VulkanDevice& device, const Mesh& mesh);
     bool uploadSelectionLines(const VulkanDevice& device, const std::vector<float>& lineVertices);
+    void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
     bool renderMeshFrame(const VulkanDevice& device,
                          const VulkanSwapchain& swapchain,
                          const VkClearColorValue& clearColor,
@@ -163,5 +165,7 @@ private:
     VkSemaphore renderFinishedSemaphore_ = VK_NULL_HANDLE;
     VkFence inFlightFence_ = VK_NULL_HANDLE;
     bool swapchainOutOfDate_ = false;
+    QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
+    QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
     QString lastError_;
 };

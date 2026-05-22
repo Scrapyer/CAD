@@ -128,8 +128,20 @@ void RenderViewport::fitToModel(const glm::vec3& center, float size)
 void RenderViewport::applyTheme(const Theme& theme)
 {
     glWidget_->applyTheme(theme);
+    backgroundTopColor_ = QVector3D(theme.bgTopR, theme.bgTopG, theme.bgTopB);
+    backgroundBottomColor_ = QVector3D(theme.bgBotR, theme.bgBotG, theme.bgBotB);
     colorBarTextColor_ = QColor(theme.barTextR, theme.barTextG, theme.barTextB);
     colorBarOverlay_->setTextColor(colorBarTextColor_);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
+    }
+#endif
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
+    }
+#endif
 }
 void RenderViewport::setColorBarVisible(bool visible)
 {
@@ -504,6 +516,43 @@ QString RenderViewport::gpuVendor() const
     return glWidget_->gpuVendor();
 }
 
+QString RenderViewport::renderDiagnostics() const
+{
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (activeBackendKind_ == RenderBackendKind::Metal && metalViewport_) {
+        const QSize drawableSize = metalViewport_->drawableSize();
+        QString text = QStringLiteral("Layer: %1 | Drawable: %2x%3 | DPR: %4")
+                           .arg(metalViewport_->hasNativeLayer() ? QStringLiteral("OK")
+                                                                 : QStringLiteral("--"))
+                           .arg(drawableSize.width())
+                           .arg(drawableSize.height())
+                           .arg(metalViewport_->devicePixelRatioF(), 0, 'f', 2);
+        const QString error = metalViewport_->lastError();
+        if (!error.isEmpty()) {
+            text += QStringLiteral(" | Error: ") + error;
+        }
+        return text;
+    }
+#endif
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (activeBackendKind_ == RenderBackendKind::Vulkan && vulkanViewport_) {
+        QString text = QStringLiteral("Viewport: %1x%2 | DPR: %3")
+                           .arg(vulkanViewport_->width())
+                           .arg(vulkanViewport_->height())
+                           .arg(vulkanViewport_->devicePixelRatioF(), 0, 'f', 2);
+        const QString error = vulkanViewport_->lastError();
+        if (!error.isEmpty()) {
+            text += QStringLiteral(" | Error: ") + error;
+        }
+        return text;
+    }
+#endif
+    return QStringLiteral("Viewport: %1x%2 | DPR: %3")
+        .arg(width())
+        .arg(height())
+        .arg(devicePixelRatioF(), 0, 'f', 2);
+}
+
 int RenderViewport::vertexCount() const { return glWidget_->vertexCount(); }
 int RenderViewport::triangleCount() const { return glWidget_->triangleCount(); }
 float RenderViewport::currentFps() const
@@ -564,6 +613,11 @@ void RenderViewport::highlightParts(const std::vector<int>& partIndices)
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->highlightParts(partIndices);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->selectByIds(PickMode::Part, partIndices);
     }
 #endif
 }
@@ -646,6 +700,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         if (hasCurrentMesh_) {
             metalViewport_->setMesh(currentMesh_);
         }
+        metalViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
         metalViewport_->setObjectColor(objectColor_);
         metalViewport_->setModelDisplayMode(displayMode_);
         metalViewport_->setOverlayMesh(overlayMesh_);
@@ -719,6 +774,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         if (hasCurrentMesh_) {
             vulkanViewport_->setMesh(currentMesh_);
         }
+        vulkanViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
         vulkanViewport_->setPickMode(currentPickMode_);
         vulkanViewport_->setObjectColor(objectColor_);
         vulkanViewport_->setModelDisplayMode(displayMode_);

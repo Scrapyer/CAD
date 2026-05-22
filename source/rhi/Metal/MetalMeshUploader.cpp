@@ -53,6 +53,7 @@ bool validateMetalMeshUploadTargets(const MetalMeshBufferTargets& targets, QStri
 } // namespace
 
 bool uploadMetalMeshBuffers(void* device,
+                            void* commandQueue,
                             const Mesh& mesh,
                             const MetalMeshUploadData& uploadData,
                             const MetalMeshBufferTargets& targets,
@@ -72,39 +73,34 @@ bool uploadMetalMeshBuffers(void* device,
     *targets.edgeVertexCount = uploadData.edgeVertexCount;
     *targets.edgeIndexCount = static_cast<int>(uploadData.edgeIndices.size());
 
-    if (!targets.meshVertexBuffer->upload(device,
-                                          uploadData.vertices.data(),
-                                          uploadData.vertices.size() * sizeof(MetalMeshVertex),
-                                          QStringLiteral("mesh vertex"),
-                                          lastError) ||
-        !targets.meshIndexBuffer->upload(device,
-                                         uploadData.indices.data(),
-                                         uploadData.indices.size() * sizeof(unsigned int),
-                                         QStringLiteral("mesh index"),
-                                         lastError) ||
-        !targets.pointVertexBuffer->upload(device,
-                                           uploadData.pointPositions.data(),
-                                           uploadData.pointPositions.size() * sizeof(float),
-                                           QStringLiteral("mesh point"),
-                                           lastError)) {
-        resetMetalMeshUploadTargets(targets);
-        return false;
+    std::vector<MetalPrivateBufferUpload> uploads = {
+        {targets.meshVertexBuffer,
+         uploadData.vertices.data(),
+         uploadData.vertices.size() * sizeof(MetalMeshVertex),
+         QStringLiteral("mesh vertex")},
+        {targets.meshIndexBuffer,
+         uploadData.indices.data(),
+         uploadData.indices.size() * sizeof(unsigned int),
+         QStringLiteral("mesh index")},
+        {targets.pointVertexBuffer,
+         uploadData.pointPositions.data(),
+         uploadData.pointPositions.size() * sizeof(float),
+         QStringLiteral("mesh point")}
+    };
+    if (*targets.edgeVertexCount > 0 && *targets.edgeIndexCount > 0) {
+        uploads.push_back({targets.edgeVertexBuffer,
+                           mesh.edgeVertices.data(),
+                           mesh.edgeVertices.size() * sizeof(float),
+                           QStringLiteral("edge vertex")});
+        uploads.push_back({targets.edgeIndexBuffer,
+                           uploadData.edgeIndices.data(),
+                           uploadData.edgeIndices.size() * sizeof(unsigned int),
+                           QStringLiteral("edge index")});
     }
 
-    if (*targets.edgeVertexCount > 0 && *targets.edgeIndexCount > 0) {
-        if (!targets.edgeVertexBuffer->upload(device,
-                                              mesh.edgeVertices.data(),
-                                              mesh.edgeVertices.size() * sizeof(float),
-                                              QStringLiteral("edge vertex"),
-                                              lastError) ||
-            !targets.edgeIndexBuffer->upload(device,
-                                             uploadData.edgeIndices.data(),
-                                             uploadData.edgeIndices.size() * sizeof(unsigned int),
-                                             QStringLiteral("edge index"),
-                                             lastError)) {
-            resetMetalMeshUploadTargets(targets);
-            return false;
-        }
+    if (!MetalBufferResource::uploadPrivateBatch(device, commandQueue, uploads, lastError)) {
+        resetMetalMeshUploadTargets(targets);
+        return false;
     }
 
     return true;

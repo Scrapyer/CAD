@@ -82,6 +82,14 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
     framePass.depthStencilState = resources.depthStencilState;
     framePass.overlayDepthStencilState = resources.overlayDepthStencilState;
     framePass.drawableSize = resources.drawableSize;
+    framePass.backgroundUniforms.bottomColor[0] = resources.backgroundBottomColor.x();
+    framePass.backgroundUniforms.bottomColor[1] = resources.backgroundBottomColor.y();
+    framePass.backgroundUniforms.bottomColor[2] = resources.backgroundBottomColor.z();
+    framePass.backgroundUniforms.bottomColor[3] = 1.0f;
+    framePass.backgroundUniforms.topColor[0] = resources.backgroundTopColor.x();
+    framePass.backgroundUniforms.topColor[1] = resources.backgroundTopColor.y();
+    framePass.backgroundUniforms.topColor[2] = resources.backgroundTopColor.z();
+    framePass.backgroundUniforms.topColor[3] = 1.0f;
     framePass.surface = makeIndexedDraw(flags.surface,
                                         resources.meshPipelineState,
                                         resources.meshVertexBuffer,

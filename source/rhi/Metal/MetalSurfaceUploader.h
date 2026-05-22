@@ -17,12 +17,14 @@ struct MetalClipPreviewLineTargets {
 };
 
 bool uploadMetalSurfaceBuffers(void* device,
+                               void* commandQueue,
                                const MetalSurfaceUploadData& uploadData,
                                const MetalSurfaceBufferTargets& targets,
                                const QString& label,
                                QString& lastError);
 
 bool uploadMetalClipPreviewBuffers(void* device,
+                                   void* commandQueue,
                                    const Mesh& mesh,
                                    const MetalSurfaceUploadData& uploadData,
                                    const MetalSurfaceBufferTargets& surfaceTargets,

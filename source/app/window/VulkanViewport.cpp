@@ -135,6 +135,7 @@ VulkanViewport::~VulkanViewport()
 
 void VulkanViewport::startRendering()
 {
+    resetFrameStats();
     if (!frameTimer_.isActive()) {
         frameTimer_.start();
     }
@@ -229,6 +230,7 @@ void VulkanViewport::setModelDisplayMode(ModelDisplayMode mode)
         return;
     }
     displayMode_ = mode;
+    resetFrameStats();
     renderFrame();
 }
 
@@ -453,6 +455,12 @@ void VulkanViewport::fitToModel(const glm::vec3& center, float size)
     cam_.yaw = 30.0f;
     cam_.pitch = 25.0f;
     selectionMarkerSize_ = modelSize_ * 0.015f;
+    renderFrame();
+}
+
+void VulkanViewport::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
+{
+    backend_.setBackgroundGradient(topColor, bottomColor);
     renderFrame();
 }
 
@@ -1476,9 +1484,17 @@ void VulkanViewport::updateFrameStats(qint64 frameNs)
     frameTimeMs_ = static_cast<float>(frameNs) / 1000000.0f;
     ++frameCounter_;
     const qint64 elapsedMs = fpsTimer_.elapsed();
-    if (elapsedMs >= 1000) {
+    if (elapsedMs >= 250) {
         fps_ = static_cast<float>(frameCounter_) * 1000.0f / static_cast<float>(elapsedMs);
         frameCounter_ = 0;
         fpsTimer_.restart();
     }
+}
+
+void VulkanViewport::resetFrameStats()
+{
+    frameCounter_ = 0;
+    fps_ = 0.0f;
+    frameTimeMs_ = 0.0f;
+    fpsTimer_.restart();
 }

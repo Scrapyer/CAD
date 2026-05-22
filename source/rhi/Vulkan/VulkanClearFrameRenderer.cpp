@@ -513,6 +513,12 @@ bool VulkanClearFrameRenderer::uploadSelectionLines(
                                          "Selection line vertex");
 }
 
+void VulkanClearFrameRenderer::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
+{
+    backgroundTopColor_ = topColor;
+    backgroundBottomColor_ = bottomColor;
+}
+
 bool VulkanClearFrameRenderer::uploadOverlayLines(
     const VulkanDevice& device,
     const std::vector<float>& lineVertices)
@@ -937,6 +943,16 @@ void VulkanClearFrameRenderer::recordBackground(VkCommandBuffer commandBuffer, V
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.background.pipeline());
+    std::array<float, 8> pushConstants = {
+        backgroundBottomColor_.x(), backgroundBottomColor_.y(), backgroundBottomColor_.z(), 1.0f,
+        backgroundTopColor_.x(), backgroundTopColor_.y(), backgroundTopColor_.z(), 1.0f
+    };
+    vkCmdPushConstants(commandBuffer,
+                       pipelines_.background.layout(),
+                       VK_SHADER_STAGE_VERTEX_BIT,
+                       0,
+                       static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
+                       pushConstants.data());
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 }
 
@@ -1306,6 +1322,12 @@ bool VulkanClearFrameRenderer::createBackgroundGraphicsPipeline(const VulkanDevi
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkPushConstantRange backgroundPushRange{};
+    backgroundPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    backgroundPushRange.offset = 0;
+    backgroundPushRange.size = sizeof(float) * 8;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &backgroundPushRange;
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

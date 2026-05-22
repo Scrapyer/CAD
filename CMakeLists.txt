@@ -218,6 +218,8 @@ endif()
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/source)
 
 set(RENDER_INCLUDE_DIRS
+    ${SOURCE_DIR}/app/platform/macos
+    ${SOURCE_DIR}/app/window
     ${SOURCE_DIR}/common
     ${SOURCE_DIR}/data
     ${SOURCE_DIR}/convert
@@ -233,6 +235,7 @@ set(RENDER_INCLUDE_DIRS
 # qt6_wrap_cpp 使用目录 include 属性生成 moc 命令；这里同步模块头文件路径。
 include_directories(
     ${SOURCE_DIR}/app
+    ${SOURCE_DIR}/app/ui
     ${RENDER_INCLUDE_DIRS}
     ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -241,7 +244,7 @@ set(RENDER_HEADERS
     ${SOURCE_DIR}/render/Camera.h
     ${SOURCE_DIR}/render/Geometry.h
     ${SOURCE_DIR}/render/GLWidget.h
-    ${SOURCE_DIR}/render/RenderViewport.h
+    ${SOURCE_DIR}/app/window/RenderViewport.h
     ${SOURCE_DIR}/render/FERenderData.h
     ${SOURCE_DIR}/render/FEPickResult.h
     ${SOURCE_DIR}/data/FEModel.h
@@ -270,7 +273,7 @@ set(RENDER_SOURCES
     ${SOURCE_DIR}/render/ColorBarOverlay.cpp
     ${SOURCE_DIR}/render/Geometry.cpp
     ${SOURCE_DIR}/render/GLWidget.cpp
-    ${SOURCE_DIR}/render/RenderViewport.cpp
+    ${SOURCE_DIR}/app/window/RenderViewport.cpp
     ${SOURCE_DIR}/rhi/RenderBackendFactory.cpp
     ${SOURCE_DIR}/rhi/RenderSettings.cpp
     ${SOURCE_DIR}/rhi/OpenGL/OpenGLRenderBackend.cpp
@@ -295,14 +298,14 @@ set(RENDER_SOURCES
 
 if(FERENDER_HAS_METAL_RHI)
     list(APPEND RENDER_SOURCES
-        ${SOURCE_DIR}/render/MetalViewport.cpp
+        ${SOURCE_DIR}/app/window/MetalViewport.cpp
         ${SOURCE_DIR}/rhi/Metal/MetalAttachmentResourceBuilder.mm
         ${SOURCE_DIR}/rhi/Metal/MetalBufferResource.mm
         ${SOURCE_DIR}/rhi/Metal/MetalClearFramePass.mm
         ${SOURCE_DIR}/rhi/Metal/MetalDepthStencilFactory.mm
         ${SOURCE_DIR}/rhi/Metal/MetalDeviceFactory.mm
         ${SOURCE_DIR}/rhi/Metal/MetalDrawableFrameSubmitter.mm
-        ${SOURCE_DIR}/rhi/Metal/MetalLayerHost.mm
+        ${SOURCE_DIR}/app/platform/macos/MacOSMetalLayerHost.mm
         ${SOURCE_DIR}/rhi/Metal/MetalLineUpload.cpp
         ${SOURCE_DIR}/rhi/Metal/MetalMeshFramePass.mm
         ${SOURCE_DIR}/rhi/Metal/MetalMeshFramePassBuilder.cpp
@@ -352,7 +355,7 @@ if(FERENDER_HAS_VULKAN_RHI)
     if(APPLE)
         list(APPEND RENDER_SOURCES
             ${SOURCE_DIR}/rhi/Vulkan/VulkanMacOSSurfaceFactory.mm
-            ${SOURCE_DIR}/render/VulkanViewport.cpp
+            ${SOURCE_DIR}/app/window/VulkanViewport.cpp
         )
     endif()
 endif()
@@ -379,6 +382,7 @@ target_include_directories(FERender
         $<BUILD_INTERFACE:${SOURCE_DIR}/rhi/OpenGL>
         $<BUILD_INTERFACE:${SOURCE_DIR}/rhi/Vulkan>
         $<BUILD_INTERFACE:${SOURCE_DIR}/render>
+        $<BUILD_INTERFACE:${SOURCE_DIR}/app/window>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
         $<INSTALL_INTERFACE:include/FERender>
 )
@@ -580,24 +584,24 @@ target_include_directories(FERender SYSTEM PUBLIC
 
 # 手动 MOC 应用程序自己的头文件，避免 AUTOMOC 重复 moc FERender 的 Q_OBJECT 类
 qt6_wrap_cpp(VIEWER_MOC_SRCS
-    ${SOURCE_DIR}/app/MainWindow.h
-    ${SOURCE_DIR}/app/FEModelPanel.h
-    ${SOURCE_DIR}/app/PartsPanel.h
-    ${SOURCE_DIR}/app/ResultPanel.h
-    ${SOURCE_DIR}/app/ControlPanel.h
-    ${SOURCE_DIR}/app/MonitorPanel.h
+    ${SOURCE_DIR}/app/ui/MainWindow.h
+    ${SOURCE_DIR}/app/ui/FEModelPanel.h
+    ${SOURCE_DIR}/app/ui/PartsPanel.h
+    ${SOURCE_DIR}/app/ui/ResultPanel.h
+    ${SOURCE_DIR}/app/ui/ControlPanel.h
+    ${SOURCE_DIR}/app/ui/MonitorPanel.h
 )
 
 qt6_add_resources(VIEWER_QRC icons.qrc)
 
 add_executable(${PROJECT_NAME}
     ${SOURCE_DIR}/app/main.cpp
-    ${SOURCE_DIR}/app/MainWindow.cpp
-    ${SOURCE_DIR}/app/FEModelPanel.cpp
-    ${SOURCE_DIR}/app/PartsPanel.cpp
-    ${SOURCE_DIR}/app/ResultPanel.cpp
-    ${SOURCE_DIR}/app/ControlPanel.cpp
-    ${SOURCE_DIR}/app/MonitorPanel.cpp
+    ${SOURCE_DIR}/app/ui/MainWindow.cpp
+    ${SOURCE_DIR}/app/ui/FEModelPanel.cpp
+    ${SOURCE_DIR}/app/ui/PartsPanel.cpp
+    ${SOURCE_DIR}/app/ui/ResultPanel.cpp
+    ${SOURCE_DIR}/app/ui/ControlPanel.cpp
+    ${SOURCE_DIR}/app/ui/MonitorPanel.cpp
     ${VIEWER_MOC_SRCS}
     ${VIEWER_QRC}
 )
@@ -618,6 +622,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE FERender)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${SOURCE_DIR}/app
+    ${SOURCE_DIR}/app/ui
     ${RENDER_INCLUDE_DIRS}
 )
 
@@ -847,6 +852,7 @@ if(BUILD_TESTING)
             tests/test_macos_metal_layer.cpp
         )
         target_include_directories(test_macos_metal_layer PRIVATE
+            ${SOURCE_DIR}/app/platform/macos
             ${SOURCE_DIR}/rhi
             ${SOURCE_DIR}/rhi/Metal
         )
@@ -859,15 +865,16 @@ if(BUILD_TESTING)
         )
     endif()
 
-    qt6_wrap_cpp(TEST_RESULT_PANEL_MOC_SRCS ${SOURCE_DIR}/app/ResultPanel.h)
+    qt6_wrap_cpp(TEST_RESULT_PANEL_MOC_SRCS ${SOURCE_DIR}/app/ui/ResultPanel.h)
     add_executable(test_result_panel
         tests/test_result_panel.cpp
-        ${SOURCE_DIR}/app/ResultPanel.cpp
+        ${SOURCE_DIR}/app/ui/ResultPanel.cpp
         ${TEST_RESULT_PANEL_MOC_SRCS}
     )
     set_target_properties(test_result_panel PROPERTIES AUTOMOC OFF)
     target_include_directories(test_result_panel PRIVATE
         ${SOURCE_DIR}/app
+        ${SOURCE_DIR}/app/ui
         ${RENDER_INCLUDE_DIRS}
     )
     target_link_libraries(test_result_panel PRIVATE FERender Qt6::Core Qt6::Gui Qt6::Widgets)
