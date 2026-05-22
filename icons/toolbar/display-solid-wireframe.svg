@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <style>.edge{fill:none;stroke:#566170;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}.face{fill:#bfe4c7;stroke:#566170;stroke-width:1.2;stroke-linejoin:round}.top{fill:#e8f7fb;stroke:#566170;stroke-width:1.2;stroke-linejoin:round}.accent{fill:none;stroke:#0b79a5;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}</style>
+  </defs>
+  <path d="M5 9l7-4 7 4-7 4z" class="top"/>
+  <path d="M5 9v7l7 4v-7z" class="face"/>
+  <path d="M19 9v7l-7 4v-7z" fill="#28a8d8" opacity=".75" stroke="#566170" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M5 9l7 4 7-4M12 13v7M5 16l7 4 7-4" class="edge"/>
+  <path d="M8.5 11l3.5-2 3.5 2M8.5 15l3.5 2 3.5-2" class="accent"/>
+</svg>

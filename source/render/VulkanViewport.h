@@ -32,6 +32,7 @@ public:
     void renderFrame();
     void setMesh(const Mesh& mesh);
     void setObjectColor(const glm::vec3& color);
+    void setModelDisplayMode(ModelDisplayMode mode);
     void setVertexColors(const std::vector<float>& colors);
     void setUseVertexColor(bool use);
     void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
@@ -132,6 +133,8 @@ private:
     PickMode pickMode_ = PickMode::Element;
     FESelection selection_;
     glm::vec3 objectColor_{0.48f, 0.72f, 0.76f};
+    ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;
+    float modelSize_ = 1.0f;
     bool useVertexColor_ = false;
     std::vector<float> vertexColors_;
     std::vector<float> vertexScalars_;

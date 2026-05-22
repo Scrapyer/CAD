@@ -1019,6 +1019,7 @@ explicit GLWidget(QWidget* parent = nullptr);
 | `void setVertexColors(const std::vector<float>& colors)` | 设置 per-vertex RGB 颜色（用于云图） |
 | `void setObjectColor(const glm::vec3& c)` | 设置统一物体颜色 |
 | `void setUseVertexColor(bool use)` | 切换云图模式 (`true`) / 纯色模式 (`false`) |
+| `void setModelDisplayMode(ModelDisplayMode mode)` | 切换模型显示方式：实体、线框、实体+线框或点显示 |
 | `void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands)` | 上传 per-vertex 标量值，由 GPU 着色器做量化 + 颜色映射 |
 
 #### 相机与视图
@@ -1155,6 +1156,7 @@ signals:
 ```cpp
 void setMesh(const Mesh& mesh);
 void setPickMode(PickMode mode);
+void setModelDisplayMode(ModelDisplayMode mode);
 void setPreferredRenderBackend(RenderBackendKind kind);
 RenderBackendKind requestedRenderBackendKind() const;
 RenderBackendKind activeRenderBackendKind() const;
@@ -1180,6 +1182,8 @@ void partsPicked(const std::vector<int>& partIndices);
 **头文件**：`RenderSettings.h`
 
 使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。
+
+`RenderBackend.h` 公开 `ModelDisplayMode` 枚举，取值为 `Solid`、`Wireframe`、`SolidWireframe`、`Points`，由 `GLWidget` 和 `RenderViewport` 统一接收并转发到当前 OpenGL 或 Vulkan 视口。
 
 ```cpp
 class RenderSettings {
@@ -1875,7 +1879,7 @@ glWidget->setIsoSurfaceMesh(iso);
 | `FEMeshConverter.h` | `source/convert/FEMeshConverter.h` | `FEMeshConverter` | 网格转换器 |
 | `Camera.h` | `source/render/Camera.h` | `Camera` | 轨道相机 |
 | `Theme.h` | `source/common/Theme.h` | `Theme` | 主题颜色配置（供 `GLWidget::applyTheme()` 使用） |
-| `RenderBackend.h` | `source/rhi/RenderBackend.h` | `RenderBackendKind`, `IRenderBackend`, `Scene*` | RHI 类型和通用渲染描述 |
+| `RenderBackend.h` | `source/rhi/RenderBackend.h` | `RenderBackendKind`, `ModelDisplayMode`, `IRenderBackend`, `Scene*` | RHI 类型和通用渲染描述 |
 | `RenderBackendFactory.h` | `source/rhi/RenderBackendFactory.h` | `createRenderBackend`, `isRenderBackendAvailable` | 渲染后端创建与可用性查询 |
 | `RenderSettings.h` | `source/rhi/RenderSettings.h` | `RenderSettings` | 全局首选 RHI 持久化设置 |
 | `GLWidget.h` | `source/render/GLWidget.h` | `GLWidget` | OpenGL 渲染窗口 |

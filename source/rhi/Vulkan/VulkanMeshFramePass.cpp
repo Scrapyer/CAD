@@ -138,35 +138,55 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
 
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.meshPipeline->pipeline());
-    std::array<float, 20> meshPushConstants{};
-    std::memcpy(meshPushConstants.data(), mvp.constData(), 16 * sizeof(float));
-    meshPushConstants[16] = resources.meshScalarMin;
-    meshPushConstants[17] = resources.meshScalarMax;
-    meshPushConstants[18] = static_cast<float>(resources.meshNumBands);
-    meshPushConstants[19] = resources.meshUseVertexScalars ? 1.0f : 0.0f;
-    vkCmdPushConstants(commandBuffer,
-                       resources.meshPipeline->layout(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0,
-                       static_cast<uint32_t>(meshPushConstants.size() * sizeof(float)),
-                       meshPushConstants.data());
     VkBuffer meshVertexBuffer = resources.meshVertexResource->buffer();
     VkBuffer meshIndexBuffer = resources.meshIndexResource->buffer();
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshVertexBuffer, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    if (resources.meshScalarDescriptor != nullptr && resources.meshScalarDescriptor->isValid()) {
-        VkDescriptorSet meshDescriptorSet = resources.meshScalarDescriptor->descriptorSet();
-        vkCmdBindDescriptorSets(commandBuffer,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                resources.meshPipeline->layout(),
-                                0,
-                                1,
-                                &meshDescriptorSet,
-                                0,
-                                nullptr);
+
+    const bool drawSurface =
+        resources.displayMode == ModelDisplayMode::Solid ||
+        resources.displayMode == ModelDisplayMode::SolidWireframe;
+    const bool drawEdges =
+        resources.displayMode == ModelDisplayMode::Wireframe ||
+        resources.displayMode == ModelDisplayMode::SolidWireframe;
+    const bool drawPoints = resources.displayMode == ModelDisplayMode::Points;
+
+    if (drawSurface) {
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.meshPipeline->pipeline());
+        std::array<float, 20> meshPushConstants{};
+        std::memcpy(meshPushConstants.data(), mvp.constData(), 16 * sizeof(float));
+        meshPushConstants[16] = resources.meshScalarMin;
+        meshPushConstants[17] = resources.meshScalarMax;
+        meshPushConstants[18] = static_cast<float>(resources.meshNumBands);
+        meshPushConstants[19] = resources.meshUseVertexScalars ? 1.0f : 0.0f;
+        vkCmdPushConstants(commandBuffer,
+                           resources.meshPipeline->layout(),
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0,
+                           static_cast<uint32_t>(meshPushConstants.size() * sizeof(float)),
+                           meshPushConstants.data());
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshVertexBuffer, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        if (resources.meshScalarDescriptor != nullptr && resources.meshScalarDescriptor->isValid()) {
+            VkDescriptorSet meshDescriptorSet = resources.meshScalarDescriptor->descriptorSet();
+            vkCmdBindDescriptorSets(commandBuffer,
+                                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    resources.meshPipeline->layout(),
+                                    0,
+                                    1,
+                                    &meshDescriptorSet,
+                                    0,
+                                    nullptr);
+        }
+        vkCmdDrawIndexed(commandBuffer, resources.meshIndexCount, 1, 0, 0, 0);
     }
-    vkCmdDrawIndexed(commandBuffer, resources.meshIndexCount, 1, 0, 0, 0);
+
+    if (drawPoints) {
+        recordLineDraw(commandBuffer,
+                       resources.pointPipeline,
+                       resources.meshVertexResource,
+                       resources.meshIndexCount,
+                       mvp,
+                       {{0.58f, 0.78f, 0.74f, 1.0f}});
+    }
 
     recordIndexedSurfaceDraw(commandBuffer,
                              resources.isoSurfacePipeline,
@@ -188,13 +208,15 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
                    resources.overlayLineVertexCount,
                    mvp,
                    {{0.5f, 0.5f, 0.5f, 0.35f}});
-    recordIndexedLineDraw(commandBuffer,
-                          resources.linePipeline,
-                          resources.edgeVertexResource,
-                          resources.edgeIndexResource,
-                          resources.edgeIndexCount,
-                          mvp,
-                          {{0.2f, 0.2f, 0.22f, 1.0f}});
+    if (drawEdges) {
+        recordIndexedLineDraw(commandBuffer,
+                              resources.linePipeline,
+                              resources.edgeVertexResource,
+                              resources.edgeIndexResource,
+                              resources.edgeIndexCount,
+                              mvp,
+                              {{0.2f, 0.2f, 0.22f, 1.0f}});
+    }
     recordLineDraw(commandBuffer,
                    resources.linePipeline,
                    resources.sliceLineVertexResource,

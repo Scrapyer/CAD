@@ -271,7 +271,8 @@ bool VulkanRenderBackend::renderMeshFrame(
     float green,
     float blue,
     float alpha,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    ModelDisplayMode displayMode)
 {
     lastError_.clear();
     if (!hasSwapchain()) {
@@ -285,7 +286,7 @@ bool VulkanRenderBackend::renderMeshFrame(
     clearColor.float32[2] = blue;
     clearColor.float32[3] = alpha;
 
-    if (!clearFrameRenderer_->renderMeshFrame(*device_, *swapchain_, clearColor, mvp, axesMvp)) {
+    if (!clearFrameRenderer_->renderMeshFrame(*device_, *swapchain_, clearColor, mvp, axesMvp, displayMode)) {
         lastError_ = clearFrameRenderer_->lastError();
         return false;
     }

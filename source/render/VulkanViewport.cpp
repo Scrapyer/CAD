@@ -175,7 +175,7 @@ void VulkanViewport::renderFrame()
 
     const QMatrix4x4 axesMvp = currentAxesMvp();
     const bool rendered = hasMesh_
-        ? backend_.renderMeshFrame(currentMvp(), 0.04f, 0.05f, 0.07f, 1.0f, axesMvp)
+        ? backend_.renderMeshFrame(currentMvp(), 0.04f, 0.05f, 0.07f, 1.0f, axesMvp, displayMode_)
         : backend_.renderClearFrame(0.04f, 0.05f, 0.07f, 1.0f);
     if (!rendered) {
         if (backend_.needsSwapchainRecreate()) {
@@ -220,6 +220,15 @@ void VulkanViewport::setObjectColor(const glm::vec3& color)
 {
     objectColor_ = color;
     meshDirty_ = true;
+    renderFrame();
+}
+
+void VulkanViewport::setModelDisplayMode(ModelDisplayMode mode)
+{
+    if (displayMode_ == mode) {
+        return;
+    }
+    displayMode_ = mode;
     renderFrame();
 }
 
@@ -435,15 +444,15 @@ void VulkanViewport::highlightParts(const std::vector<int>& partIndices)
 
 void VulkanViewport::fitToModel(const glm::vec3& center, float size)
 {
-    const float modelSize = std::max(size, 1.0e-4f);
+    modelSize_ = std::max(size, 1.0e-4f);
     cam_.target = center;
-    cam_.distance = modelSize * 1.5f;
-    cam_.maxDist = modelSize * 10.0f;
-    cam_.minDist = modelSize * 0.05f;
+    cam_.distance = modelSize_ * 1.5f;
+    cam_.maxDist = modelSize_ * 10.0f;
+    cam_.minDist = modelSize_ * 0.05f;
     cam_.panSensitivity = 0.001f;
     cam_.yaw = 30.0f;
     cam_.pitch = 25.0f;
-    selectionMarkerSize_ = modelSize * 0.015f;
+    selectionMarkerSize_ = modelSize_ * 0.015f;
     renderFrame();
 }
 
@@ -1011,8 +1020,11 @@ glm::mat4 VulkanViewport::currentGlmMvp() const
     const float aspect = (size.height() > 0)
         ? static_cast<float>(std::max(1, size.width())) / static_cast<float>(size.height())
         : 1.0f;
-    const float nearPlane = std::max(cam_.distance * 0.01f, 1.0e-4f);
-    const float farPlane = std::max(cam_.distance * 10.0f, nearPlane + 1.0f);
+    const float sceneSize = std::max(modelSize_, 1.0e-4f);
+    const float nearPlane = std::max(std::min(cam_.distance * 0.01f, sceneSize * 0.01f),
+                                     sceneSize * 1.0e-5f);
+    const float farPlane = std::max(cam_.distance + sceneSize * 2.0f,
+                                    nearPlane + sceneSize * 0.1f);
 
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, nearPlane, farPlane);
     projection[1][1] *= -1.0f; // Vulkan NDC 的 Y 方向与 OpenGL 不同。

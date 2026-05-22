@@ -1,48 +1,53 @@
 # RHI Layer
 
-这里放渲染后端抽象和具体图形 API 实现。
+这里放渲染后端抽象和具体图形 API 实现。公共抽象仍保留在 `source/rhi`，
+具体后端按 API 分目录：
+
+- `OpenGL/`：OpenGL 后端实现。
+- `Vulkan/`：Vulkan 后端、macOS surface 工厂、资源封装和 shader。
+- `Metal/`：预留 Metal 后端目录。
 
 - `RenderBackend.h` 定义 `IRenderBackend` 和后端信息结构。
 - `RenderBackendFactory.*` 提供后端创建入口，当前默认返回 OpenGL 后端。
 - `RenderSettings.*` 使用应用目录下的 `config/settings.ini` 记录全局首选 RHI，并在后端不可用时提供回退选择；运行时修改只写配置，下次启动生效。
-- `OpenGLRenderBackend.*` 是当前 OpenGL 后端的落脚点。
-- `VulkanContext.*` 封装 Vulkan instance、API 版本选择和 portability enumeration。
-- `VulkanDevice.*` 封装物理设备选择、逻辑设备创建和 graphics/present 队列。
-- `VulkanSurface.*` 封装外部创建的 `VkSurfaceKHR` 生命周期。
-- `VulkanSwapchain.*` 封装 surface 绑定后的 swapchain 创建入口。
-- `VulkanMacOSSurfaceFactory.*` 在 macOS 上通过 `QWindow` 原生 `NSView/CAMetalLayer`
+- `OpenGL/OpenGLRenderBackend.*` 是当前 OpenGL 后端的落脚点。
+- `Vulkan/VulkanContext.*` 封装 Vulkan instance、API 版本选择和 portability enumeration。
+- `Vulkan/VulkanDevice.*` 封装物理设备选择、逻辑设备创建和 graphics/present 队列。
+- `Vulkan/VulkanSurface.*` 封装外部创建的 `VkSurfaceKHR` 生命周期。
+- `Vulkan/VulkanSwapchain.*` 封装 surface 绑定后的 swapchain 创建入口。
+- `Vulkan/VulkanMacOSSurfaceFactory.*` 在 macOS 上通过 `QWindow` 原生 `NSView/CAMetalLayer`
   创建 `VK_EXT_metal_surface` surface。
-- `VulkanBufferResource.*` 封装 Vulkan buffer 的创建、上传、局部更新和销毁；主网格
+- `Vulkan/VulkanBufferResource.*` 封装 Vulkan buffer 的创建、上传、局部更新和销毁；主网格
   vertex/index、普通边线 vertex/index、iso surface vertex/index、clip preview vertex/index
   以及 overlay、slice、selection、clip preview 边框线已通过 staging buffer 上传到 device-local 内存；
   scalar SSBO 和 pick readback 仍按更新频率使用 host-visible 路径。
-- `VulkanMeshBufferResources.*` 封装主 mesh、普通边线、scalar SSBO 和 scalar descriptor 资源组。
-- `VulkanDepthResource.*` 封装 depth attachment 的 image / memory / image view 生命周期。
-- `VulkanPickResources.*` 封装离屏 pick color image、pick depth、framebuffer 和单像素 readback buffer。
-- `VulkanSwapchainFrameResources.*` 封装 swapchain image view 与 framebuffer 集合。
-- `VulkanStagingUploadContext.*` 合并一次模型上传中的多段 staging copy，用单个 command buffer 和 fence 提交。
-- `VulkanDescriptorResource.*` 封装 storage-buffer descriptor pool/set 的创建、更新和销毁，
+- `Vulkan/VulkanMeshBufferResources.*` 封装主 mesh、普通边线、scalar SSBO 和 scalar descriptor 资源组。
+- `Vulkan/VulkanDepthResource.*` 封装 depth attachment 的 image / memory / image view 生命周期。
+- `Vulkan/VulkanPickResources.*` 封装离屏 pick color image、pick depth、framebuffer 和单像素 readback buffer。
+- `Vulkan/VulkanSwapchainFrameResources.*` 封装 swapchain image view 与 framebuffer 集合。
+- `Vulkan/VulkanStagingUploadContext.*` 合并一次模型上传中的多段 staging copy，用单个 command buffer 和 fence 提交。
+- `Vulkan/VulkanDescriptorResource.*` 封装 storage-buffer descriptor pool/set 的创建、更新和销毁，
   当前承接 mesh scalar SSBO 绑定。
-- `VulkanDescriptorSetLayoutResource.*` 封装 descriptor set layout 生命周期，当前承接
+- `Vulkan/VulkanDescriptorSetLayoutResource.*` 封装 descriptor set layout 生命周期，当前承接
   mesh scalar SSBO 的 set layout。
-- `VulkanRenderPassResource.*` / `VulkanFramebufferResource.*` 封装主视口和拾取路径的
+- `Vulkan/VulkanRenderPassResource.*` / `Vulkan/VulkanFramebufferResource.*` 封装主视口和拾取路径的
   render pass / framebuffer 生命周期，逐步把裸 Vulkan handle 收敛为 RHI 资源对象。
-- `VulkanPipelineResource.*` 封装 graphics pipeline 与 pipeline layout 生命周期，当前承接
+- `Vulkan/VulkanPipelineResource.*` 封装 graphics pipeline 与 pipeline layout 生命周期，当前承接
   background、triangle、mesh、iso surface、line 和 pick 管线。
-- `VulkanFramePipelines.*` 封装 frame renderer 使用的 pipeline 资源组，后续可继续迁入具体创建逻辑。
-- `VulkanCommandResource.*` 封装 resettable command pool 与主 command buffer 生命周期，
+- `Vulkan/VulkanFramePipelines.*` 封装 frame renderer 使用的 pipeline 资源组，后续可继续迁入具体创建逻辑。
+- `Vulkan/VulkanCommandResource.*` 封装 resettable command pool 与主 command buffer 生命周期，
   当前承接主视口、拾取和 readback 录制，staging 上传上下文复用其 command pool 分配一次性 copy buffer。
-- `VulkanMeshFramePass.*` 负责主网格帧 command buffer 内的 mesh、iso、clip preview、
+- `Vulkan/VulkanMeshFramePass.*` 负责主网格帧 command buffer 内的 mesh、iso、clip preview、
   overlay、edge、slice 和 selection draw 录制。
-- `VulkanPickPass.*` 负责离屏拾取 command buffer 录制和 1x1 readback copy/barrier 录制。
-- `shaders/vulkan_background.*` / `shaders/vulkan_triangle.*` / `shaders/vulkan_mesh.*` /
-  `shaders/vulkan_iso.*` / `shaders/vulkan_line.*` / `shaders/vulkan_pick.*` 是 Vulkan 渐变背景、最小图形管线、主网格管线、等值面叠加管线、边线管线和拾取管线的
+- `Vulkan/VulkanPickPass.*` 负责离屏拾取 command buffer 录制和 1x1 readback copy/barrier 录制。
+- `Vulkan/shaders/vulkan_background.*` / `Vulkan/shaders/vulkan_triangle.*` / `Vulkan/shaders/vulkan_mesh.*` /
+  `Vulkan/shaders/vulkan_iso.*` / `Vulkan/shaders/vulkan_line.*` / `Vulkan/shaders/vulkan_pick.*` 是 Vulkan 渐变背景、最小图形管线、主网格管线、等值面叠加管线、边线管线和拾取管线的
   GLSL 源码，由 CMake 调用
   `glslc` 编译为 SPIR-V。
-- `VulkanClearFrameRenderer.*` 创建 render pass、graphics pipeline、command pool、同步对象，
+- `Vulkan/VulkanClearFrameRenderer.*` 创建 render pass、graphics pipeline、command pool、同步对象，
   并协调清屏、固定三角形、主网格、swapchain frame resources 和拾取帧提交。
-- `VulkanRenderBackend.*` 组合 Vulkan 基础设施，是传统 Vulkan 图形管线后端的落脚点。
-- 后续 QRhi 后端也放在这里，避免继续扩大 `source/render/GLWidget.*`。
+- `Vulkan/VulkanRenderBackend.*` 组合 Vulkan 基础设施，是传统 Vulkan 图形管线后端的落脚点。
+- 后续 Metal/QRhi 后端也放到对应子目录，避免继续扩大 `source/render/GLWidget.*`。
 
 Vulkan 后端通过 `FEMODELVIEWER_ENABLE_VULKAN_RHI` 控制，默认在找到 Vulkan SDK 时编译。
 运行时 `VulkanContext` 会优先请求 SDK 和 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用

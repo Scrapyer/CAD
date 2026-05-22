@@ -273,15 +273,35 @@ void GLWidget::setMesh(const Mesh& mesh) {
 
 void GLWidget::setObjectColor(const glm::vec3& c) { color_ = c; update(); }
 
+void GLWidget::setModelDisplayMode(ModelDisplayMode mode)
+{
+    if (displayMode_ == mode) {
+        return;
+    }
+    displayMode_ = mode;
+    update();
+}
+
 void GLWidget::fitToModel(const glm::vec3& center, float size) {
+    modelSize_ = std::max(size, 1.0e-4f);
     cam_.target = center;
-    cam_.distance = size * 1.5f;
-    cam_.maxDist = size * 10.0f;
-    cam_.minDist = size * 0.05f;
+    cam_.distance = modelSize_ * 1.5f;
+    cam_.maxDist = modelSize_ * 10.0f;
+    cam_.minDist = modelSize_ * 0.05f;
     cam_.panSensitivity = 0.001f;
     cam_.yaw = 30.0f;
     cam_.pitch = 25.0f;
     update();
+}
+
+glm::mat4 GLWidget::projectionMatrix(float aspect) const
+{
+    const float sceneSize = std::max(modelSize_, 1.0e-4f);
+    const float nearPlane = std::max(std::min(cam_.distance * 0.01f, sceneSize * 0.01f),
+                                     sceneSize * 1.0e-5f);
+    const float farPlane = std::max(cam_.distance + sceneSize * 2.0f,
+                                    nearPlane + sceneSize * 0.1f);
+    return glm::perspective(glm::radians(45.0f), aspect, nearPlane, farPlane);
 }
 
 void GLWidget::setTriangleToElementMap(const std::vector<int>& map) {
@@ -522,9 +542,7 @@ void GLWidget::paintOpenGLFrame() {
 
     // ── 计算变换矩阵 ──
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
-    float nearPlane = cam_.distance * 0.01f;
-    float farPlane  = cam_.distance * 10.0f;
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, nearPlane, farPlane);
+    glm::mat4 projection = projectionMatrix(aspect);
     glm::mat4 model = glm::mat4(1.0f);
     glm::mat4 view = cam_.viewMatrix();
     glm::mat4 mvp = projection * view * model;
@@ -560,6 +578,7 @@ void GLWidget::paintOpenGLFrame() {
     // ── 逐步渲染 ──
     renderMainMesh();
     renderMeshEdges();
+    renderMeshPoints();
     updateSelectionHighlight();
     renderOverlayMesh();
     renderClipPreview();
@@ -651,6 +670,10 @@ void GLWidget::renderMainMesh() {
     int count = activeIndexCount_;
     const bool isoActive = isoIndexCount_ > 0;
     if (count <= 0 || isoActive) return;
+    if (displayMode_ == ModelDisplayMode::Wireframe ||
+        displayMode_ == ModelDisplayMode::Points) {
+        return;
+    }
 
     auto* glBackend = openGLBackend();
     SceneDrawUniforms drawUniforms;
@@ -676,6 +699,10 @@ void GLWidget::renderMainMesh() {
 
 void GLWidget::renderMeshEdges() {
     if (!edgeResource_) return;
+    if (displayMode_ == ModelDisplayMode::Solid ||
+        displayMode_ == ModelDisplayMode::Points) {
+        return;
+    }
 
     auto* glBackend = openGLBackend();
 
@@ -744,6 +771,33 @@ void GLWidget::renderMeshEdges() {
         pass.state = passState;
         glBackend->drawScenePass(pass, *meshResource_);
     }
+}
+
+void GLWidget::renderMeshPoints()
+{
+    const int count = activeIndexCount_;
+    const bool isoActive = isoIndexCount_ > 0;
+    if (displayMode_ != ModelDisplayMode::Points || count <= 0 || isoActive || !meshResource_) {
+        return;
+    }
+
+    auto* glBackend = openGLBackend();
+    SceneDrawUniforms drawUniforms;
+    drawUniforms.color = QVector3D(color_.x, color_.y, color_.z);
+    drawUniforms.wireframe = false;
+    drawUniforms.useVertexColor = useVertexColor_ || !partColors_.empty();
+    ScenePassState passState;
+    passState.applyPointSize = true;
+    passState.pointSize = 4.0f;
+    passState.restoredPointSize = 1.0f;
+    OpenGLScenePass pass;
+    pass.program = shader_;
+    pass.drawKind = SceneDrawKind::Elements;
+    pass.primitive = ScenePrimitive::Points;
+    pass.count = count;
+    pass.uniforms = drawUniforms;
+    pass.state = passState;
+    glBackend->drawScenePass(pass, *meshResource_);
 }
 
 void GLWidget::updateSelectionHighlight() {
@@ -1261,7 +1315,7 @@ void GLWidget::pickAtPoint(const QPoint& pos, bool ctrlHeld) {
 
     // 渲染拾取缓冲
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, cam_.distance * 0.01f, cam_.distance * 10.0f);
+    glm::mat4 projection = projectionMatrix(aspect);
     glm::mat4 view = cam_.viewMatrix();
     glm::mat4 mvp = projection * view;
 
@@ -1369,7 +1423,7 @@ void GLWidget::pickInRect(const QRect& rect) {
     // 注意：此函数现在仅在 paintGL() 内调用，GL 上下文已由 Qt 管理。
 
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, cam_.distance * 0.01f, cam_.distance * 10.0f);
+    glm::mat4 projection = projectionMatrix(aspect);
     glm::mat4 mvp = projection * cam_.viewMatrix();
 
     // 框选范围转换为 NDC 坐标
@@ -1483,7 +1537,7 @@ void GLWidget::deselectAtPoint(const QPoint& pos) {
     if (!pickFramebuffer_ || !pickFramebuffer_->isValid() || triToElem_.empty()) return;
 
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, cam_.distance * 0.01f, cam_.distance * 10.0f);
+    glm::mat4 projection = projectionMatrix(aspect);
     glm::mat4 view = cam_.viewMatrix();
     glm::mat4 mvp = projection * view;
 
@@ -1554,7 +1608,7 @@ void GLWidget::deselectInRect(const QRect& rect) {
     if (triToElem_.empty()) return;
 
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
-    glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, cam_.distance * 0.01f, cam_.distance * 10.0f);
+    glm::mat4 projection = projectionMatrix(aspect);
     glm::mat4 mvp = projection * cam_.viewMatrix();
 
     float ndcL = (2.0f * rect.left() / width()) - 1.0f;

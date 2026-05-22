@@ -75,6 +75,16 @@ void RenderViewport::setObjectColor(const glm::vec3& c)
     }
 #endif
 }
+void RenderViewport::setModelDisplayMode(ModelDisplayMode mode)
+{
+    displayMode_ = mode;
+    glWidget_->setModelDisplayMode(mode);
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setModelDisplayMode(mode);
+    }
+#endif
+}
 void RenderViewport::fitToModel(const glm::vec3& center, float size)
 {
     modelCenter_ = center;
@@ -477,6 +487,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
         vulkanViewport_->setPickMode(currentPickMode_);
         vulkanViewport_->setObjectColor(objectColor_);
+        vulkanViewport_->setModelDisplayMode(displayMode_);
         vulkanViewport_->setOverlayMesh(overlayMesh_);
         vulkanViewport_->setOverlayVisible(overlayVisible_);
         if (!sliceLineVertices_.empty()) {

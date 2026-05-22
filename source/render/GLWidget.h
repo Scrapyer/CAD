@@ -62,6 +62,9 @@ public:
     /** @brief 设置物体颜色 */
     void setObjectColor(const glm::vec3& c);
 
+    /** @brief 设置主模型显示模式。 */
+    void setModelDisplayMode(ModelDisplayMode mode);
+
     /** @brief 自适应缩放 */
     void fitToModel(const glm::vec3& center, float size);
 
@@ -187,6 +190,7 @@ protected:
 private:
     OpenGLRenderBackend* openGLBackend() const;
     RenderBackendKind resolveRenderBackendForWidget(RenderBackendKind requested) const;
+    glm::mat4 projectionMatrix(float aspect) const;
 
     void uploadMesh();
     void drawAxesIndicator();
@@ -202,6 +206,7 @@ private:
     void renderBackground();
     void renderMainMesh();
     void renderMeshEdges();
+    void renderMeshPoints();
     void updateSelectionHighlight();
     void renderOverlayMesh();
     void renderClipPreview();
@@ -234,6 +239,8 @@ private:
     std::unique_ptr<IRenderBackend> renderBackend_;
     RenderBackendKind requestedBackendKind_ = RenderBackendKind::OpenGL;
     RenderBackendKind activeBackendKind_ = RenderBackendKind::OpenGL;
+    ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;
+    float modelSize_ = 1.0f;
 
     // ── OpenGL 对象 ──
     QOpenGLShaderProgram* shader_ = nullptr;

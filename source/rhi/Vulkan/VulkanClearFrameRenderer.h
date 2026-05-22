@@ -10,6 +10,7 @@
 #include "VulkanPickResources.h"
 #include "VulkanRenderPassResource.h"
 #include "VulkanSwapchainFrameResources.h"
+#include "RenderBackend.h"
 
 #include <QString>
 #include <QMatrix4x4>
@@ -64,7 +65,8 @@ public:
                          const VulkanSwapchain& swapchain,
                          const VkClearColorValue& clearColor,
                          const QMatrix4x4& mvp,
-                         const QMatrix4x4& axesMvp = QMatrix4x4());
+                         const QMatrix4x4& axesMvp = QMatrix4x4(),
+                         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
     bool renderPickFrame(const VulkanDevice& device,
                          const QMatrix4x4& mvp,
                          uint32_t width,
@@ -87,6 +89,7 @@ private:
     bool createBackgroundGraphicsPipeline(const VulkanDevice& device);
     bool createGraphicsPipeline(const VulkanDevice& device);
     bool createMeshGraphicsPipeline(const VulkanDevice& device);
+    bool createPointGraphicsPipeline(const VulkanDevice& device);
     bool createIsoSurfaceGraphicsPipeline(const VulkanDevice& device);
     bool createLineGraphicsPipeline(const VulkanDevice& device);
     bool createPickRenderPass(const VulkanDevice& device);
@@ -116,7 +119,8 @@ private:
                                  VkExtent2D extent,
                                  const VkClearColorValue& clearColor,
                                  const QMatrix4x4& mvp,
-                                 const QMatrix4x4& axesMvp = QMatrix4x4());
+                                 const QMatrix4x4& axesMvp = QMatrix4x4(),
+                                 ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
     bool acquireSwapchainImage(const VulkanDevice& device,
                                const VulkanSwapchain& swapchain,
                                uint32_t& imageIndex);

@@ -97,6 +97,21 @@ QSettings makeAppSettings()
                      QSettings::IniFormat);
 }
 
+QString modelDisplayModeText(ModelDisplayMode mode)
+{
+    switch (mode) {
+    case ModelDisplayMode::Solid:
+        return QStringLiteral("实体");
+    case ModelDisplayMode::Wireframe:
+        return QStringLiteral("线框");
+    case ModelDisplayMode::SolidWireframe:
+        return QStringLiteral("实体+线框");
+    case ModelDisplayMode::Points:
+        return QStringLiteral("点");
+    }
+    return QStringLiteral("实体+线框");
+}
+
 int loadThemeIndex()
 {
     QSettings settings = makeAppSettings();
@@ -928,6 +943,43 @@ void MainWindow::setupToolBar() {
             statusLabel_->setText(QString("  %1入口已预留").arg(text));
         });
     }
+
+    toolbar_->addSeparator();
+
+    // ── 模型显示模式 ──
+    displayModeGroup_ = new QActionGroup(this);
+    displayModeGroup_->setExclusive(true);
+
+    struct DisplayModeActionSpec {
+        QString text;
+        QString icon;
+        ModelDisplayMode mode;
+    };
+    const std::vector<DisplayModeActionSpec> displayModeActions = {
+        {QStringLiteral("实体"), QStringLiteral("display-solid"), ModelDisplayMode::Solid},
+        {QStringLiteral("线框"), QStringLiteral("display-wireframe"), ModelDisplayMode::Wireframe},
+        {QStringLiteral("实体+线框"), QStringLiteral("display-solid-wireframe"), ModelDisplayMode::SolidWireframe},
+        {QStringLiteral("点"), QStringLiteral("display-points"), ModelDisplayMode::Points}
+    };
+    for (const auto& actionSpec : displayModeActions) {
+        auto* action = toolbar_->addAction(toolbarIcon(actionSpec.icon), actionSpec.text);
+        action->setCheckable(true);
+        action->setToolTip(QStringLiteral("模型显示：%1").arg(actionSpec.text));
+        action->setData(static_cast<int>(actionSpec.mode));
+        if (actionSpec.mode == ModelDisplayMode::SolidWireframe) {
+            action->setChecked(true);
+        }
+        displayModeGroup_->addAction(action);
+    }
+    connect(displayModeGroup_, &QActionGroup::triggered, this, [this](QAction* action) {
+        const auto mode = static_cast<ModelDisplayMode>(action->data().toInt());
+        if (renderViewport_) {
+            renderViewport_->setModelDisplayMode(mode);
+        }
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  显示模式：%1").arg(modelDisplayModeText(mode)));
+        }
+    });
 
     toolbar_->addSeparator();
 

@@ -74,7 +74,8 @@ public:
                          float green = 0.05f,
                          float blue = 0.07f,
                          float alpha = 1.0f,
-                         const QMatrix4x4& axesMvp = QMatrix4x4());
+                         const QMatrix4x4& axesMvp = QMatrix4x4(),
+                         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
     bool renderPickFrame(const QMatrix4x4& mvp, uint32_t width, uint32_t height);
     bool pickElementAt(const QMatrix4x4& mvp,
                        uint32_t width,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RenderBackend.h"
+
 #include <QMatrix4x4>
 
 #include <vulkan/vulkan.h>
@@ -20,6 +22,7 @@ class VulkanMeshFramePass {
 public:
     struct Resources {
         const VulkanPipelineResource* meshPipeline = nullptr;
+        const VulkanPipelineResource* pointPipeline = nullptr;
         const VulkanPipelineResource* isoSurfacePipeline = nullptr;
         const VulkanPipelineResource* linePipeline = nullptr;
         const VulkanDescriptorResource* meshScalarDescriptor = nullptr;
@@ -27,6 +30,7 @@ public:
         const VulkanBufferResource* meshVertexResource = nullptr;
         const VulkanBufferResource* meshIndexResource = nullptr;
         uint32_t meshIndexCount = 0;
+        ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe;
         bool meshUseVertexScalars = false;
         float meshScalarMin = 0.0f;
         float meshScalarMax = 1.0f;

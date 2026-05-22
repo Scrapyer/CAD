@@ -20,6 +20,13 @@ enum class RenderBackendKind {
     Vulkan
 };
 
+enum class ModelDisplayMode {
+    Solid,
+    Wireframe,
+    SolidWireframe,
+    Points
+};
+
 struct PickDrawItem {
     int startIndex = 0;
     int indexCount = 0;

@@ -37,6 +37,7 @@ public:
     void setMesh(const Mesh& mesh);
     void setVertexColors(const std::vector<float>& colors);
     void setObjectColor(const glm::vec3& c);
+    void setModelDisplayMode(ModelDisplayMode mode);
     void fitToModel(const glm::vec3& center, float size);
     void applyTheme(const Theme& theme);
 
@@ -111,6 +112,7 @@ private:
     bool hasCurrentMesh_ = false;
     glm::vec3 modelCenter_{0.0f, 0.0f, 0.0f};
     glm::vec3 objectColor_{0.48f, 0.72f, 0.76f};
+    ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;
     float modelSize_ = 1.0f;
     bool hasModelFit_ = false;
     bool colorBarVisible_ = false;

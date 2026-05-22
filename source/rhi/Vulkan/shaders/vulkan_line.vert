@@ -10,4 +10,5 @@ layout(push_constant) uniform LinePushConstants {
 void main()
 {
     gl_Position = pc.mvp * vec4(inPosition, 1.0);
+    gl_PointSize = 4.0;
 }

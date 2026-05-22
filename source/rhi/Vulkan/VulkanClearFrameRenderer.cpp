@@ -83,6 +83,7 @@ bool VulkanClearFrameRenderer::initialize(const VulkanDevice& device, const Vulk
            createBackgroundGraphicsPipeline(device) &&
            createGraphicsPipeline(device) &&
            createMeshGraphicsPipeline(device) &&
+           createPointGraphicsPipeline(device) &&
            createIsoSurfaceGraphicsPipeline(device) &&
            createLineGraphicsPipeline(device) &&
            createAxesIndicatorResource(device) &&
@@ -714,7 +715,8 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
     const VulkanSwapchain& swapchain,
     const VkClearColorValue& clearColor,
     const QMatrix4x4& mvp,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    ModelDisplayMode displayMode)
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
@@ -746,7 +748,8 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
                                  swapchain.extent(),
                                  clearColor,
                                  mvp,
-                                 axesMvp)) {
+                                 axesMvp,
+                                 displayMode)) {
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -1907,6 +1910,140 @@ bool VulkanClearFrameRenderer::createLineGraphicsPipeline(const VulkanDevice& de
 #endif
 }
 
+bool VulkanClearFrameRenderer::createPointGraphicsPipeline(const VulkanDevice& device)
+{
+#if defined(FERENDER_VULKAN_SHADER_DIR)
+    const QString shaderDir = QString::fromUtf8(FERENDER_VULKAN_SHADER_DIR);
+    const QString vertexShaderPath = shaderDir + QStringLiteral("/vulkan_line.vert.spv");
+    const QString fragmentShaderPath = shaderDir + QStringLiteral("/vulkan_line.frag.spv");
+
+    VkShaderModule vertexShader = VK_NULL_HANDLE;
+    VkShaderModule fragmentShader = VK_NULL_HANDLE;
+    if (!createShaderModule(device, vertexShaderPath, vertexShader)) {
+        return false;
+    }
+    if (!createShaderModule(device, fragmentShaderPath, fragmentShader)) {
+        vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo vertexStage{};
+    vertexStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertexStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexStage.module = vertexShader;
+    vertexStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragmentStage{};
+    fragmentStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragmentStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragmentStage.module = fragmentShader;
+    fragmentStage.pName = "main";
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {vertexStage, fragmentStage};
+
+    VkVertexInputBindingDescription binding{};
+    binding.binding = 0;
+    binding.stride = sizeof(VulkanMeshVertex);
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkVertexInputAttributeDescription attribute{};
+    attribute.binding = 0;
+    attribute.location = 0;
+    attribute.format = VK_FORMAT_R32G32B32_SFLOAT;
+    attribute.offset = offsetof(VulkanMeshVertex, position);
+
+    VkPipelineVertexInputStateCreateInfo vertexInput{};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInput.vertexBindingDescriptionCount = 1;
+    vertexInput.pVertexBindingDescriptions = &binding;
+    vertexInput.vertexAttributeDescriptionCount = 1;
+    vertexInput.pVertexAttributeDescriptions = &attribute;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+        VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT |
+        VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::array<VkDynamicState, 2> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = 20 * sizeof(float);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.pVertexInputState = &vertexInput;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.renderPass = renderPass_.handle();
+    pipelineInfo.subpass = 0;
+
+    const bool pipelineCreated = pipelines_.point.createGraphics(
+        device, pipelineLayoutInfo, pipelineInfo, "point", lastError_);
+
+    vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
+    vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+
+    return pipelineCreated;
+#else
+    Q_UNUSED(device);
+    return true;
+#endif
+}
+
 bool VulkanClearFrameRenderer::createPickGraphicsPipeline(const VulkanDevice& device)
 {
 #if defined(FERENDER_VULKAN_SHADER_DIR)
@@ -2311,7 +2448,8 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     VkExtent2D extent,
     const VkClearColorValue& clearColor,
     const QMatrix4x4& mvp,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    ModelDisplayMode displayMode)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2343,6 +2481,8 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     meshFrameResources.meshPipeline = &pipelines_.mesh;
     meshFrameResources.isoSurfacePipeline = &pipelines_.isoSurface;
     meshFrameResources.linePipeline = &pipelines_.line;
+    meshFrameResources.pointPipeline = &pipelines_.point;
+    meshFrameResources.displayMode = displayMode;
     meshFrameResources.meshScalarDescriptor = &meshResources_.meshScalarDescriptor;
     meshFrameResources.meshVertexResource = &meshResources_.meshVertexResource;
     meshFrameResources.meshIndexResource = &meshResources_.meshIndexResource;

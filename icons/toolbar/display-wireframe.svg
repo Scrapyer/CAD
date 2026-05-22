@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <style>.edge{fill:none;stroke:#0b79a5;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.soft{fill:none;stroke:#566170;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}</style>
+  </defs>
+  <path d="M5 9l7-4 7 4-7 4z" class="edge"/>
+  <path d="M5 9v7l7 4 7-4V9" class="edge"/>
+  <path d="M12 13v7" class="edge"/>
+  <path d="M8.5 11l3.5-2 3.5 2M8.5 15l3.5 2 3.5-2M12 5v4" class="soft"/>
+</svg>

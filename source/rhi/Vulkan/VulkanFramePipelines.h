@@ -23,6 +23,7 @@ public:
     VulkanPipelineResource background;
     VulkanPipelineResource triangle;
     VulkanPipelineResource mesh;
+    VulkanPipelineResource point;
     VulkanPipelineResource isoSurface;
     VulkanPipelineResource line;
     VulkanPipelineResource pick;

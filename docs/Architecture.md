@@ -55,7 +55,7 @@
 | `source/data/` | FEM 纯数据结构与结果数据结构 |
 | `source/io/` | INP/BDF/OP2/UNV 文件解析 |
 | `source/convert/` | FEModel 到渲染 Mesh 的转换 |
-| `source/rhi/` | 渲染后端抽象和具体图形 API 后端（OpenGL，可选 Vulkan，未来 QRhi） |
+| `source/rhi/` | 渲染后端抽象和具体图形 API 后端；公共抽象在根目录，具体后端分到 `OpenGL/`、`Vulkan/`、`Metal/` |
 | `source/render/` | 渲染控件、相机、几何网格和拾取数据 |
 | `source/post/` | 结果映射、变形、动画、探针、过滤和等值面 |
 | `source/app/` | FEModelViewer GUI 应用入口、主窗口和面板 |
@@ -500,10 +500,10 @@ surface，再交回后端创建 swapchain。macOS 已提供 `VulkanMacOSSurfaceF
 `VulkanContext` 会优先请求 SDK 与 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
 `FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 回退。
 `VulkanClearFrameRenderer` 已能创建 render pass、command pool
-和同步对象，并通过 `VulkanFramePipelines` 管理 pipeline 资源组、通过 `VulkanSwapchainFrameResources` 管理 swapchain image view / framebuffer 集合；CMake 会用 `glslc` 将 `source/rhi/shaders/vulkan_background.*`、
-`source/rhi/shaders/vulkan_triangle.*`、
-`source/rhi/shaders/vulkan_mesh.*`、`source/rhi/shaders/vulkan_iso.*` 和
-`source/rhi/shaders/vulkan_line.*` 编译为 SPIR-V，并创建 background pipeline、最小 triangle pipeline、mesh pipeline、iso surface pipeline 和 line pipeline。当前 mesh
+和同步对象，并通过 `VulkanFramePipelines` 管理 pipeline 资源组、通过 `VulkanSwapchainFrameResources` 管理 swapchain image view / framebuffer 集合；CMake 会用 `glslc` 将 `source/rhi/Vulkan/shaders/vulkan_background.*`、
+`source/rhi/Vulkan/shaders/vulkan_triangle.*`、
+`source/rhi/Vulkan/shaders/vulkan_mesh.*`、`source/rhi/Vulkan/shaders/vulkan_iso.*` 和
+`source/rhi/Vulkan/shaders/vulkan_line.*` 编译为 SPIR-V，并创建 background pipeline、最小 triangle pipeline、mesh pipeline、iso surface pipeline 和 line pipeline。当前 mesh
 pipeline 使用 device-local vertex/index buffer 绘制主网格，line pipeline 使用
 edge vertex/index buffer 上传普通边线；两者通过 push constant 传入 MVP 矩阵。当前 Vulkan
 上传阶段会根据 `triangleToPart` / `edgeToPart` 和部件可见性重建可见索引，并把部件颜色或
@@ -1017,7 +1017,7 @@ FEModelViewer (项目)
 │   ├── 解析层：source/io/FEParser.h, source/io/FEParser_*.cpp
 │   ├── 转换层：source/convert/FEMeshConverter.h/.cpp
 │   ├── RHI 层：source/rhi/RenderBackend.h, source/rhi/RenderBackendFactory.cpp,
-│   │           source/rhi/OpenGLRenderBackend.cpp, source/rhi/Vulkan*.cpp(可选)
+│   │           source/rhi/OpenGL/OpenGLRenderBackend.cpp, source/rhi/Vulkan/Vulkan*.cpp(可选)
 │   ├── 后处理：source/post/FEResultMapper.h/.cpp, ...
 │   ├── Shader 资源：shaders.qrc
 │   ├── 依赖：OpenGL, Qt6(Core/Gui/Widgets/OpenGL/OpenGLWidgets), GLM(header-only), Vulkan(可选)

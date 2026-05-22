@@ -95,8 +95,9 @@ private:
     QDialog*               thresholdDialog_   = nullptr;
 
     // 工具栏拾取模式动作组
-    QActionGroup*  pickGroup_     = nullptr;
-    QActionGroup*  rhiGroup_      = nullptr;
+    QActionGroup*  pickGroup_        = nullptr;
+    QActionGroup*  rhiGroup_         = nullptr;
+    QActionGroup*  displayModeGroup_ = nullptr;
 
     // 状态栏
     QLabel*        statusLabel_    = nullptr;

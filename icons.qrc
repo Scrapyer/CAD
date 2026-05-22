@@ -3,6 +3,10 @@
         <file alias="clear.svg">icons/toolbar/clear.svg</file>
         <file alias="contour.svg">icons/toolbar/contour.svg</file>
         <file alias="deform.svg">icons/toolbar/deform.svg</file>
+        <file alias="display-points.svg">icons/toolbar/display-points.svg</file>
+        <file alias="display-solid.svg">icons/toolbar/display-solid.svg</file>
+        <file alias="display-solid-wireframe.svg">icons/toolbar/display-solid-wireframe.svg</file>
+        <file alias="display-wireframe.svg">icons/toolbar/display-wireframe.svg</file>
         <file alias="export.svg">icons/toolbar/export.svg</file>
         <file alias="fit.svg">icons/toolbar/fit.svg</file>
         <file alias="import.svg">icons/toolbar/import.svg</file>

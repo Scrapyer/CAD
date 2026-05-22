@@ -207,6 +207,8 @@ set(RENDER_INCLUDE_DIRS
     ${SOURCE_DIR}/io
     ${SOURCE_DIR}/post
     ${SOURCE_DIR}/rhi
+    ${SOURCE_DIR}/rhi/OpenGL
+    ${SOURCE_DIR}/rhi/Vulkan
     ${SOURCE_DIR}/render
 )
 
@@ -253,7 +255,7 @@ set(RENDER_SOURCES
     ${SOURCE_DIR}/render/RenderViewport.cpp
     ${SOURCE_DIR}/rhi/RenderBackendFactory.cpp
     ${SOURCE_DIR}/rhi/RenderSettings.cpp
-    ${SOURCE_DIR}/rhi/OpenGLRenderBackend.cpp
+    ${SOURCE_DIR}/rhi/OpenGL/OpenGLRenderBackend.cpp
     ${SOURCE_DIR}/data/FEModel.cpp
     ${SOURCE_DIR}/data/FEField.cpp
     ${SOURCE_DIR}/convert/FEMeshConverter.cpp
@@ -275,31 +277,31 @@ set(RENDER_SOURCES
 
 if(FERENDER_HAS_VULKAN_RHI)
     list(APPEND RENDER_SOURCES
-        ${SOURCE_DIR}/rhi/VulkanBufferResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanClearFrameRenderer.cpp
-        ${SOURCE_DIR}/rhi/VulkanCommandResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanContext.cpp
-        ${SOURCE_DIR}/rhi/VulkanDepthResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanDescriptorResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanDescriptorSetLayoutResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanDevice.cpp
-        ${SOURCE_DIR}/rhi/VulkanFramebufferResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanFramePipelines.cpp
-        ${SOURCE_DIR}/rhi/VulkanMeshBufferResources.cpp
-        ${SOURCE_DIR}/rhi/VulkanMeshFramePass.cpp
-        ${SOURCE_DIR}/rhi/VulkanPickPass.cpp
-        ${SOURCE_DIR}/rhi/VulkanPickResources.cpp
-        ${SOURCE_DIR}/rhi/VulkanPipelineResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanRenderPassResource.cpp
-        ${SOURCE_DIR}/rhi/VulkanRenderBackend.cpp
-        ${SOURCE_DIR}/rhi/VulkanStagingUploadContext.cpp
-        ${SOURCE_DIR}/rhi/VulkanSurface.cpp
-        ${SOURCE_DIR}/rhi/VulkanSwapchain.cpp
-        ${SOURCE_DIR}/rhi/VulkanSwapchainFrameResources.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanBufferResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanClearFrameRenderer.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanCommandResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanContext.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanDepthResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanDescriptorResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanDescriptorSetLayoutResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanDevice.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanFramebufferResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanFramePipelines.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanMeshBufferResources.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanMeshFramePass.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanPickPass.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanPickResources.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanPipelineResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanRenderPassResource.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanRenderBackend.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanStagingUploadContext.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanSurface.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanSwapchain.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/VulkanSwapchainFrameResources.cpp
     )
     if(APPLE)
         list(APPEND RENDER_SOURCES
-            ${SOURCE_DIR}/rhi/VulkanMacOSSurfaceFactory.mm
+            ${SOURCE_DIR}/rhi/Vulkan/VulkanMacOSSurfaceFactory.mm
             ${SOURCE_DIR}/render/VulkanViewport.cpp
         )
     endif()
@@ -324,6 +326,8 @@ target_include_directories(FERender
         $<BUILD_INTERFACE:${SOURCE_DIR}/io>
         $<BUILD_INTERFACE:${SOURCE_DIR}/post>
         $<BUILD_INTERFACE:${SOURCE_DIR}/rhi>
+        $<BUILD_INTERFACE:${SOURCE_DIR}/rhi/OpenGL>
+        $<BUILD_INTERFACE:${SOURCE_DIR}/rhi/Vulkan>
         $<BUILD_INTERFACE:${SOURCE_DIR}/render>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
         $<INSTALL_INTERFACE:include/FERender>
@@ -354,7 +358,7 @@ if(FERENDER_HAS_VULKAN_RHI)
     target_link_libraries(FERender PRIVATE Vulkan::Vulkan)
     if(Vulkan_GLSLC_EXECUTABLE)
         set(FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE ON)
-        set(VULKAN_SHADER_SOURCE_DIR "${SOURCE_DIR}/rhi/shaders")
+        set(VULKAN_SHADER_SOURCE_DIR "${SOURCE_DIR}/rhi/Vulkan/shaders")
         set(VULKAN_SHADER_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan_spirv")
         set(VULKAN_BACKGROUND_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_background.vert.spv")
         set(VULKAN_BACKGROUND_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_background.frag.spv")
