@@ -92,6 +92,7 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
     framePass.depthStencilState = resources.depthStencilState;
     framePass.overlayDepthStencilState = resources.overlayDepthStencilState;
     framePass.drawableSize = resources.drawableSize;
+    framePass.devicePixelRatio = resources.devicePixelRatio;
     framePass.backgroundUniforms.bottomColor[0] = resources.backgroundBottomColor.x();
     framePass.backgroundUniforms.bottomColor[1] = resources.backgroundBottomColor.y();
     framePass.backgroundUniforms.bottomColor[2] = resources.backgroundBottomColor.z();
@@ -119,7 +120,7 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
     framePass.points = makeVertexDraw(flags.points,
                                       resources.linePipelineState,
                                       resources.pointVertexBuffer,
-                                      resources.meshVertexCount,
+                                      resources.pointVertexCount,
                                       uniforms.points);
     framePass.isoSurface = makeIndexedDraw(flags.isoSurface,
                                            resources.isoSurfacePipelineState,
@@ -154,12 +155,12 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
                                          resources.selectionVertexCount,
                                          uniforms.selection);
     framePass.axes = makeVertexDraw(flags.axes,
-                                    resources.linePipelineState,
+                                    resources.axesPipelineState,
                                     resources.axesLineVertexBuffer,
                                     resources.axesLineVertexCount,
                                     uniforms.axes);
     framePass.axesSolid = makeVertexDraw(flags.axesSolid,
-                                         resources.meshPipelineState,
+                                         resources.axesPipelineState,
                                          resources.axesSolidVertexBuffer,
                                          resources.axesSolidVertexCount,
                                          uniforms.axesSolid);

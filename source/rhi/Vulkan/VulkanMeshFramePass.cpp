@@ -206,8 +206,8 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
     if (drawPoints) {
         recordLineDraw(commandBuffer,
                        resources.pointPipeline,
-                       resources.meshVertexResource,
-                       resources.meshIndexCount,
+                       resources.pointVertexResource,
+                       resources.pointVertexCount,
                        mvp,
                        {{0.58f, 0.78f, 0.74f, 1.0f}});
     }

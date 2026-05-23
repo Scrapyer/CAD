@@ -221,6 +221,41 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
 }
 )";
 
+const char* const kMetalAxesShaderSource = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VertexIn {
+    float3 position [[attribute(0)]];
+    float3 color [[attribute(1)]];
+};
+
+struct Uniforms {
+    float4x4 mvp;
+    float4 color;
+    float4 contour;
+};
+
+struct VertexOut {
+    float4 position [[position]];
+    float3 color;
+};
+
+vertex VertexOut vertex_main(VertexIn in [[stage_in]],
+                             constant Uniforms& uniforms [[buffer(1)]])
+{
+    VertexOut out;
+    out.position = uniforms.mvp * float4(in.position, 1.0);
+    out.color = in.color;
+    return out;
+}
+
+fragment float4 fragment_main(VertexOut in [[stage_in]])
+{
+    return float4(in.color, 1.0);
+}
+)";
+
 const char* const kMetalPickShaderSource = R"(
 #include <metal_stdlib>
 using namespace metal;

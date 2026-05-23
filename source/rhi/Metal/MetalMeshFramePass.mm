@@ -4,10 +4,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #import <Metal/Metal.h>
 
 namespace {
+
+constexpr NSUInteger kAxesViewportSize = 192;
 
 void bindMetalUniforms(id<MTLRenderCommandEncoder> encoder,
                        const MetalMeshFramePassInputs& inputs,
@@ -61,18 +64,23 @@ void drawMetalVertices(id<MTLRenderCommandEncoder> encoder,
 
 void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePassInputs& inputs)
 {
-    if (!inputs.axes.enabled) {
+    if (!inputs.axes.enabled && !inputs.axesSolid.enabled) {
         return;
     }
 
-    const NSUInteger margin = 8;
+    const NSUInteger margin =
+        static_cast<NSUInteger>(std::lround(8.0f * inputs.devicePixelRatio));
+    const NSUInteger targetAxesSize =
+        static_cast<NSUInteger>(std::lround(static_cast<float>(kAxesViewportSize) *
+                                            inputs.devicePixelRatio));
     const NSUInteger availableWidth = inputs.drawableSize.width() > static_cast<int>(margin * 2)
         ? static_cast<NSUInteger>(inputs.drawableSize.width()) - margin * 2
         : 0;
     const NSUInteger availableHeight = inputs.drawableSize.height() > static_cast<int>(margin * 2)
         ? static_cast<NSUInteger>(inputs.drawableSize.height()) - margin * 2
         : 0;
-    const NSUInteger axesSize = std::min<NSUInteger>(152, std::min(availableWidth, availableHeight));
+    const NSUInteger axesSize =
+        std::min<NSUInteger>(targetAxesSize, std::min(availableWidth, availableHeight));
     if (axesSize == 0) {
         return;
     }
@@ -109,40 +117,7 @@ void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePass
     [encoder setViewport:axesViewport];
     [encoder setScissorRect:axesScissor];
     drawMetalVertices(encoder, inputs, inputs.axesSolid, MTLPrimitiveTypeTriangle);
-    [encoder setRenderPipelineState:static_cast<id<MTLRenderPipelineState>>(inputs.axes.pipelineState)];
-    [encoder setVertexBuffer:static_cast<id<MTLBuffer>>(inputs.axes.vertexBuffer) offset:0 atIndex:0];
-
-    MetalMeshUniforms axesUniforms = inputs.axes.uniforms;
-    const std::array<std::array<float, 4>, 3> axisColors = {{
-        {{0.95f, 0.30f, 0.30f, 1.0f}},
-        {{0.35f, 0.90f, 0.35f, 1.0f}},
-        {{0.35f, 0.55f, 1.00f, 1.0f}}
-    }};
-    const NSUInteger axisVertexCount = static_cast<NSUInteger>(inputs.axes.vertexCount / 3);
-    if (axisVertexCount < 2) {
-        return;
-    }
-
-    for (NSUInteger axis = 0; axis < 3; ++axis) {
-        setMetalUniformColor(axesUniforms,
-                             axisColors[axis][0],
-                             axisColors[axis][1],
-                             axisColors[axis][2],
-                             axisColors[axis][3]);
-        if (inputs.uniformBuffer) {
-            id<MTLBuffer> buffer = static_cast<id<MTLBuffer>>(inputs.uniformBuffer);
-            const NSUInteger offset = static_cast<NSUInteger>(inputs.axesUniformOffsets[axis]);
-            [encoder setVertexBuffer:buffer offset:offset atIndex:1];
-            [encoder setFragmentBuffer:buffer offset:offset atIndex:1];
-        } else {
-            MetalMeshFramePassDraw axisDraw = inputs.axes;
-            axisDraw.uniforms = axesUniforms;
-            bindMetalUniforms(encoder, inputs, axisDraw);
-        }
-        [encoder drawPrimitives:MTLPrimitiveTypeLine
-                     vertexStart:axis * axisVertexCount
-                     vertexCount:axisVertexCount];
-    }
+    drawMetalVertices(encoder, inputs, inputs.axes, MTLPrimitiveTypeLine);
 
     [encoder setViewport:previousViewport];
     [encoder setScissorRect:previousScissor];

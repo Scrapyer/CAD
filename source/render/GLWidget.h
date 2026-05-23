@@ -253,6 +253,7 @@ private:
     int colorToId(unsigned char r, unsigned char g, unsigned char b);
     void rebuildSelectionEdges();
     void buildPartEdgeCache();       // 选中变化时构建边缓存（重操作）
+    void buildElementEdgeCache();    // 大规模单元选中时构建边界/轮廓缓存
     void updateSilhouetteFromCache(); // 相机变化时从缓存刷新轮廓边（轻操作）
     void buildEdgeAdjacency();       // 预建全局边邻接表（网格加载后一次性构建）
     void rebuildPartLookup();        // 根据三角形/边线映射重建部件反查表
@@ -332,6 +333,7 @@ private:
     bool selectionDirty_ = false;
     bool silhouetteDirty_ = false;    // 仅视角变化，需刷新轮廓边
     int selHlMode_ = 0;   // 0=lines, 1=points
+    bool selectionEdgeCacheUsesSilhouette_ = false; // 当前高亮缓存是否含视角相关轮廓边
 
     // ── 部件轮廓边缓存（选中变化时构建，相机变化时复用） ──
     struct SilhouetteCandidate {

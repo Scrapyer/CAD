@@ -35,6 +35,7 @@ public:
 
     bool attachLayer(void* metalLayer, const QSize& drawableSize);
     void updateDrawableSize(const QSize& drawableSize);
+    void setDevicePixelRatio(float devicePixelRatio);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
     void setViewportGridVisible(bool visible);
     void setViewportGridParams(float alpha, float minorStep, float fineAlpha);
@@ -80,6 +81,7 @@ private:
     bool ensureMeshPipeline();
     bool ensureIsoSurfacePipeline();
     bool ensureLinePipeline();
+    bool ensureAxesPipeline();
     bool ensureDepthResources();
     bool ensurePickPipeline();
     bool ensureAxesResources();
@@ -116,6 +118,7 @@ private:
     QString lastError_;
     bool initialized_ = false;
     QSize drawableSize_;
+    float devicePixelRatio_ = 1.0f;
 
     // Outer Metal objects
     MetalObjectResource device_;
@@ -127,6 +130,7 @@ private:
     MetalStateResource meshPipelineState_;
     MetalStateResource isoSurfacePipelineState_;
     MetalStateResource linePipelineState_;
+    MetalStateResource axesPipelineState_;
     MetalStateResource pickPipelineState_;
     MetalStateResource depthStencilState_;
     MetalStateResource overlayDepthStencilState_;
@@ -143,6 +147,7 @@ private:
     MetalBufferResource pointVertexBuffer_;
     int meshVertexCount_ = 0;
     int meshIndexCount_ = 0;
+    int pointVertexCount_ = 0;
     bool meshUseVertexScalars_ = false;
     float meshScalarMin_ = 0.0f;
     float meshScalarMax_ = 1.0f;

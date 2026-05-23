@@ -434,6 +434,8 @@ if(FERENDER_HAS_VULKAN_RHI)
         set(VULKAN_ISO_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_iso.frag.spv")
         set(VULKAN_LINE_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_line.vert.spv")
         set(VULKAN_LINE_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_line.frag.spv")
+        set(VULKAN_AXES_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_axes.vert.spv")
+        set(VULKAN_AXES_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_axes.frag.spv")
         set(VULKAN_PICK_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_pick.vert.spv")
         set(VULKAN_PICK_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_pick.frag.spv")
 
@@ -528,6 +530,24 @@ if(FERENDER_HAS_VULKAN_RHI)
             VERBATIM
         )
         add_custom_command(
+            OUTPUT "${VULKAN_AXES_VERT_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_axes.vert"
+                    -o "${VULKAN_AXES_VERT_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_axes.vert"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${VULKAN_AXES_FRAG_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_axes.frag"
+                    -o "${VULKAN_AXES_FRAG_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_axes.frag"
+            VERBATIM
+        )
+        add_custom_command(
             OUTPUT "${VULKAN_PICK_VERT_SPV}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
             COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
@@ -557,6 +577,8 @@ if(FERENDER_HAS_VULKAN_RHI)
                 "${VULKAN_ISO_FRAG_SPV}"
                 "${VULKAN_LINE_VERT_SPV}"
                 "${VULKAN_LINE_FRAG_SPV}"
+                "${VULKAN_AXES_VERT_SPV}"
+                "${VULKAN_AXES_FRAG_SPV}"
                 "${VULKAN_PICK_VERT_SPV}"
                 "${VULKAN_PICK_FRAG_SPV}"
         )

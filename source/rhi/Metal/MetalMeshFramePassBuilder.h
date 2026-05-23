@@ -24,9 +24,11 @@ struct MetalMeshFrameResourceHandles {
     void* meshPipelineState = nullptr;
     void* isoSurfacePipelineState = nullptr;
     void* linePipelineState = nullptr;
+    void* axesPipelineState = nullptr;
     void* depthStencilState = nullptr;
     void* overlayDepthStencilState = nullptr;
     QSize drawableSize;
+    float devicePixelRatio = 1.0f;
     QVector3D backgroundTopColor{0.38f, 0.45f, 0.58f};
     QVector3D backgroundBottomColor{0.68f, 0.74f, 0.82f};
     bool backgroundGridVisible = true;
@@ -37,6 +39,7 @@ struct MetalMeshFrameResourceHandles {
     int meshVertexCount = 0;
     int meshIndexCount = 0;
     void* pointVertexBuffer = nullptr;
+    int pointVertexCount = 0;
     void* edgeVertexBuffer = nullptr;
     void* edgeIndexBuffer = nullptr;
     int edgeVertexCount = 0;

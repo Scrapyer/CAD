@@ -25,6 +25,9 @@ void resetMetalMeshUploadTargets(const MetalMeshBufferTargets& targets)
     if (targets.meshIndexCount) {
         *targets.meshIndexCount = 0;
     }
+    if (targets.pointVertexCount) {
+        *targets.pointVertexCount = 0;
+    }
     if (targets.edgeVertexCount) {
         *targets.edgeVertexCount = 0;
     }
@@ -42,6 +45,7 @@ bool validateMetalMeshUploadTargets(const MetalMeshBufferTargets& targets, QStri
         !targets.edgeIndexBuffer ||
         !targets.meshVertexCount ||
         !targets.meshIndexCount ||
+        !targets.pointVertexCount ||
         !targets.edgeVertexCount ||
         !targets.edgeIndexCount) {
         lastError = QStringLiteral("Metal mesh upload target is incomplete");
@@ -70,6 +74,7 @@ bool uploadMetalMeshBuffers(void* device,
 
     *targets.meshVertexCount = static_cast<int>(uploadData.vertices.size());
     *targets.meshIndexCount = static_cast<int>(uploadData.indices.size());
+    *targets.pointVertexCount = uploadData.pointVertexCount;
     *targets.edgeVertexCount = uploadData.edgeVertexCount;
     *targets.edgeIndexCount = static_cast<int>(uploadData.edgeIndices.size());
 

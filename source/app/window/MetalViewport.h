@@ -119,6 +119,7 @@ private:
     bool standardViewFromAxesClick(const QPointF& position, StandardView* view) const;
     void rebuildPartLookup();
     void appendPartOutlineHighlight(std::vector<float>& lineVertices) const;
+    void appendElementOutlineHighlight(std::vector<float>& lineVertices) const;
     bool rebuildSelectionHighlight();
     int closestNodeForElement(int elementId, const QPointF& position) const;
     void selectPart(int partIndex);

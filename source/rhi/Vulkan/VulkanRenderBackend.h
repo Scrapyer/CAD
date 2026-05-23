@@ -69,6 +69,7 @@ public:
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
     void setViewportGridVisible(bool visible);
     void setViewportGridParams(float alpha, float minorStep, float fineAlpha);
+    void setDevicePixelRatio(float devicePixelRatio);
     bool renderClearFrame(float red,
                          float green,
                          float blue,
@@ -115,6 +116,7 @@ private:
     bool viewportGridVisible_ = true;
     float viewportGridMinorStep_ = 24.0f;
     float viewportGridFineAlpha_ = 0.0f;
+    float devicePixelRatio_ = 1.0f;
     bool initialized_ = false;
     QString lastError_;
 };

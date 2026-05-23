@@ -35,10 +35,12 @@ static const glm::vec3 kPartPalette[] = {
 static const int kPartPaletteSize = static_cast<int>(sizeof(kPartPalette) / sizeof(kPartPalette[0]));
 
 namespace {
-constexpr int kAxesLabelSize = 30;
+constexpr int kAxesLabelSize = 34;
 constexpr int kAxesMargin = 8;
-constexpr int kAxesViewportSize = 152;
+constexpr int kAxesViewportSize = 192;
 constexpr float kAxesClickPadding = 10.0f;
+constexpr int kFullElementHighlightLimit = 2000;
+constexpr float kFeatureAngleThreshold = 0.5f;  // cos(60°)
 
 template <typename T>
 void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
@@ -346,6 +348,7 @@ void GLWidget::setMesh(const Mesh& mesh) {
     needsColorUpload_ = false;
     needsUpload_ = true;
     partEdgeCacheValid_ = false;
+    selectionEdgeCacheUsesSilhouette_ = false;
     selectionDirty_ = true;
     selEdgeVertCount_ = 0;
     silhouetteDirty_ = true;
@@ -391,7 +394,8 @@ void GLWidget::fitToModel(const glm::vec3& center, float size) {
 void GLWidget::setStandardView(StandardView view)
 {
     applyStandardViewToCamera(cam_, view);
-    if (pickMode_ == PickMode::Part && selection_.hasSelection()) {
+    if (selection_.hasSelection() &&
+        (pickMode_ == PickMode::Part || selectionEdgeCacheUsesSilhouette_)) {
         silhouetteDirty_ = true;
     }
     update();
@@ -895,7 +899,7 @@ void GLWidget::renderMeshEdges() {
 
 void GLWidget::renderMeshPoints()
 {
-    const int count = activeIndexCount_;
+    const int count = static_cast<int>(mesh_.vertices.size() / 6);
     const bool isoActive = isoIndexCount_ > 0;
     if (displayMode_ != ModelDisplayMode::Points || count <= 0 || isoActive || !meshResource_) {
         return;
@@ -908,11 +912,11 @@ void GLWidget::renderMeshPoints()
     drawUniforms.useVertexColor = useVertexColor_ || !partColors_.empty();
     ScenePassState passState;
     passState.applyPointSize = true;
-    passState.pointSize = 4.0f;
+    passState.pointSize = count > 200000 ? 1.5f : 3.0f;
     passState.restoredPointSize = 1.0f;
     OpenGLScenePass pass;
     pass.program = shader_;
-    pass.drawKind = SceneDrawKind::Elements;
+    pass.drawKind = SceneDrawKind::Arrays;
     pass.primitive = ScenePrimitive::Points;
     pass.count = count;
     pass.uniforms = drawUniforms;
@@ -964,7 +968,7 @@ void GLWidget::updateSelectionHighlight() {
         silhouetteDirty_ = false;
         selHlMode_ = hlMode;
     } else if (silhouetteDirty_ && partEdgeCacheValid_ &&
-               pickMode_ == PickMode::Part && selection_.hasSelection()) {
+               selectionEdgeCacheUsesSilhouette_ && selection_.hasSelection()) {
         updateSilhouetteFromCache();
         silhouetteDirty_ = false;
     }
@@ -1148,7 +1152,7 @@ void GLWidget::renderSelectionHighlight() {
     drawUniforms.contourMode = false;
     ScenePassState passState;
     passState.applyDepthTest = true;
-    passState.depthTestEnabled = false;
+    passState.depthTestEnabled = true;
     passState.restoredDepthTestEnabled = true;
 
     if (selHlMode_ == 1) {
@@ -1301,8 +1305,9 @@ void GLWidget::mouseMoveEvent(QMouseEvent* e) {
         !(e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
         cam_.pan(dx, dy);
 
-    // 部件模式轮廓边依赖视角，相机变化时需要刷新
-    if (pickMode_ == PickMode::Part && selection_.hasSelection())
+    // 轮廓边依赖视角，相机变化时需要刷新
+    if (selection_.hasSelection() &&
+        (pickMode_ == PickMode::Part || selectionEdgeCacheUsesSilhouette_))
         silhouetteDirty_ = true;
 
     update();
@@ -1367,7 +1372,8 @@ void GLWidget::wheelEvent(QWheelEvent* e) {
     // 按住中键或右键拖动时忽略滚轮，防止平移与缩放同时触发
     if (e->buttons() & (Qt::MiddleButton | Qt::RightButton)) return;
     cam_.zoom(e->angleDelta().y() / 120.0f);
-    if (pickMode_ == PickMode::Part && selection_.hasSelection())
+    if (selection_.hasSelection() &&
+        (pickMode_ == PickMode::Part || selectionEdgeCacheUsesSilhouette_))
         silhouetteDirty_ = true;
     update();
 }
@@ -1378,6 +1384,7 @@ void GLWidget::keyPressEvent(QKeyEvent* e) {
             selection_.clear();
             selectionDirty_ = true;
             partEdgeCacheValid_ = false;
+            selectionEdgeCacheUsesSilhouette_ = false;
             selEdgeVertCount_ = 0;
             emit selectionChanged(pickMode_, 0, {});
             update();
@@ -1998,6 +2005,7 @@ void GLWidget::setPickMode(PickMode mode) {
         selection_.clear();
         selectionDirty_ = true;
         partEdgeCacheValid_ = false;
+        selectionEdgeCacheUsesSilhouette_ = false;
         selEdgeVertCount_ = 0;
         emit selectionChanged(pickMode_, 0, {});
         if (mode == PickMode::Part)
@@ -2164,14 +2172,24 @@ bool GLWidget::isNodeVisibleForSelection(int nodeId) const
 void GLWidget::rebuildSelectionEdges() {
     int edgeCount = static_cast<int>(mesh_.elemEdgeToElement.size());
     std::vector<float> verts;
+    selectionEdgeCacheUsesSilhouette_ = false;
 
     if (pickMode_ == PickMode::Part && !vertexToNode_.empty()) {
         // 部件模式：使用缓存机制，避免每帧重建 edgeMap
         if (!partEdgeCacheValid_) {
             buildPartEdgeCache();
         }
+        selectionEdgeCacheUsesSilhouette_ = true;
         updateSilhouetteFromCache();
         return;  // VBO 已在 updateSilhouetteFromCache 中上传
+    } else if (pickMode_ == PickMode::Element &&
+               static_cast<int>(selection_.selectedElements.size()) > kFullElementHighlightLimit &&
+               !vertexToNode_.empty() && !triToElem_.empty()) {
+        // 大规模单元选中：只显示外边界/特征边/视角轮廓，避免绘制海量内部网格线
+        buildElementEdgeCache();
+        selectionEdgeCacheUsesSilhouette_ = true;
+        updateSilhouetteFromCache();
+        return;
     } else {
         // 单元模式：显示所有选中单元的全部边线
         for (int i = 0; i < edgeCount; ++i) {
@@ -2246,8 +2264,6 @@ void GLWidget::buildPartEdgeCache() {
     }
 
     // ── 2. 只遍历选中部件的三角形，收集边并分类 ──
-    const float featureAngleThreshold = 0.5f;  // cos(60°)
-
     auto triNormal = [&](int t) -> glm::vec3 {
         unsigned int i0 = mesh_.indices[t * 3];
         unsigned int i1 = mesh_.indices[t * 3 + 1];
@@ -2324,7 +2340,7 @@ void GLWidget::buildPartEdgeCache() {
                 if (selectedTriCount >= 2 && selTri0 >= 0 && selTri1 >= 0) {
                     glm::vec3 n0 = triNormal(selTri0);
                     glm::vec3 n1 = triNormal(selTri1);
-                    if (glm::dot(n0, n1) < featureAngleThreshold) {
+                    if (glm::dot(n0, n1) < kFeatureAngleThreshold) {
                         pushEdgeVerts(pe.va, pe.vb, cachedStaticEdgeVerts_);
                     } else {
                         SilhouetteCandidate sc;
@@ -2338,6 +2354,109 @@ void GLWidget::buildPartEdgeCache() {
                         sc.n1 = n1;
                         cachedSilhouettes_.push_back(sc);
                     }
+                }
+            }
+        }
+    }
+
+    partEdgeCacheValid_ = true;
+}
+
+void GLWidget::buildElementEdgeCache() {
+    if (edgeAdjDirty_) buildEdgeAdjacency();
+
+    cachedStaticEdgeVerts_.clear();
+    cachedSilhouettes_.clear();
+
+    auto triNormal = [&](int t) -> glm::vec3 {
+        unsigned int i0 = mesh_.indices[t * 3];
+        unsigned int i1 = mesh_.indices[t * 3 + 1];
+        unsigned int i2 = mesh_.indices[t * 3 + 2];
+        glm::vec3 p0(mesh_.vertices[i0 * 6], mesh_.vertices[i0 * 6 + 1], mesh_.vertices[i0 * 6 + 2]);
+        glm::vec3 p1(mesh_.vertices[i1 * 6], mesh_.vertices[i1 * 6 + 1], mesh_.vertices[i1 * 6 + 2]);
+        glm::vec3 p2(mesh_.vertices[i2 * 6], mesh_.vertices[i2 * 6 + 1], mesh_.vertices[i2 * 6 + 2]);
+        glm::vec3 cr = glm::cross(p1 - p0, p2 - p0);
+        float len = glm::length(cr);
+        return (len > 1e-12f) ? cr / len : glm::vec3(0.0f);
+    };
+
+    auto pushEdgeVerts = [&](unsigned int a, unsigned int b, std::vector<float>& out) {
+        out.push_back(mesh_.vertices[a * 6]);
+        out.push_back(mesh_.vertices[a * 6 + 1]);
+        out.push_back(mesh_.vertices[a * 6 + 2]);
+        out.push_back(mesh_.vertices[b * 6]);
+        out.push_back(mesh_.vertices[b * 6 + 1]);
+        out.push_back(mesh_.vertices[b * 6 + 2]);
+    };
+
+    std::unordered_set<int64_t> visitedEdges;
+    visitedEdges.reserve(std::min<size_t>(triToElem_.size() * 2,
+                                          selection_.selectedElements.size() * 12));
+    cachedStaticEdgeVerts_.reserve(selection_.selectedElements.size() * 12);
+
+    const int triCount = std::min(static_cast<int>(triToElem_.size()),
+                                  static_cast<int>(mesh_.indices.size() / 3));
+    for (int t = 0; t < triCount; ++t) {
+        const int elemId = triToElem_[t];
+        if (!selection_.isElementSelected(elemId) || !isTriangleVisible(t)) {
+            continue;
+        }
+
+        for (int e = 0; e < 3; ++e) {
+            unsigned int vi_a = mesh_.indices[t * 3 + e];
+            unsigned int vi_b = mesh_.indices[t * 3 + (e + 1) % 3];
+            int na = (vi_a < vertexToNode_.size()) ? vertexToNode_[vi_a] : static_cast<int>(vi_a);
+            int nb = (vi_b < vertexToNode_.size()) ? vertexToNode_[vi_b] : static_cast<int>(vi_b);
+            int64_t key = (static_cast<int64_t>(std::min(na, nb)) << 32) |
+                          static_cast<uint32_t>(std::max(na, nb));
+
+            if (!visitedEdges.insert(key).second) continue;
+
+            auto it = edgeAdjMap_.find(key);
+            if (it == edgeAdjMap_.end()) continue;
+
+            const PreEdge& pe = it->second;
+            int selectedTriCount = 0;
+            int otherTriCount = 0;
+            int selTri0 = -1;
+            int selTri1 = -1;
+
+            for (int adjT : pe.adjTris) {
+                const bool adjSelected =
+                    adjT >= 0 &&
+                    adjT < static_cast<int>(triToElem_.size()) &&
+                    selection_.isElementSelected(triToElem_[adjT]) &&
+                    isTriangleVisible(adjT);
+                if (adjSelected) {
+                    if (selectedTriCount == 0) selTri0 = adjT;
+                    else if (selectedTriCount == 1) selTri1 = adjT;
+                    selectedTriCount++;
+                } else {
+                    otherTriCount++;
+                }
+            }
+
+            if (otherTriCount > 0 || selectedTriCount == 1) {
+                pushEdgeVerts(pe.va, pe.vb, cachedStaticEdgeVerts_);
+                continue;
+            }
+
+            if (selectedTriCount >= 2 && selTri0 >= 0 && selTri1 >= 0) {
+                glm::vec3 n0 = triNormal(selTri0);
+                glm::vec3 n1 = triNormal(selTri1);
+                if (glm::dot(n0, n1) < kFeatureAngleThreshold) {
+                    pushEdgeVerts(pe.va, pe.vb, cachedStaticEdgeVerts_);
+                } else {
+                    SilhouetteCandidate sc;
+                    sc.ax = mesh_.vertices[pe.va * 6];
+                    sc.ay = mesh_.vertices[pe.va * 6 + 1];
+                    sc.az = mesh_.vertices[pe.va * 6 + 2];
+                    sc.bx = mesh_.vertices[pe.vb * 6];
+                    sc.by = mesh_.vertices[pe.vb * 6 + 1];
+                    sc.bz = mesh_.vertices[pe.vb * 6 + 2];
+                    sc.n0 = n0;
+                    sc.n1 = n1;
+                    cachedSilhouettes_.push_back(sc);
                 }
             }
         }
@@ -2386,7 +2505,7 @@ glm::mat4 GLWidget::axesIndicatorMvp() const
     glm::mat3 rot = glm::mat3(cam_.viewMatrix());
     glm::vec3 axesEye = glm::vec3(rot[0][2], rot[1][2], rot[2][2]) * 2.5f;
     glm::mat4 axesView = glm::lookAt(axesEye, glm::vec3(0), glm::vec3(0, 1, 0));
-    glm::mat4 axesProj = glm::ortho(-1.3f, 1.3f, -1.3f, 1.3f, 0.01f, 10.0f);
+    glm::mat4 axesProj = glm::ortho(-1.15f, 1.15f, -1.15f, 1.15f, 0.01f, 10.0f);
     return axesProj * axesView;
 }
 
@@ -2459,7 +2578,7 @@ void GLWidget::drawAxesLabels(QPainter& painter) {
 
     QFont font = painter.font();
     font.setBold(true);
-    font.setPixelSize(17);
+    font.setPixelSize(18);
     painter.setFont(font);
 
     for (const auto& l : labels) {
@@ -2492,43 +2611,62 @@ bool GLWidget::standardViewFromAxesClick(const QPoint& pos, StandardView* view) 
 
     const QPointF p(pos);
     const QPointF origin = project(glm::vec3(0.0f));
-    const std::array<glm::vec3, 3> axisDirs = {
-        glm::vec3(1.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 1.0f)
+    struct AxisClickTarget {
+        glm::vec3 dir;
+        StandardView view;
     };
-    const std::array<StandardView, 3> axisViews = {
-        StandardView::Right,
-        StandardView::Top,
-        StandardView::Front
-    };
+    const std::array<AxisClickTarget, 3> visibleAxisTargets = {{
+        {glm::vec3(1.0f, 0.0f, 0.0f), StandardView::Right},
+        {glm::vec3(0.0f, 1.0f, 0.0f), StandardView::Top},
+        {glm::vec3(0.0f, 0.0f, 1.0f), StandardView::Front}
+    }};
+    const std::array<AxisClickTarget, 3> reverseAxisTargets = {{
+        {glm::vec3(-1.0f, 0.0f, 0.0f), StandardView::Left},
+        {glm::vec3(0.0f, -1.0f, 0.0f), StandardView::Bottom},
+        {glm::vec3(0.0f, 0.0f, -1.0f), StandardView::Back}
+    }};
 
-    int bestAxis = -1;
-    float bestDist2 = 1.0e30f;
-    const float lineThreshold2 = 13.0f * 13.0f;
-    for (size_t i = 0; i < axisDirs.size(); ++i) {
-        const QPointF end = project(axisDirs[i] * 1.15f);
-        const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
-                               end.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
-                               kAxesLabelSize + kAxesClickPadding * 2.0f,
-                               kAxesLabelSize + kAxesClickPadding * 2.0f);
-        if (labelRect.contains(p)) {
-            *view = axisViews[i];
+    auto hitTargets = [&](const auto& targets, float lineThreshold, float tipThreshold) -> bool {
+        StandardView bestView = StandardView::Front;
+        bool hasBest = false;
+        float bestDist2 = 1.0e30f;
+        const float lineThreshold2 = lineThreshold * lineThreshold;
+        const float tipThreshold2 = tipThreshold * tipThreshold;
+        for (const AxisClickTarget& target : targets) {
+            const QPointF tip = project(target.dir);
+            const QPointF labelCenter = project(target.dir * 1.15f);
+            const QRectF labelRect(labelCenter.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                                   labelCenter.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                                   kAxesLabelSize + kAxesClickPadding * 2.0f,
+                                   kAxesLabelSize + kAxesClickPadding * 2.0f);
+            const QPointF tipDelta = p - tip;
+            const float tipDist2 = static_cast<float>(QPointF::dotProduct(tipDelta, tipDelta));
+            if (labelRect.contains(p) || tipDist2 <= tipThreshold2) {
+                *view = target.view;
+                return true;
+            }
+
+            const float dist2 = ScreenSpacePicking::distanceSquaredToSegment(p, origin, tip);
+            if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
+                bestView = target.view;
+                bestDist2 = dist2;
+                hasBest = true;
+            }
+        }
+
+        if (hasBest) {
+            *view = bestView;
             return true;
         }
+        return false;
+    };
 
-        const float dist2 = ScreenSpacePicking::distanceSquaredToSegment(p, origin, end);
-        if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
-            bestAxis = static_cast<int>(i);
-            bestDist2 = dist2;
-        }
-    }
-
-    if (bestAxis >= 0) {
-        *view = axisViews[static_cast<size_t>(bestAxis)];
+    // 优先命中实际绘制的正向轴，避免旋转后隐藏的反向轴抢到点击。
+    if (hitTargets(visibleAxisTargets, 24.0f, 28.0f)) {
         return true;
     }
-    return false;
+
+    return hitTargets(reverseAxisTargets, 14.0f, 18.0f);
 }
 
 void GLWidget::setShowLabels(bool show) {

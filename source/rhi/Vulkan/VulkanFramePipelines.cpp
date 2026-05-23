@@ -10,5 +10,6 @@ void VulkanFramePipelines::destroy(const VulkanDevice& device)
     point.destroy(device);
     isoSurface.destroy(device);
     line.destroy(device);
+    axes.destroy(device);
     pick.destroy(device);
 }

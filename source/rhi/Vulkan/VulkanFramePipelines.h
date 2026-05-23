@@ -26,5 +26,6 @@ public:
     VulkanPipelineResource point;
     VulkanPipelineResource isoSurface;
     VulkanPipelineResource line;
+    VulkanPipelineResource axes;
     VulkanPipelineResource pick;
 };

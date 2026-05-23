@@ -5,6 +5,8 @@
 #include "VulkanDevice.h"
 #include "VulkanSwapchain.h"
 
+#include <algorithm>
+
 VulkanRenderBackend::VulkanRenderBackend()
     : context_(std::make_unique<VulkanContext>()),
       device_(std::make_unique<VulkanDevice>()),
@@ -244,6 +246,14 @@ void VulkanRenderBackend::setViewportGridParams(float alpha, float minorStep, fl
     viewportGridFineAlpha_ = fineAlpha;
     if (clearFrameRenderer_) {
         clearFrameRenderer_->setViewportGridParams(alpha, minorStep, fineAlpha);
+    }
+}
+
+void VulkanRenderBackend::setDevicePixelRatio(float devicePixelRatio)
+{
+    devicePixelRatio_ = std::max(1.0f, devicePixelRatio);
+    if (clearFrameRenderer_) {
+        clearFrameRenderer_->setDevicePixelRatio(devicePixelRatio_);
     }
 }
 

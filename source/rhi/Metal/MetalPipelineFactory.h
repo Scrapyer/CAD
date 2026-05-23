@@ -8,6 +8,7 @@ enum class MetalPipelineVertexLayout {
     None,
     Mesh,
     Line,
+    Axis,
     Pick
 };
 

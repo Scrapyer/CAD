@@ -118,6 +118,7 @@ private:
     bool isElementVisibleForSelection(int elementId) const;
     bool isNodeVisibleForSelection(int nodeId) const;
     void appendPartOutlineHighlight(std::vector<float>& lineVertices) const;
+    void appendElementOutlineHighlight(std::vector<float>& lineVertices) const;
     bool rebuildSelectionHighlight();
     void updateRubberBand(const QPoint& currentPos);
     void updateAxesLabels();

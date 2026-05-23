@@ -29,10 +29,11 @@ void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
     }
 }
 
-constexpr int kAxesLabelSize = 30;
+constexpr int kAxesLabelSize = 34;
 constexpr int kAxesMargin = 8;
-constexpr int kAxesViewportSize = 152;
+constexpr int kAxesViewportSize = 192;
 constexpr int kMaxIdLabels = 160;
+constexpr int kFullElementHighlightLimit = 2000;
 constexpr float kAxesClickPadding = 10.0f;
 
 glm::mat4 depthZeroToOneRemap()
@@ -232,6 +233,7 @@ void MetalViewport::renderFrame()
         return;
     }
 
+    backend_.setDevicePixelRatio(static_cast<float>(std::max<qreal>(devicePixelRatioF(), 1.0)));
     const ViewportGridMetrics gridMetrics =
         computeViewportGridMetrics(modelSize_, cam_.distance, viewportGridVisible_);
     backend_.setViewportGridParams(gridMetrics.alpha,
@@ -694,6 +696,7 @@ void MetalViewport::resizeEvent(QResizeEvent* event)
     if (metalLayerHost_.hasLayer() && backend_.hasLayer()) {
         metalLayerHost_.resize(width(), height(), devicePixelRatioF());
         backend_.updateDrawableSize(metalLayerHost_.drawableSize());
+        backend_.setDevicePixelRatio(static_cast<float>(std::max<qreal>(devicePixelRatioF(), 1.0)));
     }
     updateAxesLabels();
 }
@@ -726,6 +729,7 @@ bool MetalViewport::initializeIfNeeded()
     if (!metalLayerHost_.prepare(nativeWindow_, backend_.deviceHandle(), lastError_)) {
         return false;
     }
+    backend_.setDevicePixelRatio(static_cast<float>(std::max<qreal>(devicePixelRatioF(), 1.0)));
     if (!backend_.attachLayer(metalLayerHost_.layer(), metalLayerHost_.drawableSize())) {
         lastError_ = backend_.lastError();
         return false;
@@ -924,16 +928,31 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
         }
         if (rotating_) {
             cam_.rotate(static_cast<float>(delta.x()), static_cast<float>(delta.y()));
+            if (!selection_.selectedElements.empty() &&
+                (pickMode_ == PickMode::Part ||
+                 static_cast<int>(selection_.selectedElements.size()) > kFullElementHighlightLimit)) {
+                selectionDirty_ = true;
+            }
             renderFrame();
             return true;
         }
         if (panning_) {
             cam_.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()));
+            if (!selection_.selectedElements.empty() &&
+                (pickMode_ == PickMode::Part ||
+                 static_cast<int>(selection_.selectedElements.size()) > kFullElementHighlightLimit)) {
+                selectionDirty_ = true;
+            }
             renderFrame();
             return true;
         }
         if (zooming_) {
             cam_.zoom(static_cast<float>(-delta.y()) / 120.0f);
+            if (!selection_.selectedElements.empty() &&
+                (pickMode_ == PickMode::Part ||
+                 static_cast<int>(selection_.selectedElements.size()) > kFullElementHighlightLimit)) {
+                selectionDirty_ = true;
+            }
             renderFrame();
             return true;
         }
@@ -1016,6 +1035,11 @@ bool MetalViewport::handleWheelEvent(QEvent* event)
 
     auto* wheelEvent = static_cast<QWheelEvent*>(event);
     cam_.zoom(static_cast<float>(wheelEvent->angleDelta().y()) / 120.0f);
+    if (!selection_.selectedElements.empty() &&
+        (pickMode_ == PickMode::Part ||
+         static_cast<int>(selection_.selectedElements.size()) > kFullElementHighlightLimit)) {
+        selectionDirty_ = true;
+    }
     renderFrame();
     return true;
 }
@@ -1370,7 +1394,7 @@ glm::mat4 MetalViewport::currentAxesGlmMvp() const
     glm::mat3 rot = glm::mat3(cam_.viewMatrix());
     glm::vec3 axesEye = glm::vec3(rot[0][2], rot[1][2], rot[2][2]) * 2.5f;
     glm::mat4 axesView = glm::lookAt(axesEye, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 axesProj = glm::ortho(-1.3f, 1.3f, -1.3f, 1.3f, 0.01f, 10.0f);
+    glm::mat4 axesProj = glm::ortho(-1.15f, 1.15f, -1.15f, 1.15f, 0.01f, 10.0f);
     axesProj[1][1] *= -1.0f;
     return depthZeroToOneRemap() * axesProj * axesView;
 }
@@ -1411,43 +1435,62 @@ bool MetalViewport::standardViewFromAxesClick(const QPointF& position, StandardV
     };
 
     const QPointF origin = project(glm::vec3(0.0f));
-    const std::array<glm::vec3, 3> axisDirs = {
-        glm::vec3(1.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 1.0f)
+    struct AxisClickTarget {
+        glm::vec3 dir;
+        StandardView view;
     };
-    const std::array<StandardView, 3> axisViews = {
-        StandardView::Right,
-        StandardView::Top,
-        StandardView::Front
-    };
+    const std::array<AxisClickTarget, 3> visibleAxisTargets = {{
+        {glm::vec3(1.0f, 0.0f, 0.0f), StandardView::Right},
+        {glm::vec3(0.0f, 1.0f, 0.0f), StandardView::Top},
+        {glm::vec3(0.0f, 0.0f, 1.0f), StandardView::Front}
+    }};
+    const std::array<AxisClickTarget, 3> reverseAxisTargets = {{
+        {glm::vec3(-1.0f, 0.0f, 0.0f), StandardView::Left},
+        {glm::vec3(0.0f, -1.0f, 0.0f), StandardView::Bottom},
+        {glm::vec3(0.0f, 0.0f, -1.0f), StandardView::Back}
+    }};
 
-    int bestAxis = -1;
-    float bestDist2 = 1.0e30f;
-    const float lineThreshold2 = 13.0f * 13.0f;
-    for (size_t i = 0; i < axisDirs.size(); ++i) {
-        const QPointF end = project(axisDirs[i] * 1.12f);
-        const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
-                               end.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
-                               kAxesLabelSize + kAxesClickPadding * 2.0f,
-                               kAxesLabelSize + kAxesClickPadding * 2.0f);
-        if (labelRect.contains(position)) {
-            *view = axisViews[i];
+    auto hitTargets = [&](const auto& targets, float lineThreshold, float tipThreshold) -> bool {
+        StandardView bestView = StandardView::Front;
+        bool hasBest = false;
+        float bestDist2 = 1.0e30f;
+        const float lineThreshold2 = lineThreshold * lineThreshold;
+        const float tipThreshold2 = tipThreshold * tipThreshold;
+        for (const AxisClickTarget& target : targets) {
+            const QPointF tip = project(target.dir);
+            const QPointF labelCenter = project(target.dir * 1.12f);
+            const QRectF labelRect(labelCenter.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                                   labelCenter.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                                   kAxesLabelSize + kAxesClickPadding * 2.0f,
+                                   kAxesLabelSize + kAxesClickPadding * 2.0f);
+            const QPointF tipDelta = position - tip;
+            const float tipDist2 = static_cast<float>(QPointF::dotProduct(tipDelta, tipDelta));
+            if (labelRect.contains(position) || tipDist2 <= tipThreshold2) {
+                *view = target.view;
+                return true;
+            }
+
+            const float dist2 = ScreenSpacePicking::distanceSquaredToSegment(position, origin, tip);
+            if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
+                bestView = target.view;
+                bestDist2 = dist2;
+                hasBest = true;
+            }
+        }
+
+        if (hasBest) {
+            *view = bestView;
             return true;
         }
+        return false;
+    };
 
-        const float dist2 = ScreenSpacePicking::distanceSquaredToSegment(position, origin, end);
-        if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
-            bestAxis = static_cast<int>(i);
-            bestDist2 = dist2;
-        }
-    }
-
-    if (bestAxis >= 0) {
-        *view = axisViews[static_cast<size_t>(bestAxis)];
+    // 优先命中实际绘制的正向轴，避免旋转后隐藏的反向轴抢到点击。
+    if (hitTargets(visibleAxisTargets, 24.0f, 28.0f)) {
         return true;
     }
-    return false;
+
+    return hitTargets(reverseAxisTargets, 14.0f, 18.0f);
 }
 
 glm::mat4 MetalViewport::currentGlmMvp() const
@@ -1683,6 +1726,159 @@ void MetalViewport::appendPartOutlineHighlight(std::vector<float>& lineVertices)
     }
 }
 
+void MetalViewport::appendElementOutlineHighlight(std::vector<float>& lineVertices) const
+{
+    struct EdgeAdjacency {
+        unsigned int va = 0;
+        unsigned int vb = 0;
+        std::vector<int> adjacentTriangles;
+    };
+
+    auto edgeKey = [this](unsigned int a, unsigned int b) -> int64_t {
+        const int nodeA = a < vertexToNode_.size() ? vertexToNode_[a] : static_cast<int>(a);
+        const int nodeB = b < vertexToNode_.size() ? vertexToNode_[b] : static_cast<int>(b);
+        return (static_cast<int64_t>(std::min(nodeA, nodeB)) << 32) |
+            static_cast<uint32_t>(std::max(nodeA, nodeB));
+    };
+    auto pushIndexedEdge = [this, &lineVertices](unsigned int a, unsigned int b) {
+        const size_t baseA = static_cast<size_t>(a) * 6;
+        const size_t baseB = static_cast<size_t>(b) * 6;
+        if (baseA + 2 >= mesh_.vertices.size() || baseB + 2 >= mesh_.vertices.size()) {
+            return;
+        }
+        lineVertices.push_back(mesh_.vertices[baseA]);
+        lineVertices.push_back(mesh_.vertices[baseA + 1]);
+        lineVertices.push_back(mesh_.vertices[baseA + 2]);
+        lineVertices.push_back(mesh_.vertices[baseB]);
+        lineVertices.push_back(mesh_.vertices[baseB + 1]);
+        lineVertices.push_back(mesh_.vertices[baseB + 2]);
+    };
+    auto triangleNormal = [this](int triangle) -> glm::vec3 {
+        const size_t base = static_cast<size_t>(triangle) * 3;
+        if (base + 2 >= mesh_.indices.size()) {
+            return glm::vec3(0.0f);
+        }
+        const unsigned int i0 = mesh_.indices[base];
+        const unsigned int i1 = mesh_.indices[base + 1];
+        const unsigned int i2 = mesh_.indices[base + 2];
+        const size_t b0 = static_cast<size_t>(i0) * 6;
+        const size_t b1 = static_cast<size_t>(i1) * 6;
+        const size_t b2 = static_cast<size_t>(i2) * 6;
+        if (b0 + 2 >= mesh_.vertices.size() ||
+            b1 + 2 >= mesh_.vertices.size() ||
+            b2 + 2 >= mesh_.vertices.size()) {
+            return glm::vec3(0.0f);
+        }
+        const glm::vec3 p0(mesh_.vertices[b0], mesh_.vertices[b0 + 1], mesh_.vertices[b0 + 2]);
+        const glm::vec3 p1(mesh_.vertices[b1], mesh_.vertices[b1 + 1], mesh_.vertices[b1 + 2]);
+        const glm::vec3 p2(mesh_.vertices[b2], mesh_.vertices[b2 + 1], mesh_.vertices[b2 + 2]);
+        const glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
+        const float length = glm::length(n);
+        return length > 1.0e-12f ? n / length : glm::vec3(0.0f);
+    };
+
+    if (selection_.selectedElements.empty()) {
+        return;
+    }
+
+    std::unordered_map<int64_t, EdgeAdjacency> edgeAdjacency;
+    const int triangleCount = static_cast<int>(mesh_.indices.size() / 3);
+    edgeAdjacency.reserve(static_cast<size_t>(triangleCount) * 2);
+    for (int triangle = 0; triangle < triangleCount; ++triangle) {
+        if (!isTriangleVisibleForSelection(static_cast<size_t>(triangle))) {
+            continue;
+        }
+        for (int edge = 0; edge < 3; ++edge) {
+            const unsigned int va = mesh_.indices[static_cast<size_t>(triangle) * 3 + edge];
+            const unsigned int vb = mesh_.indices[static_cast<size_t>(triangle) * 3 + ((edge + 1) % 3)];
+            EdgeAdjacency& adjacency = edgeAdjacency[edgeKey(va, vb)];
+            if (adjacency.adjacentTriangles.empty()) {
+                adjacency.va = va;
+                adjacency.vb = vb;
+            }
+            adjacency.adjacentTriangles.push_back(triangle);
+        }
+    }
+
+    constexpr float featureAngleThreshold = 0.5f; // cos(60°)
+    const glm::vec3 eye = cam_.eye();
+    std::unordered_set<int64_t> visitedEdges;
+    visitedEdges.reserve(std::min<size_t>(static_cast<size_t>(triangleCount) * 2,
+                                          selection_.selectedElements.size() * 12));
+
+    const size_t selectedTriangleCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
+    for (size_t triangle = 0; triangle < selectedTriangleCount; ++triangle) {
+        if (!selection_.isElementSelected(triangleToElement_[triangle]) ||
+            !isTriangleVisibleForSelection(triangle)) {
+            continue;
+        }
+
+        const size_t base = triangle * 3;
+        for (int edge = 0; edge < 3; ++edge) {
+            const unsigned int va = mesh_.indices[base + static_cast<size_t>(edge)];
+            const unsigned int vb = mesh_.indices[base + static_cast<size_t>((edge + 1) % 3)];
+            const int64_t key = edgeKey(va, vb);
+            if (!visitedEdges.insert(key).second) {
+                continue;
+            }
+            const auto adjacencyIt = edgeAdjacency.find(key);
+            if (adjacencyIt == edgeAdjacency.end()) {
+                continue;
+            }
+
+            int selectedCount = 0;
+            int otherCount = 0;
+            int selected0 = -1;
+            int selected1 = -1;
+            for (int adjacentTriangle : adjacencyIt->second.adjacentTriangles) {
+                const bool adjacentSelected =
+                    adjacentTriangle >= 0 &&
+                    adjacentTriangle < static_cast<int>(triangleToElement_.size()) &&
+                    selection_.isElementSelected(triangleToElement_[static_cast<size_t>(adjacentTriangle)]) &&
+                    isTriangleVisibleForSelection(static_cast<size_t>(adjacentTriangle));
+                if (adjacentSelected) {
+                    if (selectedCount == 0) {
+                        selected0 = adjacentTriangle;
+                    } else if (selectedCount == 1) {
+                        selected1 = adjacentTriangle;
+                    }
+                    ++selectedCount;
+                } else {
+                    ++otherCount;
+                }
+            }
+
+            if (otherCount > 0 || selectedCount == 1) {
+                pushIndexedEdge(adjacencyIt->second.va, adjacencyIt->second.vb);
+                continue;
+            }
+            if (selectedCount < 2 || selected0 < 0 || selected1 < 0) {
+                continue;
+            }
+
+            const glm::vec3 n0 = triangleNormal(selected0);
+            const glm::vec3 n1 = triangleNormal(selected1);
+            if (glm::dot(n0, n1) < featureAngleThreshold) {
+                pushIndexedEdge(adjacencyIt->second.va, adjacencyIt->second.vb);
+                continue;
+            }
+
+            const size_t baseA = static_cast<size_t>(adjacencyIt->second.va) * 6;
+            const size_t baseB = static_cast<size_t>(adjacencyIt->second.vb) * 6;
+            if (baseA + 2 >= mesh_.vertices.size() || baseB + 2 >= mesh_.vertices.size()) {
+                continue;
+            }
+            const glm::vec3 a(mesh_.vertices[baseA], mesh_.vertices[baseA + 1], mesh_.vertices[baseA + 2]);
+            const glm::vec3 b(mesh_.vertices[baseB], mesh_.vertices[baseB + 1], mesh_.vertices[baseB + 2]);
+            const glm::vec3 mid = (a + b) * 0.5f;
+            const glm::vec3 viewDir = eye - mid;
+            if (glm::dot(n0, viewDir) * glm::dot(n1, viewDir) <= 0.0f) {
+                pushIndexedEdge(adjacencyIt->second.va, adjacencyIt->second.vb);
+            }
+        }
+    }
+}
+
 bool MetalViewport::rebuildSelectionHighlight()
 {
     std::vector<float> lineVertices;
@@ -1727,6 +1923,12 @@ bool MetalViewport::rebuildSelectionHighlight()
     } else if (pickMode_ == PickMode::Part && !selection_.selectedElements.empty()) {
         appendPartOutlineHighlight(lineVertices);
     } else if (!selection_.selectedElements.empty()) {
+        if (static_cast<int>(selection_.selectedElements.size()) > kFullElementHighlightLimit &&
+            !vertexToNode_.empty() && !triangleToElement_.empty()) {
+            appendElementOutlineHighlight(lineVertices);
+            return backend_.uploadSelectionLines(lineVertices);
+        }
+
         const size_t elemEdgeCount =
             std::min(mesh_.elemEdgeToElement.size(), mesh_.elemEdgeVertices.size() / 6);
         if (elemEdgeCount > 0) {

@@ -14,6 +14,7 @@ struct MetalMeshBufferTargets {
     MetalBufferResource* edgeIndexBuffer = nullptr;
     int* meshVertexCount = nullptr;
     int* meshIndexCount = nullptr;
+    int* pointVertexCount = nullptr;
     int* edgeVertexCount = nullptr;
     int* edgeIndexCount = nullptr;
 };

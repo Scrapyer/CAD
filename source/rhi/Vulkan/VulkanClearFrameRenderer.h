@@ -66,6 +66,7 @@ public:
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
     void setViewportGridVisible(bool visible);
     void setViewportGridParams(float alpha, float minorStep, float fineAlpha);
+    void setDevicePixelRatio(float devicePixelRatio);
     bool renderMeshFrame(const VulkanDevice& device,
                          const VulkanSwapchain& swapchain,
                          const VkClearColorValue& clearColor,
@@ -97,6 +98,7 @@ private:
     bool createPointGraphicsPipeline(const VulkanDevice& device);
     bool createIsoSurfaceGraphicsPipeline(const VulkanDevice& device);
     bool createLineGraphicsPipeline(const VulkanDevice& device);
+    bool createAxesGraphicsPipeline(const VulkanDevice& device);
     bool createPickRenderPass(const VulkanDevice& device);
     bool createPickGraphicsPipeline(const VulkanDevice& device);
     bool createMeshScalarDescriptor(const VulkanDevice& device);
@@ -175,5 +177,6 @@ private:
     bool viewportGridVisible_ = true;
     float viewportGridMinorStep_ = 24.0f;
     float viewportGridFineAlpha_ = 0.0f;
+    float devicePixelRatio_ = 1.0f;
     QString lastError_;
 };

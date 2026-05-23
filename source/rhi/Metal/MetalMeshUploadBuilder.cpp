@@ -44,6 +44,7 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
     uploadData.vertices.reserve(triangleCount * 3);
     uploadData.indices.reserve(triangleCount * 3);
     uploadData.scalarSourceIndices.reserve(triangleCount * 3);
+    std::vector<unsigned char> visiblePointVertices(sourceVertexCount, 0);
 
     for (size_t tri = 0; tri < triangleCount; ++tri) {
         const int part = tri < options.triangleToPart.size()
@@ -65,6 +66,7 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
             if (sourceIndex >= sourceVertexCount) {
                 continue;
             }
+            visiblePointVertices[sourceIndex] = 1;
             const size_t base = static_cast<size_t>(sourceIndex) * 6;
             MetalMeshVertex vertex{};
             vertex.position[0] = mesh.vertices[base + 0];
@@ -123,15 +125,20 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
         }
     }
 
-    uploadData.pointVertices.reserve(uploadData.vertices.size());
-    for (const MetalMeshVertex& vertex : uploadData.vertices) {
+    uploadData.pointVertices.reserve(sourceVertexCount);
+    for (size_t sourceIndex = 0; sourceIndex < sourceVertexCount; ++sourceIndex) {
+        if (!visiblePointVertices[sourceIndex]) {
+            continue;
+        }
+        const size_t base = sourceIndex * 6;
         MetalLineVertex point{};
-        point.position[0] = vertex.position[0];
-        point.position[1] = vertex.position[1];
-        point.position[2] = vertex.position[2];
+        point.position[0] = mesh.vertices[base + 0];
+        point.position[1] = mesh.vertices[base + 1];
+        point.position[2] = mesh.vertices[base + 2];
         point.scalar = 0.0f;
         uploadData.pointVertices.push_back(point);
     }
+    uploadData.pointVertexCount = static_cast<int>(uploadData.pointVertices.size());
 
     return uploadData;
 }

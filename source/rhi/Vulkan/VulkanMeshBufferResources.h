@@ -42,6 +42,8 @@ public:
     VulkanBufferResource meshVertexResource;
     VulkanBufferResource meshIndexResource;
     uint32_t meshIndexCount = 0;
+    VulkanBufferResource pointVertexResource;
+    uint32_t pointVertexCount = 0;
 
     bool meshUseVertexScalars = false;
     float meshScalarMin = 0.0f;

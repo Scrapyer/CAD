@@ -33,6 +33,7 @@ struct MetalMeshUploadData {
     std::vector<MetalLineVertex> edgeVertices;
     std::vector<unsigned int> edgeIndices;
     std::vector<unsigned int> scalarSourceIndices;
+    int pointVertexCount = 0;
     int edgeVertexCount = 0;
 };
 

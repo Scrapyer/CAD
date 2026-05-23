@@ -30,6 +30,8 @@ public:
         const VulkanBufferResource* meshVertexResource = nullptr;
         const VulkanBufferResource* meshIndexResource = nullptr;
         uint32_t meshIndexCount = 0;
+        const VulkanBufferResource* pointVertexResource = nullptr;
+        uint32_t pointVertexCount = 0;
         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe;
         bool meshUseVertexScalars = false;
         float meshScalarMin = 0.0f;
