@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QIcon>
 #include <QWidget>
 #include <QTreeWidget>
 #include <vector>
@@ -44,13 +45,19 @@ signals:
     void partSelectionChanged(const std::vector<int>& selectedParts);
 
 private slots:
-    void onItemChanged(QTreeWidgetItem* item, int column);
+    void onItemClicked(QTreeWidgetItem* item, int column);
     void onSelectionChanged();
 
 private:
     QPixmap makeColorSwatch(const glm::vec3& color, int size = 12) const;
+    QIcon makeVisibilityIcon(bool visible, const QColor& color) const;
+    QIcon makePartIcon(const glm::vec3& color) const;
+    QIcon makeRootIcon(const QColor& color) const;
+    void setPartVisible(QTreeWidgetItem* item, bool visible, bool notify);
+    void updateRootVisibilityIcon();
 
     QTreeWidget*  tree_       = nullptr;
     QTreeWidgetItem* rootItem_ = nullptr;
     bool          updating_   = false;   // 防止信号递归
+    QColor        iconColor_{160, 166, 190};
 };
