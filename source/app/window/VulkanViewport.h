@@ -104,6 +104,7 @@ private:
     bool isElementVisibleForSelection(int elementId) const;
     void appendPartOutlineHighlight(std::vector<float>& lineVertices) const;
     bool rebuildSelectionHighlight();
+    void updateRubberBand(const QPoint& currentPos);
     void updateAxesLabels();
     void updateIdLabels();
     void updateFrameStats(qint64 frameNs);

@@ -143,7 +143,7 @@ VulkanViewport::VulkanViewport(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(windowContainer_);
-    rubberBand_ = new QRubberBand(QRubberBand::Rectangle, windowContainer_);
+    rubberBand_ = new QRubberBand(QRubberBand::Rectangle);
 
     const std::array<QString, 3> axesNames = {
         QStringLiteral("X"),
@@ -181,6 +181,8 @@ VulkanViewport::~VulkanViewport()
 {
     stopRendering();
     backend_.destroySwapchain();
+    delete rubberBand_;
+    rubberBand_ = nullptr;
 }
 
 void VulkanViewport::startRendering()
@@ -759,8 +761,7 @@ bool VulkanViewport::handleMouseEvent(QEvent* event)
         boxSelecting_ = leftPressForPick_ && selectionGesture;
         boxDeselecting_ = rightPressForDeselect_ && selectionGesture;
         if (boxSelecting_ || boxDeselecting_) {
-            rubberBand_->setGeometry(QRect(boxOrigin_, QSize()));
-            rubberBand_->show();
+            updateRubberBand(boxOrigin_);
         }
         rotating_ = mouseEvent->button() == Qt::LeftButton && !boxSelecting_;
         panning_ = mouseEvent->button() == Qt::MiddleButton ||
@@ -775,7 +776,7 @@ bool VulkanViewport::handleMouseEvent(QEvent* event)
             mouseMovedSincePress_ = true;
         }
         if (boxSelecting_ || boxDeselecting_) {
-            rubberBand_->setGeometry(QRect(boxOrigin_, mouseEvent->position().toPoint()).normalized());
+            updateRubberBand(mouseEvent->position().toPoint());
             return true;
         }
         if (rotating_) {
@@ -831,6 +832,20 @@ bool VulkanViewport::handleMouseEvent(QEvent* event)
         break;
     }
     return false;
+}
+
+void VulkanViewport::updateRubberBand(const QPoint& currentPos)
+{
+    if (!rubberBand_) {
+        return;
+    }
+
+    QWidget* anchor = windowContainer_ ? windowContainer_ : this;
+    const QPoint globalOrigin = anchor->mapToGlobal(boxOrigin_);
+    const QPoint globalCurrent = anchor->mapToGlobal(currentPos);
+    rubberBand_->setGeometry(QRect(globalOrigin, globalCurrent).normalized());
+    rubberBand_->show();
+    rubberBand_->raise();
 }
 
 bool VulkanViewport::pickAtPosition(const QPointF& position, bool appendSelection)

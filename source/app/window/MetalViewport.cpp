@@ -145,7 +145,7 @@ MetalViewport::MetalViewport(QWidget* parent)
     layout->addWidget(windowContainer_);
     windowContainer_->installEventFilter(this);
     nativeWindow_->installEventFilter(this);
-    rubberBand_ = new QRubberBand(QRubberBand::Rectangle, windowContainer_);
+    rubberBand_ = new QRubberBand(QRubberBand::Rectangle);
 
     const std::array<QString, 3> axesNames = {
         QStringLiteral("X"),
@@ -182,6 +182,8 @@ MetalViewport::~MetalViewport()
 {
     stopRendering();
     backend_.destroy();
+    delete rubberBand_;
+    rubberBand_ = nullptr;
 }
 
 void MetalViewport::startRendering()
@@ -757,8 +759,7 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
         boxSelecting_ = leftPressForPick_ && selectionGesture;
         boxDeselecting_ = rightPressForDeselect_ && selectionGesture;
         if (boxSelecting_ || boxDeselecting_) {
-            rubberBand_->setGeometry(QRect(boxOrigin_, QSize()));
-            rubberBand_->show();
+            updateRubberBand(boxOrigin_);
         }
         rotating_ = mouseEvent->button() == Qt::LeftButton && !boxSelecting_;
         panning_ = mouseEvent->button() == Qt::MiddleButton ||
@@ -773,7 +774,7 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
             mouseMovedSincePress_ = true;
         }
         if (boxSelecting_ || boxDeselecting_) {
-            rubberBand_->setGeometry(QRect(boxOrigin_, mouseEvent->position().toPoint()).normalized());
+            updateRubberBand(mouseEvent->position().toPoint());
             return true;
         }
         if (rotating_) {
@@ -827,6 +828,20 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
         break;
     }
     return false;
+}
+
+void MetalViewport::updateRubberBand(const QPoint& currentPos)
+{
+    if (!rubberBand_) {
+        return;
+    }
+
+    QWidget* anchor = windowContainer_ ? windowContainer_ : this;
+    const QPoint globalOrigin = anchor->mapToGlobal(boxOrigin_);
+    const QPoint globalCurrent = anchor->mapToGlobal(currentPos);
+    rubberBand_->setGeometry(QRect(globalOrigin, globalCurrent).normalized());
+    rubberBand_->show();
+    rubberBand_->raise();
 }
 
 bool MetalViewport::handleWheelEvent(QEvent* event)
@@ -967,12 +982,12 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
     const float height = static_cast<float>(std::max(1, size.height()));
     float ndcLeft = (2.0f * static_cast<float>(rect.left()) / width) - 1.0f;
     float ndcRight = (2.0f * static_cast<float>(rect.right()) / width) - 1.0f;
-    float ndcTop = (2.0f * static_cast<float>(rect.top()) / height) - 1.0f;
-    float ndcBottom = (2.0f * static_cast<float>(rect.bottom()) / height) - 1.0f;
+    float ndcTop = 1.0f - (2.0f * static_cast<float>(rect.top()) / height);
+    float ndcBottom = 1.0f - (2.0f * static_cast<float>(rect.bottom()) / height);
     if (ndcLeft > ndcRight) {
         std::swap(ndcLeft, ndcRight);
     }
-    if (ndcTop > ndcBottom) {
+    if (ndcBottom > ndcTop) {
         std::swap(ndcTop, ndcBottom);
     }
 
@@ -992,7 +1007,7 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
         }
         const float x = clip.x / clip.w;
         const float y = clip.y / clip.w;
-        return x >= ndcLeft && x <= ndcRight && y >= ndcTop && y <= ndcBottom;
+        return x >= ndcLeft && x <= ndcRight && y >= ndcBottom && y <= ndcTop;
     };
 
     if (pickMode_ == PickMode::Node) {

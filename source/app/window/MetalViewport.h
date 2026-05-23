@@ -116,6 +116,7 @@ private:
     std::vector<int> pickedPartIndices() const;
     std::vector<int> currentSelectionIds() const;
     bool isElementVisibleForSelection(int elementId) const;
+    void updateRubberBand(const QPoint& currentPos);
     void updateAxesLabels();
     void updateIdLabels();
     void updateFrameStats(qint64 frameNs);
