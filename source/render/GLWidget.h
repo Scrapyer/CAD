@@ -163,6 +163,15 @@ public slots:
     /** @brief 设置指定部件的可见性，触发重绘 */
     void setPartVisibility(int partIndex, bool visible);
 
+    /** @brief 设置指定单元的可见性，触发重绘 */
+    void setElementVisibility(int elementId, bool visible);
+
+    /** @brief 批量设置单元可见性，触发重绘 */
+    void setElementsVisibility(const std::vector<int>& elementIds, bool visible);
+
+    /** @brief 清除所有单元级隐藏状态 */
+    void setAllElementsVisible();
+
     /** @brief 高亮显示指定部件（来自模型树多选） */
     void highlightParts(const std::vector<int>& partIndices);
 
@@ -290,6 +299,7 @@ private:
     // ── 部件可见性 ──
     std::vector<int> triToPart_;                        // 三角形 → 部件索引
     std::unordered_map<int, bool> partVisibility_;      // 部件索引 → 是否可见
+    std::unordered_set<int> hiddenElementIds_;          // 被单独隐藏的 FEM 单元 ID
     std::vector<unsigned int> allTriIndices_;            // 完整三角形索引（不过滤）
     int activeIndexCount_ = 0;                          // 当前实际绘制的索引数量
     bool partVisibilityDirty_ = false;                  // 是否需要重建 IBO

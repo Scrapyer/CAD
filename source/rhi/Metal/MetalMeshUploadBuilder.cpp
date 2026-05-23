@@ -10,6 +10,11 @@ bool isPartVisible(const MetalMeshUploadOptions& options, int part)
     return it == options.partVisibility.end() || it->second;
 }
 
+bool isElementVisible(const MetalMeshUploadOptions& options, int elementId)
+{
+    return elementId < 0 || options.hiddenElementIds.count(elementId) == 0;
+}
+
 QVector3D triangleColor(const MetalMeshUploadOptions& options, int part)
 {
     if (part >= 0 && part < static_cast<int>(options.partColors.size())) {
@@ -51,6 +56,9 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
         const int elementId = tri < options.triangleToElement.size()
             ? options.triangleToElement[tri]
             : static_cast<int>(tri);
+        if (!isElementVisible(options, elementId)) {
+            continue;
+        }
         const QVector3D pickColor = metalIdToPickColor(elementId);
         for (size_t corner = 0; corner < 3; ++corner) {
             const unsigned int sourceIndex = mesh.indices[tri * 3 + corner];
@@ -101,6 +109,12 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
             const int part = edge < options.edgeToPart.size()
                 ? options.edgeToPart[edge]
                 : -1;
+            const int elementId = edge < mesh.edgeToElement.size()
+                ? mesh.edgeToElement[edge]
+                : -1;
+            if (!isElementVisible(options, elementId)) {
+                continue;
+            }
             if (!isPartVisible(options, part)) {
                 continue;
             }

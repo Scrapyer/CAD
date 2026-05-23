@@ -51,6 +51,7 @@ void RenderViewport::setMesh(const Mesh& mesh)
     triangleToPart_.clear();
     edgeToPart_.clear();
     partVisibility_.clear();
+    hiddenElementIds_.clear();
     vertexColors_.clear();
     vertexScalars_.clear();
     edgeScalars_.clear();
@@ -701,6 +702,71 @@ void RenderViewport::setPartVisibility(int partIndex, bool visible)
     }
 #endif
 }
+
+void RenderViewport::setElementVisibility(int elementId, bool visible)
+{
+    if (elementId < 0) {
+        return;
+    }
+    if (visible) {
+        hiddenElementIds_.erase(elementId);
+    } else {
+        hiddenElementIds_.insert(elementId);
+    }
+    glWidget_->setElementVisibility(elementId, visible);
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setElementVisibility(elementId, visible);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setElementVisibility(elementId, visible);
+    }
+#endif
+}
+
+void RenderViewport::setElementsVisibility(const std::vector<int>& elementIds, bool visible)
+{
+    for (int elementId : elementIds) {
+        if (elementId < 0) {
+            continue;
+        }
+        if (visible) {
+            hiddenElementIds_.erase(elementId);
+        } else {
+            hiddenElementIds_.insert(elementId);
+        }
+    }
+    glWidget_->setElementsVisibility(elementIds, visible);
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setElementsVisibility(elementIds, visible);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setElementsVisibility(elementIds, visible);
+    }
+#endif
+}
+
+void RenderViewport::setAllElementsVisible()
+{
+    hiddenElementIds_.clear();
+    glWidget_->setAllElementsVisible();
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setAllElementsVisible();
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setAllElementsVisible();
+    }
+#endif
+}
+
 void RenderViewport::highlightParts(const std::vector<int>& partIndices)
 {
     currentPickMode_ = PickMode::Part;
@@ -848,6 +914,11 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         for (const auto& [partIndex, visible] : partVisibility_) {
             metalViewport_->setPartVisibility(partIndex, visible);
         }
+        if (!hiddenElementIds_.empty()) {
+            metalViewport_->setElementsVisibility(
+                std::vector<int>(hiddenElementIds_.begin(), hiddenElementIds_.end()),
+                false);
+        }
         if (hasModelFit_) {
             metalViewport_->fitToModel(modelCenter_, modelSize_);
         }
@@ -932,6 +1003,11 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
         for (const auto& [partIndex, visible] : partVisibility_) {
             vulkanViewport_->setPartVisibility(partIndex, visible);
+        }
+        if (!hiddenElementIds_.empty()) {
+            vulkanViewport_->setElementsVisibility(
+                std::vector<int>(hiddenElementIds_.begin(), hiddenElementIds_.end()),
+                false);
         }
         if (hasModelFit_) {
             vulkanViewport_->fitToModel(modelCenter_, modelSize_);

@@ -302,10 +302,21 @@ MainWindow::MainWindow() {
         QTimer::singleShot(0, this, [this, globalPos]() {
             if (viewportContextMenu_) {
                 const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+                const std::vector<int> elementIds = selectedElementIdsForVisibility();
+                const bool hasVisibilitySelection = !partIndices.empty() || !elementIds.empty();
+                const bool selectionHasVisibleItems =
+                    !partIndices.empty() ? anyVisibilityPartsVisible(partIndices)
+                                         : anyVisibilityElementsVisible(elementIds);
+                const bool selectionHasHiddenItems =
+                    !partIndices.empty() ? anyVisibilityPartsHidden(partIndices)
+                                         : anyVisibilityElementsHidden(elementIds);
                 viewportContextMenu_->setModelVisibilityState(!activeModel().isEmpty(),
-                                                              !partIndices.empty(),
-                                                              anyVisibilityPartsVisible(partIndices),
-                                                              anyVisibilityPartsHidden(partIndices),
+                                                              hasVisibilitySelection,
+                                                              lastSelectionMode_,
+                                                              selectionHasVisibleItems,
+                                                              selectionHasHiddenItems,
+                                                              hasHiddenModelItems(),
+                                                              hasHiddenModelElements(),
                                                               hasHiddenModelParts());
                 viewportContextMenu_->popup(renderViewport_, globalPos);
             }
@@ -358,12 +369,20 @@ MainWindow::MainWindow() {
             this, &MainWindow::showModelInfoDialog);
     connect(viewportContextMenu_, &ViewportContextMenu::hideSelectedRequested,
             this, &MainWindow::hideSelectedModelParts);
-    connect(viewportContextMenu_, &ViewportContextMenu::showSelectedRequested,
-            this, &MainWindow::showSelectedModelParts);
+    connect(viewportContextMenu_, &ViewportContextMenu::hideAllElementsRequested,
+            this, &MainWindow::hideAllModelElements);
+    connect(viewportContextMenu_, &ViewportContextMenu::hideAllPartsRequested,
+            this, &MainWindow::hideAllModelParts);
+    connect(viewportContextMenu_, &ViewportContextMenu::hideAllRequested,
+            this, &MainWindow::hideAllModelObjects);
+    connect(viewportContextMenu_, &ViewportContextMenu::showAllElementsRequested,
+            this, &MainWindow::showAllModelElements);
+    connect(viewportContextMenu_, &ViewportContextMenu::showAllPartsRequested,
+            this, &MainWindow::showAllModelParts);
     connect(viewportContextMenu_, &ViewportContextMenu::isolateSelectedRequested,
             this, &MainWindow::isolateSelectedModelParts);
     connect(viewportContextMenu_, &ViewportContextMenu::showAllRequested,
-            this, &MainWindow::showAllModelParts);
+            this, &MainWindow::showAllModelObjects);
     connect(viewportContextMenu_, &ViewportContextMenu::backgroundSettingsRequested,
             this, &MainWindow::showBackgroundSettingsDialog);
     connect(viewportContextMenu_, &ViewportContextMenu::gridVisibleChanged,
@@ -408,6 +427,7 @@ MainWindow::MainWindow() {
         lastSelectionMode_ = PickMode::Node;
         lastSelectionIds_.clear();
         lastSelectedPartIndices_.clear();
+        hiddenElementIds_.clear();
         if (size > 0) {
             renderViewport_->fitToModel(center, size);
         }
@@ -636,6 +656,7 @@ void MainWindow::clearCurrentLayout()
     lastSelectionMode_ = PickMode::Node;
     lastSelectionIds_.clear();
     lastSelectedPartIndices_.clear();
+    hiddenElementIds_.clear();
     importPaths_ = ImportPathState{};
     feModelPanel_->clearModel();
     if (statusProgress_) statusProgress_->setVisible(false);
@@ -889,42 +910,44 @@ void MainWindow::updatePickModeSummary(PickMode mode)
 std::vector<int> MainWindow::selectedPartIndicesForVisibility() const
 {
     const FEModel& model = activeModel();
-    if (model.parts.empty()) {
+    if (model.parts.empty() || lastSelectionMode_ != PickMode::Part) {
         return {};
     }
 
     std::set<int> partSet;
-    if (lastSelectionMode_ == PickMode::Part) {
-        for (int partIndex : lastSelectedPartIndices_) {
-            if (partIndex >= 0 && partIndex < static_cast<int>(model.parts.size())) {
-                partSet.insert(partIndex);
-            }
-        }
-    } else if (lastSelectionMode_ == PickMode::Element) {
-        const std::unordered_set<int> selected(lastSelectionIds_.begin(), lastSelectionIds_.end());
-        for (int partIndex = 0; partIndex < static_cast<int>(model.parts.size()); ++partIndex) {
-            const FEPart& part = model.parts[partIndex];
-            for (int elementId : part.elementIds) {
-                if (selected.count(elementId) > 0) {
-                    partSet.insert(partIndex);
-                    break;
-                }
-            }
-        }
-    } else {
-        const std::unordered_set<int> selected(lastSelectionIds_.begin(), lastSelectionIds_.end());
-        for (int partIndex = 0; partIndex < static_cast<int>(model.parts.size()); ++partIndex) {
-            const FEPart& part = model.parts[partIndex];
-            for (int nodeId : part.nodeIds) {
-                if (selected.count(nodeId) > 0) {
-                    partSet.insert(partIndex);
-                    break;
-                }
-            }
+    for (int partIndex : lastSelectedPartIndices_) {
+        if (partIndex >= 0 && partIndex < static_cast<int>(model.parts.size())) {
+            partSet.insert(partIndex);
         }
     }
 
     return std::vector<int>(partSet.begin(), partSet.end());
+}
+
+std::vector<int> MainWindow::selectedElementIdsForVisibility() const
+{
+    if (lastSelectionMode_ != PickMode::Element || lastSelectionIds_.empty()) {
+        return {};
+    }
+
+    std::set<int> elementSet;
+    for (int elementId : lastSelectionIds_) {
+        if (elementId >= 0) {
+            elementSet.insert(elementId);
+        }
+    }
+    return std::vector<int>(elementSet.begin(), elementSet.end());
+}
+
+std::vector<int> MainWindow::allModelElementIds() const
+{
+    const FEModel& model = activeModel();
+    std::set<int> elementSet;
+    for (const auto& [elementId, element] : model.elements) {
+        (void)element;
+        elementSet.insert(elementId);
+    }
+    return std::vector<int>(elementSet.begin(), elementSet.end());
 }
 
 bool MainWindow::areVisibilityPartsVisible(const std::vector<int>& partIndices) const
@@ -972,6 +995,36 @@ bool MainWindow::anyVisibilityPartsHidden(const std::vector<int>& partIndices) c
     return false;
 }
 
+bool MainWindow::anyVisibilityElementsVisible(const std::vector<int>& elementIds) const
+{
+    for (int elementId : elementIds) {
+        if (hiddenElementIds_.count(elementId) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MainWindow::anyVisibilityElementsHidden(const std::vector<int>& elementIds) const
+{
+    for (int elementId : elementIds) {
+        if (hiddenElementIds_.count(elementId) > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MainWindow::hasHiddenModelItems() const
+{
+    return hasHiddenModelElements() || hasHiddenModelParts();
+}
+
+bool MainWindow::hasHiddenModelElements() const
+{
+    return !hiddenElementIds_.empty();
+}
+
 bool MainWindow::hasHiddenModelParts() const
 {
     if (!partsPanel_) {
@@ -1015,10 +1068,28 @@ void MainWindow::rememberVisibilitySelection(const std::vector<int>& partIndices
 
 void MainWindow::hideSelectedModelParts()
 {
+    if (lastSelectionMode_ == PickMode::Element) {
+        const std::vector<int> elementIds = selectedElementIdsForVisibility();
+        if (elementIds.empty()) {
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  请先选择要隐藏的单元"));
+            }
+            return;
+        }
+        for (int elementId : elementIds) {
+            hiddenElementIds_.insert(elementId);
+        }
+        renderViewport_->setElementsVisibility(elementIds, false);
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  已隐藏 %1 个单元").arg(elementIds.size()));
+        }
+        return;
+    }
+
     const std::vector<int> partIndices = selectedPartIndicesForVisibility();
     if (partIndices.empty()) {
         if (statusLabel_) {
-            statusLabel_->setText(QStringLiteral("  请先选择要隐藏的部件、单元或节点"));
+            statusLabel_->setText(QStringLiteral("  请先选择要隐藏的部件"));
         }
         return;
     }
@@ -1032,12 +1103,87 @@ void MainWindow::hideSelectedModelParts()
     }
 }
 
+void MainWindow::hideAllModelElements()
+{
+    const std::vector<int> elementIds = allModelElementIds();
+    if (elementIds.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  当前没有可隐藏的单元"));
+        }
+        return;
+    }
+
+    hiddenElementIds_.insert(elementIds.begin(), elementIds.end());
+    renderViewport_->setElementsVisibility(elementIds, false);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已隐藏全部单元"));
+    }
+}
+
+void MainWindow::hideAllModelParts()
+{
+    const FEModel& model = activeModel();
+    if (model.parts.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  当前没有可隐藏的部件"));
+        }
+        return;
+    }
+
+    partsPanel_->setAllPartsVisible(false, true);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已隐藏全部部件"));
+    }
+}
+
+void MainWindow::hideAllModelObjects()
+{
+    const std::vector<int> elementIds = allModelElementIds();
+    if (!elementIds.empty()) {
+        hiddenElementIds_.insert(elementIds.begin(), elementIds.end());
+        renderViewport_->setElementsVisibility(elementIds, false);
+    }
+
+    const FEModel& model = activeModel();
+    if (!model.parts.empty()) {
+        partsPanel_->setAllPartsVisible(false, true);
+    }
+
+    if (elementIds.empty() && model.parts.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  当前没有可隐藏的对象"));
+        }
+        return;
+    }
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已隐藏全部对象"));
+    }
+}
+
 void MainWindow::showSelectedModelParts()
 {
+    if (lastSelectionMode_ == PickMode::Element) {
+        const std::vector<int> elementIds = selectedElementIdsForVisibility();
+        if (elementIds.empty()) {
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  请先选择要显示的单元"));
+            }
+            return;
+        }
+        for (int elementId : elementIds) {
+            hiddenElementIds_.erase(elementId);
+        }
+        renderViewport_->setElementsVisibility(elementIds, true);
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  已显示 %1 个单元").arg(elementIds.size()));
+        }
+        return;
+    }
+
     const std::vector<int> partIndices = selectedPartIndicesForVisibility();
     if (partIndices.empty()) {
         if (statusLabel_) {
-            statusLabel_->setText(QStringLiteral("  请先选择要显示的部件、单元或节点"));
+            statusLabel_->setText(QStringLiteral("  请先选择要显示的部件"));
         }
         return;
     }
@@ -1051,20 +1197,19 @@ void MainWindow::showSelectedModelParts()
     }
 }
 
-void MainWindow::isolateSelectedModelParts()
+void MainWindow::showAllModelElements()
 {
-    const std::vector<int> partIndices = selectedPartIndicesForVisibility();
-    if (partIndices.empty()) {
+    if (hiddenElementIds_.empty()) {
         if (statusLabel_) {
-            statusLabel_->setText(QStringLiteral("  请先选择要隔离显示的部件、单元或节点"));
+            statusLabel_->setText(QStringLiteral("  当前没有隐藏的单元"));
         }
         return;
     }
 
-    partsPanel_->isolateParts(partIndices, true);
-    rememberVisibilitySelection(partIndices, true);
+    hiddenElementIds_.clear();
+    renderViewport_->setAllElementsVisible();
     if (statusLabel_) {
-        statusLabel_->setText(QStringLiteral("  已仅显示 %1 个部件").arg(partIndices.size()));
+        statusLabel_->setText(QStringLiteral("  已显示全部单元"));
     }
 }
 
@@ -1081,6 +1226,72 @@ void MainWindow::showAllModelParts()
     partsPanel_->setAllPartsVisible(true, true);
     if (statusLabel_) {
         statusLabel_->setText(QStringLiteral("  已显示全部部件"));
+    }
+}
+
+void MainWindow::isolateSelectedModelParts()
+{
+    if (lastSelectionMode_ == PickMode::Element) {
+        const std::vector<int> selectedElementIds = selectedElementIdsForVisibility();
+        if (selectedElementIds.empty()) {
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  请先选择要隔离显示的单元"));
+            }
+            return;
+        }
+
+        const std::unordered_set<int> selectedSet(selectedElementIds.begin(), selectedElementIds.end());
+        std::vector<int> hideElementIds;
+        for (int elementId : allModelElementIds()) {
+            if (selectedSet.count(elementId) == 0) {
+                hideElementIds.push_back(elementId);
+                hiddenElementIds_.insert(elementId);
+            } else {
+                hiddenElementIds_.erase(elementId);
+            }
+        }
+        if (!hideElementIds.empty()) {
+            renderViewport_->setElementsVisibility(hideElementIds, false);
+        }
+        renderViewport_->setElementsVisibility(selectedElementIds, true);
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  已仅显示 %1 个单元").arg(selectedElementIds.size()));
+        }
+        return;
+    }
+
+    const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+    if (partIndices.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  请先选择要隔离显示的部件"));
+        }
+        return;
+    }
+
+    partsPanel_->isolateParts(partIndices, true);
+    rememberVisibilitySelection(partIndices, true);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已仅显示 %1 个部件").arg(partIndices.size()));
+    }
+}
+
+void MainWindow::showAllModelObjects()
+{
+    const FEModel& model = activeModel();
+    if (model.parts.empty() && hiddenElementIds_.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  当前没有可显示的部件"));
+        }
+        return;
+    }
+
+    if (!model.parts.empty()) {
+        partsPanel_->setAllPartsVisible(true, true);
+    }
+    hiddenElementIds_.clear();
+    renderViewport_->setAllElementsVisible();
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已显示全部对象"));
     }
 }
 
@@ -2285,6 +2496,11 @@ void MainWindow::pushRenderDataToGL(const FERenderData& rd)
     renderViewport_->setTriangleToPartMap(rd.triangleToPart);
     renderViewport_->setEdgeToPartMap(rd.edgeToPart);
     syncPartVisibilityToViewport();
+    if (!hiddenElementIds_.empty()) {
+        renderViewport_->setElementsVisibility(
+            std::vector<int>(hiddenElementIds_.begin(), hiddenElementIds_.end()),
+            false);
+    }
 }
 
 void MainWindow::reapplyContourIfNeeded()

@@ -16,7 +16,7 @@ QMenu* findViewportMenu(QWidget& parent)
             continue;
         }
         for (QAction* action : menu->actions()) {
-            if (action && action->text() == QStringLiteral("隐藏选中")) {
+            if (action && action->text() == QStringLiteral("模型信息...")) {
                 return menu;
             }
         }
@@ -33,6 +33,24 @@ QAction* findAction(QMenu* menu, const QString& text)
         if (action && action->text() == text) {
             return action;
         }
+        if (action && action->menu()) {
+            if (QAction* nested = findAction(action->menu(), text)) {
+                return nested;
+            }
+        }
+    }
+    return nullptr;
+}
+
+QMenu* findSubMenu(QMenu* menu, const QString& text)
+{
+    if (!menu) {
+        return nullptr;
+    }
+    for (QAction* action : menu->actions()) {
+        if (action && action->menu() && action->text() == text) {
+            return action->menu();
+        }
     }
     return nullptr;
 }
@@ -42,19 +60,27 @@ void assertVisibilityActions(QApplication& app,
                              ViewportContextMenu& contextMenu,
                              bool hasModel,
                              bool hasSelection,
+                             PickMode selectionMode,
                              bool selectionHasVisibleParts,
                              bool selectionHasHiddenParts,
+                             bool hasHiddenItems,
+                             bool hasHiddenElements,
                              bool hasHiddenParts,
                              bool modelInfoEnabled,
                              bool hideEnabled,
-                             bool showEnabled,
-                             bool isolateEnabled,
+                             bool isolateElementsEnabled,
+                             bool isolatePartsEnabled,
+                             bool showAllElementsEnabled,
+                             bool showAllPartsEnabled,
                              bool showAllEnabled)
 {
     contextMenu.setModelVisibilityState(hasModel,
                                         hasSelection,
+                                        selectionMode,
                                         selectionHasVisibleParts,
                                         selectionHasHiddenParts,
+                                        hasHiddenItems,
+                                        hasHiddenElements,
                                         hasHiddenParts);
     contextMenu.popup(&parent, parent.mapToGlobal(QPoint(24, 24)));
     app.processEvents();
@@ -63,14 +89,36 @@ void assertVisibilityActions(QApplication& app,
     assert(menu);
     QAction* modelInfoAction = findAction(menu, QStringLiteral("模型信息..."));
     QAction* hideAction = findAction(menu, QStringLiteral("隐藏选中"));
-    QAction* showAction = findAction(menu, QStringLiteral("显示选中"));
-    QAction* isolateAction = findAction(menu, QStringLiteral("仅显示选中"));
-    QAction* showAllAction = findAction(menu, QStringLiteral("显示全部"));
-    assert(modelInfoAction && hideAction && showAction && isolateAction && showAllAction);
+    QMenu* isolateMenu = findSubMenu(menu, QStringLiteral("仅显示"));
+    QMenu* hideMenu = findSubMenu(menu, QStringLiteral("隐藏"));
+    QMenu* showMenu = findSubMenu(menu, QStringLiteral("显示"));
+    QAction* isolateNodesAction = findAction(isolateMenu, QStringLiteral("选中节点"));
+    QAction* isolateElementsAction = findAction(isolateMenu, QStringLiteral("选中单元"));
+    QAction* isolatePartsAction = findAction(isolateMenu, QStringLiteral("选中部件"));
+    QAction* hideAllNodesAction = findAction(hideMenu, QStringLiteral("所有节点"));
+    QAction* hideAllElementsAction = findAction(hideMenu, QStringLiteral("所有单元"));
+    QAction* hideAllPartsAction = findAction(hideMenu, QStringLiteral("所有部件"));
+    QAction* hideAllAction = findAction(hideMenu, QStringLiteral("全部对象"));
+    QAction* showAllNodesAction = findAction(showMenu, QStringLiteral("所有节点"));
+    QAction* showAllElementsAction = findAction(showMenu, QStringLiteral("所有单元"));
+    QAction* showAllPartsAction = findAction(showMenu, QStringLiteral("所有部件"));
+    QAction* showAllAction = findAction(showMenu, QStringLiteral("全部对象"));
+    assert(modelInfoAction && hideAction && isolateMenu && hideMenu && showMenu &&
+           isolateNodesAction && isolateElementsAction && isolatePartsAction &&
+           hideAllNodesAction && hideAllElementsAction && hideAllPartsAction && hideAllAction &&
+           showAllNodesAction && showAllElementsAction && showAllPartsAction && showAllAction);
     assert(modelInfoAction->isEnabled() == modelInfoEnabled);
     assert(hideAction->isEnabled() == hideEnabled);
-    assert(showAction->isEnabled() == showEnabled);
-    assert(isolateAction->isEnabled() == isolateEnabled);
+    assert(!isolateNodesAction->isEnabled());
+    assert(isolateElementsAction->isEnabled() == isolateElementsEnabled);
+    assert(isolatePartsAction->isEnabled() == isolatePartsEnabled);
+    assert(!hideAllNodesAction->isEnabled());
+    assert(hideAllElementsAction->isEnabled() == hasModel);
+    assert(hideAllPartsAction->isEnabled() == hasModel);
+    assert(hideAllAction->isEnabled() == hasModel);
+    assert(!showAllNodesAction->isEnabled());
+    assert(showAllElementsAction->isEnabled() == showAllElementsEnabled);
+    assert(showAllPartsAction->isEnabled() == showAllPartsEnabled);
     assert(showAllAction->isEnabled() == showAllEnabled);
 
     menu->close();
@@ -91,17 +139,21 @@ int main(int argc, char** argv)
     ViewportContextMenu contextMenu;
 
     assertVisibilityActions(app, parent, contextMenu,
+                            false, false, PickMode::Node,
                             false, false, false, false, false,
-                            false, false, false, false, false);
+                            false, false, false, false, false, false, false);
     assertVisibilityActions(app, parent, contextMenu,
-                            true, true, true, false, false,
-                            true, true, false, true, false);
+                            true, true, PickMode::Part,
+                            true, false, false, false, false,
+                            true, true, false, true, false, false, false);
     assertVisibilityActions(app, parent, contextMenu,
-                            true, true, false, true, true,
-                            true, false, true, true, true);
+                            true, true, PickMode::Element,
+                            false, true, true, true, false,
+                            true, false, true, false, true, false, true);
     assertVisibilityActions(app, parent, contextMenu,
+                            true, true, PickMode::Part,
                             true, true, true, true, true,
-                            true, true, true, true, true);
+                            true, true, false, true, true, true, true);
 
     printf("ViewportContextMenu visibility action state test passed.\\n");
     return 0;

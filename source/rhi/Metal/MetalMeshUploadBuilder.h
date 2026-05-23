@@ -6,6 +6,7 @@
 #include <QVector3D>
 
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct MetalMeshUploadOptions {
@@ -15,6 +16,7 @@ struct MetalMeshUploadOptions {
     std::vector<int> edgeToPart;
     std::vector<QVector3D> partColors;
     std::unordered_map<int, bool> partVisibility;
+    std::unordered_set<int> hiddenElementIds;
     bool useVertexColor = false;
     std::vector<float> vertexColors;
     std::vector<float> vertexScalars;

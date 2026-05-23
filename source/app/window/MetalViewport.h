@@ -23,6 +23,7 @@
 
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 /**
@@ -69,6 +70,9 @@ public:
     void setShowLabels(bool show);
     void selectByIds(PickMode mode, const std::vector<int>& ids);
     void setPartVisibility(int partIndex, bool visible);
+    void setElementVisibility(int elementId, bool visible);
+    void setElementsVisibility(const std::vector<int>& elementIds, bool visible);
+    void setAllElementsVisible();
     void fitToModel(const glm::vec3& center, float size);
     void setStandardView(StandardView view);
     void setClearColor(float red, float green, float blue, float alpha = 1.0f);
@@ -176,6 +180,7 @@ private:
     std::unordered_map<int, int> elementToPart_;
     std::vector<glm::vec3> partColors_;
     std::unordered_map<int, bool> partVisibility_;
+    std::unordered_set<int> hiddenElementIds_;
     Camera cam_;
     PickMode pickMode_ = PickMode::Element;
     ViewportInteractionMode interactionMode_ = ViewportInteractionMode::Pick;

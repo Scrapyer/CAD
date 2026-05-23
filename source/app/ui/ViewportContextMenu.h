@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FEPickResult.h"
 #include "RenderBackend.h"
 
 #include <QObject>
@@ -19,8 +20,11 @@ public:
     void setGridVisible(bool visible);
     void setModelVisibilityState(bool hasModel,
                                  bool hasSelection,
+                                 PickMode selectionMode,
                                  bool selectionHasVisibleParts,
                                  bool selectionHasHiddenParts,
+                                 bool hasHiddenItems,
+                                 bool hasHiddenElements,
                                  bool hasHiddenParts);
     void popup(QWidget* parent, const QPoint& globalPos);
 
@@ -30,7 +34,11 @@ signals:
     void displayModeRequested(ModelDisplayMode mode);
     void modelInfoRequested();
     void hideSelectedRequested();
-    void showSelectedRequested();
+    void hideAllElementsRequested();
+    void hideAllPartsRequested();
+    void hideAllRequested();
+    void showAllElementsRequested();
+    void showAllPartsRequested();
     void isolateSelectedRequested();
     void showAllRequested();
     void backgroundSettingsRequested();
@@ -46,7 +54,10 @@ private:
     bool gridVisible_ = true;
     bool hasModel_ = false;
     bool hasSelection_ = false;
+    PickMode selectionMode_ = PickMode::Node;
     bool selectionHasVisibleParts_ = false;
     bool selectionHasHiddenParts_ = false;
+    bool hasHiddenItems_ = false;
+    bool hasHiddenElements_ = false;
     bool hasHiddenParts_ = false;
 };

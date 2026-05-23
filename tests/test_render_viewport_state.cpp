@@ -155,6 +155,13 @@ int main(int argc, char** argv)
     viewport.selectByIds(PickMode::Element, {100, 101});
     assert(lastSelectionMode == PickMode::Element);
     assert((lastSelectionIds == std::vector<int>{100}));
+    viewport.setElementVisibility(100, false);
+    viewport.selectByIds(PickMode::Element, {100, 102});
+    assert((lastSelectionIds == std::vector<int>{102}));
+    viewport.setElementsVisibility({100}, true);
+    viewport.selectByIds(PickMode::Element, {100});
+    assert((lastSelectionIds == std::vector<int>{100}));
+    viewport.setAllElementsVisible();
     viewport.selectByIds(PickMode::Part, {0, 1});
     assert((lastPickedParts == std::vector<int>{0}));
     viewport.setShowLabels(true);
@@ -231,6 +238,9 @@ int main(int argc, char** argv)
                                      1.0f,
                                      5);
         metalViewport.setPartVisibility(1, false);
+        metalViewport.setElementVisibility(100, false);
+        metalViewport.setElementsVisibility({100}, true);
+        metalViewport.setAllElementsVisible();
         metalViewport.selectByIds(PickMode::Element, {100});
         metalViewport.selectByIds(PickMode::Node, {0});
         metalViewport.selectByIds(PickMode::Part, {0});

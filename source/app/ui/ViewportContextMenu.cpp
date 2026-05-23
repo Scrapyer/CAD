@@ -79,14 +79,20 @@ void ViewportContextMenu::setGridVisible(bool visible)
 
 void ViewportContextMenu::setModelVisibilityState(bool hasModel,
                                                   bool hasSelection,
+                                                  PickMode selectionMode,
                                                   bool selectionHasVisibleParts,
                                                   bool selectionHasHiddenParts,
+                                                  bool hasHiddenItems,
+                                                  bool hasHiddenElements,
                                                   bool hasHiddenParts)
 {
     hasModel_ = hasModel;
     hasSelection_ = hasSelection;
+    selectionMode_ = selectionMode;
     selectionHasVisibleParts_ = selectionHasVisibleParts;
     selectionHasHiddenParts_ = selectionHasHiddenParts;
+    hasHiddenItems_ = hasHiddenItems;
+    hasHiddenElements_ = hasHiddenElements;
     hasHiddenParts_ = hasHiddenParts;
 }
 
@@ -153,18 +159,55 @@ void ViewportContextMenu::popup(QWidget* parent, const QPoint& globalPos)
     connect(hideSelectedAction, &QAction::triggered,
             this, &ViewportContextMenu::hideSelectedRequested);
 
-    QAction* showSelectedAction = menu->addAction(QStringLiteral("显示选中"));
-    showSelectedAction->setEnabled(hasModel_ && hasSelection_ && selectionHasHiddenParts_);
-    connect(showSelectedAction, &QAction::triggered,
-            this, &ViewportContextMenu::showSelectedRequested);
+    auto* isolateMenu = menu->addMenu(QStringLiteral("仅显示"));
+    QAction* isolateNodesAction = isolateMenu->addAction(QStringLiteral("选中节点"));
+    isolateNodesAction->setEnabled(false);
 
-    QAction* isolateSelectedAction = menu->addAction(QStringLiteral("仅显示选中"));
-    isolateSelectedAction->setEnabled(hasModel_ && hasSelection_);
-    connect(isolateSelectedAction, &QAction::triggered,
+    QAction* isolateElementsAction = isolateMenu->addAction(QStringLiteral("选中单元"));
+    isolateElementsAction->setEnabled(hasModel_ && hasSelection_ && selectionMode_ == PickMode::Element);
+    connect(isolateElementsAction, &QAction::triggered,
             this, &ViewportContextMenu::isolateSelectedRequested);
 
-    QAction* showAllAction = menu->addAction(QStringLiteral("显示全部"));
-    showAllAction->setEnabled(hasModel_ && hasHiddenParts_);
+    QAction* isolatePartsAction = isolateMenu->addAction(QStringLiteral("选中部件"));
+    isolatePartsAction->setEnabled(hasModel_ && hasSelection_ && selectionMode_ == PickMode::Part);
+    connect(isolatePartsAction, &QAction::triggered,
+            this, &ViewportContextMenu::isolateSelectedRequested);
+
+    auto* hideMenu = menu->addMenu(QStringLiteral("隐藏"));
+    QAction* hideAllNodesAction = hideMenu->addAction(QStringLiteral("所有节点"));
+    hideAllNodesAction->setEnabled(false);
+
+    QAction* hideAllElementsAction = hideMenu->addAction(QStringLiteral("所有单元"));
+    hideAllElementsAction->setEnabled(hasModel_);
+    connect(hideAllElementsAction, &QAction::triggered,
+            this, &ViewportContextMenu::hideAllElementsRequested);
+
+    QAction* hideAllPartsAction = hideMenu->addAction(QStringLiteral("所有部件"));
+    hideAllPartsAction->setEnabled(hasModel_);
+    connect(hideAllPartsAction, &QAction::triggered,
+            this, &ViewportContextMenu::hideAllPartsRequested);
+
+    QAction* hideAllAction = hideMenu->addAction(QStringLiteral("全部对象"));
+    hideAllAction->setEnabled(hasModel_);
+    connect(hideAllAction, &QAction::triggered,
+            this, &ViewportContextMenu::hideAllRequested);
+
+    auto* showMenu = menu->addMenu(QStringLiteral("显示"));
+    QAction* showAllNodesAction = showMenu->addAction(QStringLiteral("所有节点"));
+    showAllNodesAction->setEnabled(false);
+
+    QAction* showAllElementsAction = showMenu->addAction(QStringLiteral("所有单元"));
+    showAllElementsAction->setEnabled(hasModel_ && hasHiddenElements_);
+    connect(showAllElementsAction, &QAction::triggered,
+            this, &ViewportContextMenu::showAllElementsRequested);
+
+    QAction* showAllPartsAction = showMenu->addAction(QStringLiteral("所有部件"));
+    showAllPartsAction->setEnabled(hasModel_ && hasHiddenParts_);
+    connect(showAllPartsAction, &QAction::triggered,
+            this, &ViewportContextMenu::showAllPartsRequested);
+
+    QAction* showAllAction = showMenu->addAction(QStringLiteral("全部对象"));
+    showAllAction->setEnabled(hasModel_ && hasHiddenItems_);
     connect(showAllAction, &QAction::triggered,
             this, &ViewportContextMenu::showAllRequested);
 

@@ -270,6 +270,7 @@ void VulkanViewport::setMesh(const Mesh& mesh)
     elementToPart_.clear();
     partColors_.clear();
     partVisibility_.clear();
+    hiddenElementIds_.clear();
     vertexColors_.clear();
     vertexScalars_.clear();
     edgeScalars_.clear();
@@ -504,6 +505,50 @@ void VulkanViewport::setPartVisibility(int partIndex, bool visible)
     renderFrame();
 }
 
+void VulkanViewport::setElementVisibility(int elementId, bool visible)
+{
+    if (elementId < 0) {
+        return;
+    }
+    if (visible) {
+        hiddenElementIds_.erase(elementId);
+    } else {
+        hiddenElementIds_.insert(elementId);
+    }
+    meshDirty_ = true;
+    renderFrame();
+}
+
+void VulkanViewport::setElementsVisibility(const std::vector<int>& elementIds, bool visible)
+{
+    bool changed = false;
+    for (int elementId : elementIds) {
+        if (elementId < 0) {
+            continue;
+        }
+        if (visible) {
+            changed = hiddenElementIds_.erase(elementId) > 0 || changed;
+        } else {
+            changed = hiddenElementIds_.insert(elementId).second || changed;
+        }
+    }
+    if (!changed) {
+        return;
+    }
+    meshDirty_ = true;
+    renderFrame();
+}
+
+void VulkanViewport::setAllElementsVisible()
+{
+    if (hiddenElementIds_.empty()) {
+        return;
+    }
+    hiddenElementIds_.clear();
+    meshDirty_ = true;
+    renderFrame();
+}
+
 void VulkanViewport::setPickMode(PickMode mode)
 {
     pickMode_ = mode;
@@ -706,6 +751,7 @@ bool VulkanViewport::uploadMeshIfNeeded()
     options.triangleToPart = triangleToPart_;
     options.edgeToPart = edgeToPart_;
     options.partVisibility = partVisibility_;
+    options.hiddenElementIds = hiddenElementIds_;
     options.useVertexColor = useVertexColor_;
     options.vertexColors = vertexColors_;
     options.vertexScalars = vertexScalars_;
@@ -1436,7 +1482,9 @@ void VulkanViewport::selectPart(int partIndex)
         return;
     }
     for (int element : partElementIds_[static_cast<size_t>(partIndex)]) {
-        selection_.selectedElements.insert(element);
+        if (isElementVisibleForSelection(element)) {
+            selection_.selectedElements.insert(element);
+        }
     }
 }
 
@@ -1459,12 +1507,17 @@ bool VulkanViewport::isPartFullySelected(int partIndex) const
     if (elements.empty()) {
         return false;
     }
+    bool hasVisibleElement = false;
     for (int element : elements) {
+        if (!isElementVisibleForSelection(element)) {
+            continue;
+        }
+        hasVisibleElement = true;
         if (!selection_.isElementSelected(element)) {
             return false;
         }
     }
-    return true;
+    return hasVisibleElement;
 }
 
 std::vector<int> VulkanViewport::pickedPartIndices() const
@@ -1505,6 +1558,10 @@ bool VulkanViewport::isTriangleVisibleForSelection(size_t triangleIndex) const
     if (triangleIndex >= triangleCount) {
         return false;
     }
+    const int elementId = triangleToElement_[triangleIndex];
+    if (elementId >= 0 && hiddenElementIds_.count(elementId) > 0) {
+        return false;
+    }
     const int part = triangleIndex < triangleToPart_.size()
         ? triangleToPart_[triangleIndex]
         : -1;
@@ -1513,6 +1570,9 @@ bool VulkanViewport::isTriangleVisibleForSelection(size_t triangleIndex) const
 
 bool VulkanViewport::isElementVisibleForSelection(int elementId) const
 {
+    if (elementId >= 0 && hiddenElementIds_.count(elementId) > 0) {
+        return false;
+    }
     const auto partIt = elementToPart_.find(elementId);
     if (partIt == elementToPart_.end()) {
         return true;
@@ -1623,6 +1683,9 @@ void VulkanViewport::appendPartOutlineHighlight(std::vector<float>& lineVertices
     const int triangleCount = static_cast<int>(mesh_.indices.size() / 3);
     edgeAdjacency.reserve(static_cast<size_t>(triangleCount) * 2);
     for (int triangle = 0; triangle < triangleCount; ++triangle) {
+        if (!isTriangleVisibleForSelection(static_cast<size_t>(triangle))) {
+            continue;
+        }
         for (int edge = 0; edge < 3; ++edge) {
             const unsigned int va = mesh_.indices[static_cast<size_t>(triangle) * 3 + edge];
             const unsigned int vb = mesh_.indices[static_cast<size_t>(triangle) * 3 + ((edge + 1) % 3)];
@@ -1643,6 +1706,9 @@ void VulkanViewport::appendPartOutlineHighlight(std::vector<float>& lineVertices
             continue;
         }
         for (int triangle : partTriangles_[static_cast<size_t>(part)]) {
+            if (!isTriangleVisibleForSelection(static_cast<size_t>(triangle))) {
+                continue;
+            }
             for (int edge = 0; edge < 3; ++edge) {
                 const unsigned int va = mesh_.indices[static_cast<size_t>(triangle) * 3 + edge];
                 const unsigned int vb = mesh_.indices[static_cast<size_t>(triangle) * 3 + ((edge + 1) % 3)];
@@ -1988,6 +2054,9 @@ void VulkanViewport::updateIdLabels()
             glm::vec3 sum(0.0f);
             int count = 0;
             for (int tri : partTriangles_[static_cast<size_t>(part)]) {
+                if (!isTriangleVisibleForSelection(static_cast<size_t>(tri))) {
+                    continue;
+                }
                 const size_t triBase = static_cast<size_t>(tri) * 3;
                 if (triBase + 2 >= mesh_.indices.size()) {
                     continue;

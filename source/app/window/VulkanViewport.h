@@ -21,6 +21,8 @@
 
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 class VulkanViewport : public QWidget {
     Q_OBJECT
@@ -55,6 +57,9 @@ public:
     void setTriangleToPartMap(const std::vector<int>& map);
     void setEdgeToPartMap(const std::vector<int>& map);
     void setPartVisibility(int partIndex, bool visible);
+    void setElementVisibility(int elementId, bool visible);
+    void setElementsVisibility(const std::vector<int>& elementIds, bool visible);
+    void setAllElementsVisible();
     void setPickMode(PickMode mode);
     void setInteractionMode(ViewportInteractionMode mode);
     void setShowLabels(bool show);
@@ -183,6 +188,7 @@ private:
     std::unordered_map<int, int> elementToPart_;
     std::vector<glm::vec3> partColors_;
     std::unordered_map<int, bool> partVisibility_;
+    std::unordered_set<int> hiddenElementIds_;
     Mesh mesh_;
     QString lastError_;
 };

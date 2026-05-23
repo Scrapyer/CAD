@@ -1109,8 +1109,13 @@ void selectByIds(PickMode mode, const std::vector<int>& ids);
 ```cpp
 public slots:
     void setPartVisibility(int partIndex, bool visible);
+    void setElementVisibility(int elementId, bool visible);
+    void setElementsVisibility(const std::vector<int>& elementIds, bool visible);
+    void setAllElementsVisible();
     void highlightParts(const std::vector<int>& partIndices);
 ```
+
+部件显隐按 `partIndex` 控制整组单元；单元显隐按 FEM element id 控制局部单元，不会反向隐藏所属部件。
 
 #### 查询方法
 
@@ -1177,6 +1182,10 @@ void setPickMode(PickMode mode);
 void setInteractionMode(ViewportInteractionMode mode);
 void setModelDisplayMode(ModelDisplayMode mode);
 void setViewportGridVisible(bool visible);
+void setPartVisibility(int partIndex, bool visible);
+void setElementVisibility(int elementId, bool visible);
+void setElementsVisibility(const std::vector<int>& elementIds, bool visible);
+void setAllElementsVisible();
 void setStandardView(StandardView view);
 void setPreferredRenderBackend(RenderBackendKind kind);
 RenderBackendKind requestedRenderBackendKind() const;

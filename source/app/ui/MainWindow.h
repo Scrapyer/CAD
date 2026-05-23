@@ -23,6 +23,8 @@
 #include <QDialog>
 #include <QTreeWidget>
 
+#include <unordered_set>
+
 #include "Theme.h"
 #include "FERenderData.h"
 #include "FEModel.h"
@@ -68,16 +70,27 @@ private:
     void updateStatusSummaries();
     void updatePickModeSummary(PickMode mode);
     std::vector<int> selectedPartIndicesForVisibility() const;
+    std::vector<int> selectedElementIdsForVisibility() const;
+    std::vector<int> allModelElementIds() const;
     bool areVisibilityPartsVisible(const std::vector<int>& partIndices) const;
     bool anyVisibilityPartsVisible(const std::vector<int>& partIndices) const;
     bool anyVisibilityPartsHidden(const std::vector<int>& partIndices) const;
+    bool anyVisibilityElementsVisible(const std::vector<int>& elementIds) const;
+    bool anyVisibilityElementsHidden(const std::vector<int>& elementIds) const;
+    bool hasHiddenModelItems() const;
+    bool hasHiddenModelElements() const;
     bool hasHiddenModelParts() const;
     void syncPartVisibilityToViewport();
     void rememberVisibilitySelection(const std::vector<int>& partIndices, bool highlightVisibleParts);
     void hideSelectedModelParts();
+    void hideAllModelElements();
+    void hideAllModelParts();
+    void hideAllModelObjects();
     void showSelectedModelParts();
-    void isolateSelectedModelParts();
+    void showAllModelElements();
     void showAllModelParts();
+    void isolateSelectedModelParts();
+    void showAllModelObjects();
 
     void clearCurrentLayout();
     bool browseModelFile();
@@ -142,6 +155,7 @@ private:
     PickMode       lastSelectionMode_ = PickMode::Node;
     std::vector<int> lastSelectionIds_;
     std::vector<int> lastSelectedPartIndices_;
+    std::unordered_set<int> hiddenElementIds_;
 
     // 后处理显示状态
     DeformState     deform_;

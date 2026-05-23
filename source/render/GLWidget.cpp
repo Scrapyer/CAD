@@ -331,6 +331,7 @@ void GLWidget::setMesh(const Mesh& mesh) {
     vertexToNode_.clear();
     selection_.clear();
     partVisibility_.clear();
+    hiddenElementIds_.clear();
     partColors_.clear();
     edgeScalars_.clear();
     useVertexColor_ = false;
@@ -731,6 +732,10 @@ void GLWidget::rebuildPartVisibilityIbo() {
     std::vector<float> filteredTriPart;
     int triCount = static_cast<int>(allTriIndices_.size() / 3);
     for (int t = 0; t < triCount; ++t) {
+        const int elementId = t < static_cast<int>(triToElem_.size()) ? triToElem_[t] : -1;
+        if (elementId >= 0 && hiddenElementIds_.count(elementId) > 0) {
+            continue;
+        }
         int part = (t < static_cast<int>(triToPart_.size())) ? triToPart_[t] : -1;
         if (part >= 0) {
             auto it = partVisibility_.find(part);
@@ -2067,7 +2072,8 @@ void GLWidget::selectPart(int partIndex) {
     if (partIndex < 0 || partIndex >= static_cast<int>(partElementIds_.size())) return;
     if (!isPartVisible(partIndex)) return;
     for (int eid : partElementIds_[partIndex]) {
-        selection_.selectedElements.insert(eid);
+        if (isElementVisibleForSelection(eid))
+            selection_.selectedElements.insert(eid);
     }
 }
 
@@ -2082,10 +2088,13 @@ bool GLWidget::isPartFullySelected(int partIndex) const {
     if (partIndex < 0 || partIndex >= static_cast<int>(partElementIds_.size())) return false;
     const auto& elems = partElementIds_[partIndex];
     if (elems.empty()) return false;
+    bool hasVisibleElement = false;
     for (int eid : elems) {
+        if (!isElementVisibleForSelection(eid)) continue;
+        hasVisibleElement = true;
         if (!selection_.isElementSelected(eid)) return false;
     }
-    return true;
+    return hasVisibleElement;
 }
 
 bool GLWidget::isPartVisible(int partIndex) const
@@ -2102,6 +2111,10 @@ bool GLWidget::isTriangleVisible(int triangleIndex) const
     if (triangleIndex < 0 || triangleIndex >= static_cast<int>(triToElem_.size())) {
         return false;
     }
+    const int elementId = triToElem_[triangleIndex];
+    if (elementId >= 0 && hiddenElementIds_.count(elementId) > 0) {
+        return false;
+    }
     const int partIndex = triangleIndex < static_cast<int>(triToPart_.size())
         ? triToPart_[triangleIndex]
         : -1;
@@ -2110,6 +2123,9 @@ bool GLWidget::isTriangleVisible(int triangleIndex) const
 
 bool GLWidget::isElementVisibleForSelection(int elementId) const
 {
+    if (elementId >= 0 && hiddenElementIds_.count(elementId) > 0) {
+        return false;
+    }
     auto it = elemToPart_.find(elementId);
     if (it == elemToPart_.end()) {
         return true;
@@ -2841,6 +2857,61 @@ void GLWidget::setPartVisibility(int partIndex, bool visible) {
     update();
 }
 
+void GLWidget::setElementVisibility(int elementId, bool visible)
+{
+    if (elementId < 0) {
+        return;
+    }
+
+    if (visible) {
+        hiddenElementIds_.erase(elementId);
+    } else {
+        hiddenElementIds_.insert(elementId);
+    }
+    partVisibilityDirty_ = true;
+    edgeVisibilityDirty_ = true;
+    partEdgeCacheValid_ = false;
+    selectionDirty_ = true;
+    update();
+}
+
+void GLWidget::setElementsVisibility(const std::vector<int>& elementIds, bool visible)
+{
+    bool changed = false;
+    for (int elementId : elementIds) {
+        if (elementId < 0) {
+            continue;
+        }
+        if (visible) {
+            changed = hiddenElementIds_.erase(elementId) > 0 || changed;
+        } else {
+            changed = hiddenElementIds_.insert(elementId).second || changed;
+        }
+    }
+    if (!changed) {
+        return;
+    }
+
+    partVisibilityDirty_ = true;
+    edgeVisibilityDirty_ = true;
+    partEdgeCacheValid_ = false;
+    selectionDirty_ = true;
+    update();
+}
+
+void GLWidget::setAllElementsVisible()
+{
+    if (hiddenElementIds_.empty()) {
+        return;
+    }
+    hiddenElementIds_.clear();
+    partVisibilityDirty_ = true;
+    edgeVisibilityDirty_ = true;
+    partEdgeCacheValid_ = false;
+    selectionDirty_ = true;
+    update();
+}
+
 void GLWidget::highlightParts(const std::vector<int>& partIndices) {
     // 清除当前选中
     selection_.selectedElements.clear();
@@ -2896,6 +2967,12 @@ void GLWidget::rebuildEdgeIbo() {
     filtered.reserve(allEdgeIndices_.size());
     int edgeCount = static_cast<int>(allEdgeIndices_.size() / 2);
     for (int e = 0; e < edgeCount; ++e) {
+        const int elementId = e < static_cast<int>(mesh_.edgeToElement.size())
+            ? mesh_.edgeToElement[e]
+            : -1;
+        if (elementId >= 0 && hiddenElementIds_.count(elementId) > 0) {
+            continue;
+        }
         int part = (e < static_cast<int>(edgeToPart_.size())) ? edgeToPart_[e] : -1;
         if (part >= 0) {
             auto it = partVisibility_.find(part);

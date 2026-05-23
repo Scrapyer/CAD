@@ -244,6 +244,11 @@ bool isPartVisible(const VulkanMeshUploadOptions& options, int part)
     return it == options.partVisibility.end() || it->second;
 }
 
+bool isElementVisible(const VulkanMeshUploadOptions& options, int elementId)
+{
+    return elementId < 0 || options.hiddenElementIds.count(elementId) == 0;
+}
+
 QVector3D triangleColor(const VulkanMeshUploadOptions& options, int part)
 {
     if (part >= 0 && part < static_cast<int>(options.partColors.size())) {
@@ -526,6 +531,9 @@ bool VulkanClearFrameRenderer::uploadMesh(
             const int elementId = tri < options.triangleToElement.size()
                 ? options.triangleToElement[tri]
                 : static_cast<int>(tri);
+            if (!isElementVisible(options, elementId)) {
+                continue;
+            }
             const QVector3D pickColor = idToPickColor(elementId);
             for (size_t corner = 0; corner < 3; ++corner) {
                 const uint32_t sourceIndex = mesh.indices[tri * 3 + corner];
@@ -600,6 +608,12 @@ bool VulkanClearFrameRenderer::uploadMesh(
                 const int part = edge < options.edgeToPart.size()
                     ? options.edgeToPart[edge]
                     : -1;
+                const int elementId = edge < mesh.edgeToElement.size()
+                    ? mesh.edgeToElement[edge]
+                    : -1;
+                if (!isElementVisible(options, elementId)) {
+                    continue;
+                }
                 if (!isPartVisible(options, part)) {
                     continue;
                 }

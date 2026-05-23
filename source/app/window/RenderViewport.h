@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct Theme;
@@ -95,6 +96,9 @@ public:
 
 public slots:
     void setPartVisibility(int partIndex, bool visible);
+    void setElementVisibility(int elementId, bool visible);
+    void setElementsVisibility(const std::vector<int>& elementIds, bool visible);
+    void setAllElementsVisible();
     void highlightParts(const std::vector<int>& partIndices);
     void refresh();
 
@@ -167,4 +171,5 @@ private:
     std::vector<int> triangleToPart_;
     std::vector<int> edgeToPart_;
     std::unordered_map<int, bool> partVisibility_;
+    std::unordered_set<int> hiddenElementIds_;
 };
