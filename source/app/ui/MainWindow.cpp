@@ -112,6 +112,25 @@ QString modelDisplayModeText(ModelDisplayMode mode)
     return QStringLiteral("实体+线框");
 }
 
+struct StandardViewActionSpec {
+    QString text;
+    QString icon;
+    QString status;
+    StandardView view;
+};
+
+std::vector<StandardViewActionSpec> standardViewActionSpecs()
+{
+    return {
+        {QStringLiteral("前"), QStringLiteral("view-front"), QStringLiteral("前视图"), StandardView::Front},
+        {QStringLiteral("后"), QStringLiteral("view-back"), QStringLiteral("后视图"), StandardView::Back},
+        {QStringLiteral("左"), QStringLiteral("view-left"), QStringLiteral("左视图"), StandardView::Left},
+        {QStringLiteral("右"), QStringLiteral("view-right"), QStringLiteral("右视图"), StandardView::Right},
+        {QStringLiteral("上"), QStringLiteral("view-top"), QStringLiteral("俯视图"), StandardView::Top},
+        {QStringLiteral("下"), QStringLiteral("view-bottom"), QStringLiteral("仰视图"), StandardView::Bottom}
+    };
+}
+
 int loadThemeIndex()
 {
     QSettings settings = makeAppSettings();
@@ -201,13 +220,13 @@ MainWindow::MainWindow() {
     // ── 左侧停靠：模型结构 ──
     partsDock_ = new QDockWidget("模型结构", this);
     partsDock_->setWidget(modelNavigatorPanel_);
-    partsDock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    partsDock_->setFeatures(QDockWidget::DockWidgetMovable);
     addDockWidget(Qt::LeftDockWidgetArea, partsDock_);
 
     // ── 右侧停靠：属性 / 控制 ──
     modelInfoDock_ = new QDockWidget("属性 / 控制", this);
     modelInfoDock_->setWidget(inspectorPanel_);
-    modelInfoDock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    modelInfoDock_->setFeatures(QDockWidget::DockWidgetMovable);
     addDockWidget(Qt::RightDockWidgetArea, modelInfoDock_);
     resizeDocks({partsDock_, modelInfoDock_}, {240, 280}, Qt::Horizontal);
 
@@ -779,6 +798,64 @@ void MainWindow::setupMenuBar() {
         if (renderViewport_) renderViewport_->setShowLabels(checked);
     });
 
+    viewMenu->addSeparator();
+    auto* standardViewsMenu = viewMenu->addMenu("Standard Views");
+    for (const auto& actionSpec : standardViewActionSpecs()) {
+        auto* action = standardViewsMenu->addAction(toolbarIcon(actionSpec.icon), actionSpec.status);
+        connect(action, &QAction::triggered, this, [this, actionSpec]() {
+            if (renderViewport_) {
+                renderViewport_->setStandardView(actionSpec.view);
+            }
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  已切换到%1").arg(actionSpec.status));
+            }
+        });
+    }
+
+    viewMenu->addSeparator();
+    if (sidebarsAction_) {
+        viewMenu->addAction(sidebarsAction_);
+    }
+
+    leftPanelAction_ = viewMenu->addAction("Model Structure");
+    leftPanelAction_->setCheckable(true);
+    leftPanelAction_->setChecked(true);
+    leftPanelAction_->setShortcut(QKeySequence("Ctrl+Shift+M"));
+
+    rightPanelAction_ = viewMenu->addAction("Property Panel");
+    rightPanelAction_->setCheckable(true);
+    rightPanelAction_->setChecked(true);
+
+    if (sidebarsAction_) {
+        connect(sidebarsAction_, &QAction::toggled, this, [this](bool visible) {
+            if (partsDock_) partsDock_->setVisible(visible);
+            if (modelInfoDock_) modelInfoDock_->setVisible(visible);
+
+            if (leftPanelAction_) {
+                const bool blockLeft = leftPanelAction_->blockSignals(true);
+                leftPanelAction_->setChecked(visible);
+                leftPanelAction_->blockSignals(blockLeft);
+            }
+
+            if (rightPanelAction_) {
+                const bool blockRight = rightPanelAction_->blockSignals(true);
+                rightPanelAction_->setChecked(visible);
+                rightPanelAction_->blockSignals(blockRight);
+            }
+
+            syncSidebarActions();
+        });
+    }
+
+    connect(leftPanelAction_, &QAction::toggled, this, [this](bool visible) {
+        if (partsDock_) partsDock_->setVisible(visible);
+        syncSidebarActions();
+    });
+    connect(rightPanelAction_, &QAction::toggled, this, [this](bool visible) {
+        if (modelInfoDock_) modelInfoDock_->setVisible(visible);
+        syncSidebarActions();
+    });
+
     auto* plotMenu = menuBar()->addMenu("Plot");
     const QStringList plotActions = {"Contour", "Deformation", "Slice", "Iso Surface", "Threshold"};
     for (const QString& text : plotActions) {
@@ -839,19 +916,6 @@ void MainWindow::setupMenuBar() {
     auto* applyDataAction = dataMenu->addAction("Apply Current Paths");
     connect(applyDataAction, &QAction::triggered, this, &MainWindow::applyFiles);
 
-    auto* frameMenu = menuBar()->addMenu("Frame");
-    auto* leftPanelAction = frameMenu->addAction("Model Structure");
-    leftPanelAction->setCheckable(true);
-    leftPanelAction->setChecked(true);
-    connect(leftPanelAction, &QAction::toggled, this, [this](bool visible) {
-        if (partsDock_) partsDock_->setVisible(visible);
-    });
-    auto* rightPanelAction = frameMenu->addAction("Property Panel");
-    rightPanelAction->setCheckable(true);
-    rightPanelAction->setChecked(true);
-    connect(rightPanelAction, &QAction::toggled, this, [this](bool visible) {
-        if (modelInfoDock_) modelInfoDock_->setVisible(visible);
-    });
     auto* optionsMenu = menuBar()->addMenu("Options");
     if (themeMenu_) optionsMenu->addMenu(themeMenu_);
     if (rhiMenu_) optionsMenu->addMenu(rhiMenu_);
@@ -885,6 +949,14 @@ void MainWindow::setupToolBar() {
     toolbar_->setMovable(false);
     toolbar_->setIconSize(QSize(20, 20));
     toolbar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+
+    sidebarsAction_ = new QAction(toolbarIcon("sidebar"), "边栏", this);
+    sidebarsAction_->setCheckable(true);
+    sidebarsAction_->setChecked(true);
+    sidebarsAction_->setShortcut(QKeySequence("Ctrl+Shift+B"));
+    sidebarsAction_->setToolTip("显示/隐藏左右边栏");
+    toolbar_->addAction(sidebarsAction_);
+    toolbar_->addSeparator();
 
     auto* newLayoutAction = toolbar_->addAction(toolbarIcon("new-layout"), "新建");
     newLayoutAction->setToolTip("新建布局 / 清空当前模型");
@@ -941,6 +1013,21 @@ void MainWindow::setupToolBar() {
                 renderViewport_->refresh();
             }
             statusLabel_->setText(QString("  %1入口已预留").arg(text));
+        });
+    }
+
+    toolbar_->addSeparator();
+
+    for (const auto& actionSpec : standardViewActionSpecs()) {
+        auto* action = toolbar_->addAction(toolbarIcon(actionSpec.icon), actionSpec.text);
+        action->setToolTip(actionSpec.status);
+        connect(action, &QAction::triggered, this, [this, actionSpec]() {
+            if (renderViewport_) {
+                renderViewport_->setStandardView(actionSpec.view);
+            }
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  已切换到%1").arg(actionSpec.status));
+            }
         });
     }
 
@@ -1202,6 +1289,23 @@ void MainWindow::updateRhiActionText()
             action->setChecked(action->data().toInt() == static_cast<int>(requested));
         }
     }
+}
+
+void MainWindow::syncSidebarActions()
+{
+    if (!sidebarsAction_) {
+        return;
+    }
+
+    const bool leftVisible = leftPanelAction_
+        ? leftPanelAction_->isChecked()
+        : (partsDock_ && partsDock_->isVisible());
+    const bool rightVisible = rightPanelAction_
+        ? rightPanelAction_->isChecked()
+        : (modelInfoDock_ && modelInfoDock_->isVisible());
+    const bool block = sidebarsAction_->blockSignals(true);
+    sidebarsAction_->setChecked(leftVisible && rightVisible);
+    sidebarsAction_->blockSignals(block);
 }
 
 // ════════════════════════════════════════════════════════════

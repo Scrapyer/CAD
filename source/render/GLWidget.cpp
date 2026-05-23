@@ -32,6 +32,50 @@ static const glm::vec3 kPartPalette[] = {
 };
 static const int kPartPaletteSize = static_cast<int>(sizeof(kPartPalette) / sizeof(kPartPalette[0]));
 
+namespace {
+template <typename T>
+void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
+    if (targetSize < 0) {
+        targetSize = 0;
+    }
+    if (static_cast<int>(arr.size()) > targetSize) {
+        arr.resize(static_cast<size_t>(targetSize));
+    } else if (static_cast<int>(arr.size()) < targetSize) {
+        arr.resize(static_cast<size_t>(targetSize), fillValue);
+    }
+}
+
+void applyStandardViewToCamera(Camera& camera, StandardView view)
+{
+    switch (view) {
+    case StandardView::Front:
+        camera.yaw = 0.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Back:
+        camera.yaw = 180.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Left:
+        camera.yaw = -90.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Right:
+        camera.yaw = 90.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Top:
+        camera.yaw = 0.0f;
+        camera.pitch = 89.0f;
+        break;
+    case StandardView::Bottom:
+        camera.yaw = 0.0f;
+        camera.pitch = -89.0f;
+        break;
+    }
+}
+}  // namespace
+
 static Mesh makeClipPlanePreviewMesh(const glm::vec3& bbMin,
                                      const glm::vec3& bbMax,
                                      const glm::vec3& origin,
@@ -254,20 +298,31 @@ void GLWidget::setMesh(const Mesh& mesh) {
     allTriIndices_ = mesh.indices;
     allEdgeIndices_ = mesh.edgeIndices;
     activeEdgeIndexCount_ = static_cast<int>(mesh.edgeIndices.size());
+    triToElem_.clear();
     triToPart_.clear();
     edgeToPart_.clear();
     vertexToNode_.clear();
+    selection_.clear();
     partVisibility_.clear();
     partColors_.clear();
     partTriangles_.clear();
     partElementIds_.clear();
     elemToPart_.clear();
+    triPartDirty_ = true;
+    edgeAdjDirty_ = true;
     activeIndexCount_ = static_cast<int>(mesh.indices.size());
     partVisibilityDirty_ = false;
     edgeVisibilityDirty_ = false;
     needsColorUpload_ = false;
-    edgeAdjDirty_ = true;
     needsUpload_ = true;
+    partEdgeCacheValid_ = false;
+    selectionDirty_ = true;
+    selEdgeVertCount_ = 0;
+    silhouetteDirty_ = true;
+    emit selectionChanged(pickMode_, 0, {});
+    if (pickMode_ == PickMode::Part) {
+        emit partsPicked({});
+    }
     update();
 }
 
@@ -294,6 +349,15 @@ void GLWidget::fitToModel(const glm::vec3& center, float size) {
     update();
 }
 
+void GLWidget::setStandardView(StandardView view)
+{
+    applyStandardViewToCamera(cam_, view);
+    if (pickMode_ == PickMode::Part && selection_.hasSelection()) {
+        silhouetteDirty_ = true;
+    }
+    update();
+}
+
 glm::mat4 GLWidget::projectionMatrix(float aspect) const
 {
     const float sceneSize = std::max(modelSize_, 1.0e-4f);
@@ -306,10 +370,14 @@ glm::mat4 GLWidget::projectionMatrix(float aspect) const
 
 void GLWidget::setTriangleToElementMap(const std::vector<int>& map) {
     triToElem_ = map;
+    int triCount = static_cast<int>(mesh_.indices.size() / 3);
+    alignSize(triToElem_, triCount, -1);
 }
 
 void GLWidget::setVertexToNodeMap(const std::vector<int>& map) {
     vertexToNode_ = map;
+    int vertexCount = static_cast<int>(mesh_.vertices.size() / 6);
+    alignSize(vertexToNode_, vertexCount, -1);
     edgeAdjDirty_ = true;
 }
 
@@ -2295,9 +2363,11 @@ void GLWidget::applyTheme(const Theme& theme) {
 
 void GLWidget::setTriangleToPartMap(const std::vector<int>& map) {
     triToPart_ = map;
+    int triCount = static_cast<int>(mesh_.indices.size() / 3);
+    alignSize(triToPart_, triCount, -1);
     // Assign palette colors to parts
     int numParts = 0;
-    for (int p : map) if (p >= 0) numParts = std::max(numParts, p + 1);
+    for (int p : triToPart_) if (p >= 0) numParts = std::max(numParts, p + 1);
     partColors_.resize(numParts);
     for (int i = 0; i < numParts; ++i)
         partColors_[i] = kPartPalette[i % kPartPaletteSize];
@@ -2308,9 +2378,9 @@ void GLWidget::setTriangleToPartMap(const std::vector<int>& map) {
     partElementIds_.clear();
     partElementIds_.resize(numParts);
 
-    int triCount = static_cast<int>(map.size());
+    triCount = static_cast<int>(triToPart_.size());
     for (int t = 0; t < triCount; ++t) {
-        int p = map[t];
+        int p = triToPart_[t];
         if (p >= 0 && p < numParts) {
             partTriangles_[p].push_back(t);
         }
@@ -2338,6 +2408,8 @@ void GLWidget::setTriangleToPartMap(const std::vector<int>& map) {
 
 void GLWidget::setEdgeToPartMap(const std::vector<int>& map) {
     edgeToPart_ = map;
+    int edgeCount = static_cast<int>(mesh_.edgeIndices.size() / 2);
+    alignSize(edgeToPart_, edgeCount, -1);
     edgeVisibilityDirty_ = true;
     update();
 }

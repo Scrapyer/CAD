@@ -68,6 +68,9 @@ public:
     /** @brief 自适应缩放 */
     void fitToModel(const glm::vec3& center, float size);
 
+    /** @brief 切换到标准正交观察方向（前/后/左/右/上/下）。 */
+    void setStandardView(StandardView view);
+
     /** @brief 应用主题（更新背景渐变和色标文字颜色） */
     void applyTheme(const Theme& theme);
 

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -27,6 +28,40 @@ namespace {
 
 constexpr size_t kMetalFrameUniformAlignment = 256;
 constexpr int kMetalFrameUniformSlotCount = 3;
+constexpr int kAxesVerticesPerAxis = 26;
+constexpr float kPi = 3.14159265358979323846f;
+
+struct Vec3 {
+    float x;
+    float y;
+    float z;
+};
+
+Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+Vec3 scale(const Vec3& v, float s) { return {v.x * s, v.y * s, v.z * s}; }
+Vec3 cross(const Vec3& a, const Vec3& b)
+{
+    return {
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    };
+}
+
+float dot(const Vec3& a, const Vec3& b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+Vec3 normalize(const Vec3& v)
+{
+    const float len2 = dot(v, v);
+    if (len2 <= 1.0e-12f) {
+        return {0.0f, 0.0f, 1.0f};
+    }
+    return scale(v, 1.0f / std::sqrt(len2));
+}
 
 size_t alignMetalUniformOffset(size_t size)
 {
@@ -52,6 +87,164 @@ void writeDrawUniform(void* contents,
                                            cursor,
                                            &draw.uniforms,
                                            sizeof(draw.uniforms));
+}
+
+std::vector<float> buildAxesLineVertices()
+{
+    std::vector<float> vertices;
+    vertices.reserve(static_cast<size_t>(kAxesVerticesPerAxis * 3 * 3));
+    auto appendLine = [&vertices](const Vec3& a, const Vec3& b) {
+        vertices.insert(vertices.end(), {a.x, a.y, a.z, b.x, b.y, b.z});
+    };
+
+    const std::array<Vec3, 3> dirs = {{
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f}
+    }};
+    const std::array<Vec3, 3> ups = {{
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {1.0f, 0.0f, 0.0f}
+    }};
+
+    constexpr float shaftLength = 0.78f;
+    constexpr float tipLength = 1.0f;
+    constexpr float shaftRadius = 0.025f;
+    constexpr float arrowRadius = 0.12f;
+    for (size_t axis = 0; axis < dirs.size(); ++axis) {
+        const Vec3 dir = dirs[axis];
+        const Vec3 right = cross(dir, ups[axis]);
+        const Vec3 up = cross(right, dir);
+        const Vec3 origin{0.0f, 0.0f, 0.0f};
+        const Vec3 shaftEnd = scale(dir, shaftLength);
+        const Vec3 tip = scale(dir, tipLength);
+        const std::array<Vec3, 4> base = {{
+            add(shaftEnd, scale(right, arrowRadius)),
+            add(shaftEnd, scale(up, arrowRadius)),
+            add(shaftEnd, scale(right, -arrowRadius)),
+            add(shaftEnd, scale(up, -arrowRadius))
+        }};
+
+        appendLine(origin, shaftEnd);
+        appendLine(scale(right, shaftRadius), add(shaftEnd, scale(right, shaftRadius)));
+        appendLine(scale(up, shaftRadius), add(shaftEnd, scale(up, shaftRadius)));
+        appendLine(scale(right, -shaftRadius), add(shaftEnd, scale(right, -shaftRadius)));
+        appendLine(scale(up, -shaftRadius), add(shaftEnd, scale(up, -shaftRadius)));
+        for (const Vec3& p : base) {
+            appendLine(tip, p);
+        }
+        for (size_t i = 0; i < base.size(); ++i) {
+            appendLine(base[i], base[(i + 1) % base.size()]);
+        }
+    }
+    return vertices;
+}
+
+std::vector<MetalMeshVertex> buildAxesSolidVertices()
+{
+    std::vector<MetalMeshVertex> vertices;
+    vertices.reserve(3 * 24 * 12 + 8 * 12 * 6);
+
+    auto appendVertex = [&vertices](const Vec3& position, const Vec3& normal, const Vec3& color) {
+        MetalMeshVertex vertex{};
+        vertex.position[0] = position.x;
+        vertex.position[1] = position.y;
+        vertex.position[2] = position.z;
+        const Vec3 n = normalize(normal);
+        vertex.normal[0] = n.x;
+        vertex.normal[1] = n.y;
+        vertex.normal[2] = n.z;
+        vertex.color[0] = color.x;
+        vertex.color[1] = color.y;
+        vertex.color[2] = color.z;
+        vertices.push_back(vertex);
+    };
+    auto appendTri = [&appendVertex](const Vec3& a,
+                                     const Vec3& b,
+                                     const Vec3& c,
+                                     const Vec3& color) {
+        const Vec3 normal = normalize(cross(sub(b, a), sub(c, a)));
+        appendVertex(a, normal, color);
+        appendVertex(b, normal, color);
+        appendVertex(c, normal, color);
+    };
+
+    constexpr int segs = 24;
+    constexpr float shaftLen = 0.70f;
+    constexpr float shaftRadius = 0.028f;
+    constexpr float coneRadius = 0.10f;
+    constexpr float coneLen = 0.30f;
+    constexpr float ballRadius = 0.065f;
+    const std::array<Vec3, 3> dirs = {{
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f}
+    }};
+    const std::array<Vec3, 3> ups = {{
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {1.0f, 0.0f, 0.0f}
+    }};
+    const std::array<Vec3, 3> colors = {{
+        {0.95f, 0.30f, 0.30f},
+        {0.35f, 0.90f, 0.35f},
+        {0.35f, 0.55f, 1.00f}
+    }};
+
+    for (size_t axis = 0; axis < dirs.size(); ++axis) {
+        const Vec3 dir = dirs[axis];
+        const Vec3 right = normalize(cross(dir, ups[axis]));
+        const Vec3 up = normalize(cross(right, dir));
+        const Vec3 color = colors[axis];
+        const Vec3 shaftColor = scale(color, 0.85f);
+        for (int i = 0; i < segs; ++i) {
+            const float a0 = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(segs);
+            const float a1 = 2.0f * kPi * static_cast<float>(i + 1) / static_cast<float>(segs);
+            const Vec3 radial0 = add(scale(right, std::cos(a0)), scale(up, std::sin(a0)));
+            const Vec3 radial1 = add(scale(right, std::cos(a1)), scale(up, std::sin(a1)));
+            const Vec3 b0 = scale(radial0, shaftRadius);
+            const Vec3 b1 = scale(radial1, shaftRadius);
+            const Vec3 t0 = add(scale(dir, shaftLen), b0);
+            const Vec3 t1 = add(scale(dir, shaftLen), b1);
+            appendVertex(b0, radial0, shaftColor);
+            appendVertex(t0, radial0, shaftColor);
+            appendVertex(t1, radial1, shaftColor);
+            appendVertex(b0, radial0, shaftColor);
+            appendVertex(t1, radial1, shaftColor);
+            appendVertex(b1, radial1, shaftColor);
+
+            const Vec3 coneBase0 = add(scale(dir, shaftLen), scale(radial0, coneRadius));
+            const Vec3 coneBase1 = add(scale(dir, shaftLen), scale(radial1, coneRadius));
+            const Vec3 tip = scale(dir, shaftLen + coneLen);
+            appendTri(tip, coneBase0, coneBase1, color);
+            appendTri(scale(dir, shaftLen), coneBase1, coneBase0, scale(color, 0.55f));
+        }
+    }
+
+    const Vec3 ballColor{0.82f, 0.82f, 0.85f};
+    constexpr int ballRings = 8;
+    constexpr int ballSectors = 12;
+    for (int r = 0; r < ballRings; ++r) {
+        const float phi0 = kPi * static_cast<float>(r) / static_cast<float>(ballRings) - kPi * 0.5f;
+        const float phi1 = kPi * static_cast<float>(r + 1) / static_cast<float>(ballRings) - kPi * 0.5f;
+        for (int s = 0; s < ballSectors; ++s) {
+            const float theta0 = 2.0f * kPi * static_cast<float>(s) / static_cast<float>(ballSectors);
+            const float theta1 = 2.0f * kPi * static_cast<float>(s + 1) / static_cast<float>(ballSectors);
+            const Vec3 p00 = scale({std::cos(phi0) * std::cos(theta0), std::sin(phi0), std::cos(phi0) * std::sin(theta0)}, ballRadius);
+            const Vec3 p10 = scale({std::cos(phi1) * std::cos(theta0), std::sin(phi1), std::cos(phi1) * std::sin(theta0)}, ballRadius);
+            const Vec3 p01 = scale({std::cos(phi0) * std::cos(theta1), std::sin(phi0), std::cos(phi0) * std::sin(theta1)}, ballRadius);
+            const Vec3 p11 = scale({std::cos(phi1) * std::cos(theta1), std::sin(phi1), std::cos(phi1) * std::sin(theta1)}, ballRadius);
+            appendVertex(p00, p00, ballColor);
+            appendVertex(p10, p10, ballColor);
+            appendVertex(p11, p11, ballColor);
+            appendVertex(p00, p00, ballColor);
+            appendVertex(p11, p11, ballColor);
+            appendVertex(p01, p01, ballColor);
+        }
+    }
+
+    return vertices;
 }
 
 } // namespace
@@ -165,7 +358,10 @@ bool MetalRenderBackend::ensurePickPipeline()
 
 bool MetalRenderBackend::ensureAxesResources()
 {
-    if (axesLineVertexBuffer_.isValid() && axesLineVertexCount_ >= 6) {
+    if (axesLineVertexBuffer_.isValid() &&
+        axesLineVertexCount_ >= kAxesVerticesPerAxis * 3 &&
+        axesSolidVertexBuffer_.isValid() &&
+        axesSolidVertexCount_ > 0) {
         return true;
     }
     initialize();
@@ -176,11 +372,7 @@ bool MetalRenderBackend::ensureAxesResources()
         return false;
     }
 
-    const std::array<float, 18> axesVertices = {
-        0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f
-    };
+    const std::vector<float> axesVertices = buildAxesLineVertices();
     if (!axesLineVertexBuffer_.upload(device_.handle(),
                                       axesVertices.data(),
                                       axesVertices.size() * sizeof(float),
@@ -190,6 +382,17 @@ bool MetalRenderBackend::ensureAxesResources()
         return false;
     }
     axesLineVertexCount_ = static_cast<int>(axesVertices.size() / 3);
+
+    const std::vector<MetalMeshVertex> axesSolidVertices = buildAxesSolidVertices();
+    if (!axesSolidVertexBuffer_.upload(device_.handle(),
+                                       axesSolidVertices.data(),
+                                       axesSolidVertices.size() * sizeof(MetalMeshVertex),
+                                       QStringLiteral("axes solid"),
+                                       lastError_)) {
+        axesSolidVertexCount_ = 0;
+        return false;
+    }
+    axesSolidVertexCount_ = static_cast<int>(axesSolidVertices.size());
     return true;
 }
 
@@ -469,7 +672,11 @@ bool MetalRenderBackend::uploadSelectionLines(const std::vector<float>& lineVert
                             QStringLiteral("selection"));
 }
 
-bool MetalRenderBackend::renderClearFrame(float red, float green, float blue, float alpha)
+bool MetalRenderBackend::renderClearFrame(float red,
+                                         float green,
+                                         float blue,
+                                         float alpha,
+                                         const QMatrix4x4& axesMvp)
 {
     lastError_.clear();
     if (!initialized_ || !device_.isValid() || !commandQueue_.isValid()) {
@@ -481,31 +688,35 @@ bool MetalRenderBackend::renderClearFrame(float red, float green, float blue, fl
         return false;
     }
 
-    if (!ensureBackgroundPipeline() || !ensureDepthResources()) {
+    const MetalMeshFrameDrawFlags drawFlags{
+        .surface = false,
+        .edges = false,
+        .points = false,
+        .isoSurface = false,
+        .clipPreview = false,
+        .overlay = false,
+        .slice = false,
+        .clipPreviewLines = false,
+        .selection = false,
+        .axes = !axesMvp.isIdentity() && drawableSize_.width() > 16 && drawableSize_.height() > 16,
+        .axesSolid = !axesMvp.isIdentity() && drawableSize_.width() > 16 && drawableSize_.height() > 16
+    };
+    if (!ensureMeshFrameResources(drawFlags)) {
         return false;
     }
 
-    MetalMeshFrameResourceHandles resources;
-    resources.backgroundPipelineState = backgroundPipelineState_.handle();
-    resources.depthStencilState = depthStencilState_.handle();
-    resources.overlayDepthStencilState = overlayDepthStencilState_.handle();
-    resources.drawableSize = drawableSize_;
-    resources.backgroundTopColor = backgroundTopColor_;
-    resources.backgroundBottomColor = backgroundBottomColor_;
-
-    MetalMeshFramePassInputs framePass;
-    framePass.backgroundPipelineState = resources.backgroundPipelineState;
-    framePass.depthStencilState = resources.depthStencilState;
-    framePass.overlayDepthStencilState = resources.overlayDepthStencilState;
-    framePass.drawableSize = resources.drawableSize;
-    framePass.backgroundUniforms.bottomColor[0] = resources.backgroundBottomColor.x();
-    framePass.backgroundUniforms.bottomColor[1] = resources.backgroundBottomColor.y();
-    framePass.backgroundUniforms.bottomColor[2] = resources.backgroundBottomColor.z();
-    framePass.backgroundUniforms.bottomColor[3] = 1.0f;
-    framePass.backgroundUniforms.topColor[0] = resources.backgroundTopColor.x();
-    framePass.backgroundUniforms.topColor[1] = resources.backgroundTopColor.y();
-    framePass.backgroundUniforms.topColor[2] = resources.backgroundTopColor.z();
-    framePass.backgroundUniforms.topColor[3] = 1.0f;
+    const MetalMeshFrameResourceHandles resources = buildMeshFrameResourceHandles();
+    const MetalMeshFrameUniformSet frameUniforms =
+        buildMetalMeshFrameUniformSet(QMatrix4x4(),
+                                      QVector3D(0.0f, 0.0f, 0.0f),
+                                      0.0f,
+                                      1.0f,
+                                      std::max(1, meshNumBands_),
+                                      false,
+                                      axesMvp);
+    MetalMeshFramePassInputs framePass = buildMetalMeshFramePassInputs(drawFlags,
+                                                                      resources,
+                                                                      frameUniforms);
     if (!prepareFrameUniformBuffer(framePass)) {
         return false;
     }
@@ -551,6 +762,7 @@ MetalMeshFrameDrawFlags MetalRenderBackend::buildMeshFrameDrawFlags(
         selectionVertexCount_ > 0 && selectionVertexBuffer_.isValid();
     drawFlags.axes =
         !axesMvp.isIdentity() && drawableSize_.width() > 16 && drawableSize_.height() > 16;
+    drawFlags.axesSolid = drawFlags.axes;
     return drawFlags;
 }
 
@@ -559,7 +771,7 @@ bool MetalRenderBackend::ensureMeshFrameResources(const MetalMeshFrameDrawFlags&
     if (!ensureBackgroundPipeline()) {
         return false;
     }
-    if (drawFlags.surface && !ensureMeshPipeline()) {
+    if ((drawFlags.surface || drawFlags.axesSolid) && !ensureMeshPipeline()) {
         return false;
     }
     if ((drawFlags.edges ||
@@ -618,6 +830,8 @@ MetalMeshFrameResourceHandles MetalRenderBackend::buildMeshFrameResourceHandles(
     frameResources.selectionVertexCount = selectionVertexCount_;
     frameResources.axesLineVertexBuffer = axesLineVertexBuffer_.handle();
     frameResources.axesLineVertexCount = axesLineVertexCount_;
+    frameResources.axesSolidVertexBuffer = axesSolidVertexBuffer_.handle();
+    frameResources.axesSolidVertexCount = axesSolidVertexCount_;
     return frameResources;
 }
 
@@ -645,7 +859,7 @@ bool MetalRenderBackend::prepareFrameUniformBuffer(MetalMeshFramePassInputs& fra
 {
     const size_t uniformStride = alignMetalUniformOffset(sizeof(MetalMeshUniforms));
     const size_t backgroundStride = alignMetalUniformOffset(sizeof(MetalBackgroundUniforms));
-    const size_t slotSize = backgroundStride + uniformStride * 12;
+    const size_t slotSize = backgroundStride + uniformStride * 13;
     const size_t totalSize = slotSize * kMetalFrameUniformSlotCount;
 
     if (!frameUniformBuffer_.isValid() || frameUniformBuffer_.sizeBytes() < totalSize) {
@@ -686,6 +900,7 @@ bool MetalRenderBackend::prepareFrameUniformBuffer(MetalMeshFramePassInputs& fra
     writeDrawUniform(contents, baseOffset, cursor, framePass.slice);
     writeDrawUniform(contents, baseOffset, cursor, framePass.clipPreviewLines);
     writeDrawUniform(contents, baseOffset, cursor, framePass.selection);
+    writeDrawUniform(contents, baseOffset, cursor, framePass.axesSolid);
 
     const std::array<std::array<float, 4>, 3> axisColors = {{
         {{0.95f, 0.30f, 0.30f, 1.0f}},
@@ -720,7 +935,7 @@ bool MetalRenderBackend::renderMeshFrame(const QMatrix4x4& mvp,
 {
     lastError_.clear();
     if (meshIndexCount_ <= 0 || !meshVertexBuffer_.isValid() || !meshIndexBuffer_.isValid()) {
-        return renderClearFrame(red, green, blue, alpha);
+        return renderClearFrame(red, green, blue, alpha, axesMvp);
     }
     if (!initialized_ || !device_.isValid() || !commandQueue_.isValid()) {
         lastError_ = QStringLiteral("Metal backend is not initialized");
@@ -864,6 +1079,7 @@ void MetalRenderBackend::destroySelectionResources()
 void MetalRenderBackend::destroyAxesResources()
 {
     destroyLineBuffer(axesLineVertexBuffer_, axesLineVertexCount_);
+    destroyLineBuffer(axesSolidVertexBuffer_, axesSolidVertexCount_);
 }
 
 void MetalRenderBackend::destroyDepthResources()

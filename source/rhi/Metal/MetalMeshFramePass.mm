@@ -108,6 +108,7 @@ void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePass
     [encoder setDepthStencilState:static_cast<id<MTLDepthStencilState>>(inputs.overlayDepthStencilState)];
     [encoder setViewport:axesViewport];
     [encoder setScissorRect:axesScissor];
+    drawMetalVertices(encoder, inputs, inputs.axesSolid, MTLPrimitiveTypeTriangle);
     [encoder setRenderPipelineState:static_cast<id<MTLRenderPipelineState>>(inputs.axes.pipelineState)];
     [encoder setVertexBuffer:static_cast<id<MTLBuffer>>(inputs.axes.vertexBuffer) offset:0 atIndex:0];
 
@@ -117,6 +118,11 @@ void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePass
         {{0.35f, 0.90f, 0.35f, 1.0f}},
         {{0.35f, 0.55f, 1.00f, 1.0f}}
     }};
+    const NSUInteger axisVertexCount = static_cast<NSUInteger>(inputs.axes.vertexCount / 3);
+    if (axisVertexCount < 2) {
+        return;
+    }
+
     for (NSUInteger axis = 0; axis < 3; ++axis) {
         setMetalUniformColor(axesUniforms,
                              axisColors[axis][0],
@@ -133,7 +139,9 @@ void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePass
             axisDraw.uniforms = axesUniforms;
             bindMetalUniforms(encoder, inputs, axisDraw);
         }
-        [encoder drawPrimitives:MTLPrimitiveTypeLine vertexStart:axis * 2 vertexCount:2];
+        [encoder drawPrimitives:MTLPrimitiveTypeLine
+                     vertexStart:axis * axisVertexCount
+                     vertexCount:axisVertexCount];
     }
 
     [encoder setViewport:previousViewport];

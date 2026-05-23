@@ -58,6 +58,7 @@ private:
     void showPostDialog(QDialog* dialog);
     void applyTheme(const Theme& theme);
     void updateRhiActionText();
+    void syncSidebarActions();
     void updateProjectTreeSummary();
     void updateStatusSummaries();
 
@@ -133,5 +134,8 @@ private:
     QMenu*         themeMenu_      = nullptr;
     QAction*       rhiAction_      = nullptr;
     QMenu*         rhiMenu_        = nullptr;
+    QAction*       sidebarsAction_ = nullptr;
+    QAction*       leftPanelAction_ = nullptr;
+    QAction*       rightPanelAction_ = nullptr;
     int            themeIndex_     = 0;
 };

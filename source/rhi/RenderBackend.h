@@ -30,6 +30,15 @@ enum class ModelDisplayMode {
     Points
 };
 
+enum class StandardView {
+    Front,
+    Back,
+    Left,
+    Right,
+    Top,
+    Bottom
+};
+
 struct PickDrawItem {
     int startIndex = 0;
     int indexCount = 0;

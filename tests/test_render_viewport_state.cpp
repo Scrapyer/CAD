@@ -109,6 +109,7 @@ int main(int argc, char** argv)
                               6);
     viewport.setPartVisibility(1, false);
     viewport.selectByIds(PickMode::Element, {100});
+    viewport.setShowLabels(true);
     viewport.refresh();
     pumpEvents(app, 300);
 
@@ -181,6 +182,7 @@ int main(int argc, char** argv)
         metalViewport.selectByIds(PickMode::Element, {100});
         metalViewport.selectByIds(PickMode::Node, {0});
         metalViewport.selectByIds(PickMode::Part, {0});
+        metalViewport.setShowLabels(true);
         metalViewport.setModelDisplayMode(ModelDisplayMode::Points);
         metalViewport.refresh();
         pumpEvents(app, 100);

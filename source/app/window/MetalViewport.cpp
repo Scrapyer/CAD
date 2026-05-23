@@ -15,9 +15,58 @@
 #include <unordered_set>
 
 namespace {
+template <typename T>
+void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
+    if (targetSize < 0) targetSize = 0;
+    if (static_cast<int>(arr.size()) > targetSize) {
+        arr.resize(static_cast<size_t>(targetSize));
+    } else if (static_cast<int>(arr.size()) < targetSize) {
+        arr.resize(static_cast<size_t>(targetSize), fillValue);
+    }
+}
+
 constexpr int kAxesLabelSize = 24;
 constexpr int kAxesMargin = 8;
 constexpr int kAxesViewportSize = 120;
+constexpr int kMaxIdLabels = 160;
+
+glm::mat4 depthZeroToOneRemap()
+{
+    glm::mat4 remap(1.0f);
+    remap[2][2] = 0.5f;
+    remap[3][2] = 0.5f;
+    return remap;
+}
+
+void applyStandardViewToCamera(Camera& camera, StandardView view)
+{
+    switch (view) {
+    case StandardView::Front:
+        camera.yaw = 0.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Back:
+        camera.yaw = 180.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Left:
+        camera.yaw = -90.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Right:
+        camera.yaw = 90.0f;
+        camera.pitch = 0.0f;
+        break;
+    case StandardView::Top:
+        camera.yaw = 0.0f;
+        camera.pitch = 89.0f;
+        break;
+    case StandardView::Bottom:
+        camera.yaw = 0.0f;
+        camera.pitch = -89.0f;
+        break;
+    }
+}
 
 Mesh makeClipPlanePreviewMesh(const glm::vec3& bbMin,
                               const glm::vec3& bbMax,
@@ -109,9 +158,10 @@ MetalViewport::MetalViewport(QWidget* parent)
         QStringLiteral("rgb(89, 140, 255)")
     };
     for (size_t i = 0; i < axesLabels_.size(); ++i) {
-        axesLabels_[i] = new QLabel(axesNames[i], windowContainer_);
+        axesLabels_[i] = new QLabel(axesNames[i], this);
         axesLabels_[i]->setAlignment(Qt::AlignCenter);
         axesLabels_[i]->setAttribute(Qt::WA_TransparentForMouseEvents);
+        axesLabels_[i]->setAttribute(Qt::WA_TranslucentBackground);
         axesLabels_[i]->setFixedSize(kAxesLabelSize, kAxesLabelSize);
         QFont labelFont = axesLabels_[i]->font();
         labelFont.setBold(true);
@@ -184,22 +234,42 @@ void MetalViewport::renderFrame()
                                    clearBlue_,
                                    clearAlpha_,
                                    currentAxesMvp())
-        : backend_.renderClearFrame(clearRed_, clearGreen_, clearBlue_, clearAlpha_);
+        : backend_.renderClearFrame(clearRed_,
+                                    clearGreen_,
+                                    clearBlue_,
+                                    clearAlpha_,
+                                    currentAxesMvp());
     if (!rendered) {
         lastError_ = backend_.lastError();
         return;
     }
 
     updateAxesLabels();
+    updateIdLabels();
     updateFrameStats(frameTimer.nsecsElapsed());
 }
 
 void MetalViewport::setMesh(const Mesh& mesh)
 {
     mesh_ = mesh;
+    triangleToElement_.clear();
+    vertexToNode_.clear();
+    triangleToPart_.clear();
+    edgeToPart_.clear();
+    partTriangles_.clear();
+    partElementIds_.clear();
+    elementToPart_.clear();
+    partColors_.clear();
+    partVisibility_.clear();
     hasMesh_ = !mesh_.vertices.empty() && !mesh_.indices.empty();
     meshDirty_ = true;
+    selection_.clear();
     selectionDirty_ = true;
+    emit selectionChanged(pickMode_, 0, {});
+    if (pickMode_ == PickMode::Part) {
+        emit partsPicked({});
+    }
+    updateIdLabels();
     renderFrame();
 }
 
@@ -313,6 +383,8 @@ void MetalViewport::clearClipPlanePreview()
 void MetalViewport::setTriangleToElementMap(const std::vector<int>& map)
 {
     triangleToElement_ = map;
+    int triCount = static_cast<int>(mesh_.indices.size() / 3);
+    alignSize(triangleToElement_, triCount, -1);
     rebuildPartLookup();
     meshDirty_ = true;
     selectionDirty_ = true;
@@ -322,6 +394,8 @@ void MetalViewport::setTriangleToElementMap(const std::vector<int>& map)
 void MetalViewport::setVertexToNodeMap(const std::vector<int>& map)
 {
     vertexToNode_ = map;
+    int vertexCount = static_cast<int>(mesh_.vertices.size() / 6);
+    alignSize(vertexToNode_, vertexCount, -1);
     selectionDirty_ = true;
     renderFrame();
 }
@@ -329,6 +403,8 @@ void MetalViewport::setVertexToNodeMap(const std::vector<int>& map)
 void MetalViewport::setTriangleToPartMap(const std::vector<int>& map)
 {
     triangleToPart_ = map;
+    int triCount = static_cast<int>(mesh_.indices.size() / 3);
+    alignSize(triangleToPart_, triCount, -1);
 
     int numParts = 0;
     for (int part : triangleToPart_) {
@@ -363,6 +439,8 @@ void MetalViewport::setTriangleToPartMap(const std::vector<int>& map)
 void MetalViewport::setEdgeToPartMap(const std::vector<int>& map)
 {
     edgeToPart_ = map;
+    int edgeCount = static_cast<int>(mesh_.edgeIndices.size() / 2);
+    alignSize(edgeToPart_, edgeCount, -1);
     meshDirty_ = true;
     renderFrame();
 }
@@ -376,7 +454,17 @@ void MetalViewport::setPickMode(PickMode mode)
     if (pickMode_ == PickMode::Part) {
         emit partsPicked({});
     }
+    updateIdLabels();
     renderFrame();
+}
+
+void MetalViewport::setShowLabels(bool show)
+{
+    if (showLabels_ == show) {
+        return;
+    }
+    showLabels_ = show;
+    updateIdLabels();
 }
 
 void MetalViewport::selectByIds(PickMode mode, const std::vector<int>& ids)
@@ -409,6 +497,7 @@ void MetalViewport::selectByIds(PickMode mode, const std::vector<int>& ids)
     if (pickMode_ == PickMode::Part) {
         emit partsPicked(pickedPartIndices());
     }
+    updateIdLabels();
     renderFrame();
 }
 
@@ -425,6 +514,7 @@ void MetalViewport::setPartVisibility(int partIndex, bool visible)
         if (pickMode_ == PickMode::Part) {
             emit partsPicked(pickedPartIndices());
         }
+        updateIdLabels();
     }
     meshDirty_ = true;
     selectionDirty_ = true;
@@ -443,6 +533,14 @@ void MetalViewport::fitToModel(const glm::vec3& center, float size)
     cam_.pitch = 25.0f;
     selectionMarkerSize_ = modelSize_ * 0.015f;
     selectionDirty_ = true;
+    renderFrame();
+}
+
+void MetalViewport::setStandardView(StandardView view)
+{
+    applyStandardViewToCamera(cam_, view);
+    selectionDirty_ = true;
+    updateAxesLabels();
     renderFrame();
 }
 
@@ -805,6 +903,7 @@ bool MetalViewport::pickAtPosition(const QPointF& position, bool appendSelection
     if (pickMode_ == PickMode::Part) {
         emit partsPicked(pickedPartIndices());
     }
+    updateIdLabels();
     renderFrame();
     return true;
 }
@@ -849,6 +948,7 @@ bool MetalViewport::deselectAtPosition(const QPointF& position)
     if (pickMode_ == PickMode::Part) {
         emit partsPicked(pickedPartIndices());
     }
+    updateIdLabels();
     renderFrame();
     return true;
 }
@@ -966,6 +1066,7 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
     if (pickMode_ == PickMode::Part) {
         emit partsPicked(pickedPartIndices());
     }
+    updateIdLabels();
     renderFrame();
     return true;
 }
@@ -983,7 +1084,7 @@ glm::mat4 MetalViewport::currentAxesGlmMvp() const
     glm::mat4 axesView = glm::lookAt(axesEye, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     glm::mat4 axesProj = glm::ortho(-1.3f, 1.3f, -1.3f, 1.3f, 0.01f, 10.0f);
     axesProj[1][1] *= -1.0f;
-    return axesProj * axesView;
+    return depthZeroToOneRemap() * axesProj * axesView;
 }
 
 QMatrix4x4 MetalViewport::currentAxesMvp() const
@@ -1412,7 +1513,7 @@ void MetalViewport::updateAxesLabels()
     const int availableWidth = std::max(0, size.width() - kAxesMargin * 2);
     const int availableHeight = std::max(0, size.height() - kAxesMargin * 2);
     const int axesSize = std::min(kAxesViewportSize, std::min(availableWidth, availableHeight));
-    if (!hasMesh_ || axesSize <= 0) {
+    if (axesSize <= 0) {
         for (QLabel* label : axesLabels_) {
             if (label) {
                 label->hide();
@@ -1447,6 +1548,186 @@ void MetalViewport::updateAxesLabels()
         const int x = axesLeft + static_cast<int>((ndcX * 0.5f + 0.5f) * axesSize) - kAxesLabelSize / 2;
         const int y = axesTop + static_cast<int>((ndcY * 0.5f + 0.5f) * axesSize) - kAxesLabelSize / 2;
         label->move(x, y);
+        label->show();
+        label->raise();
+    }
+}
+
+void MetalViewport::updateIdLabels()
+{
+    auto hideAllLabels = [this]() {
+        for (QLabel* label : idLabels_) {
+            if (label) {
+                label->hide();
+            }
+        }
+    };
+
+    if (!showLabels_ || !hasMesh_ || !selection_.hasSelection()) {
+        hideAllLabels();
+        return;
+    }
+
+    const QSize size = windowContainer_ ? windowContainer_->size() : this->size();
+    const float width = static_cast<float>(std::max(1, size.width()));
+    const float height = static_cast<float>(std::max(1, size.height()));
+    const glm::mat4 mvp = currentGlmMvp();
+
+    struct LabelCandidate {
+        QString text;
+        QPoint point;
+    };
+    std::vector<LabelCandidate> labels;
+    labels.reserve(std::min(kMaxIdLabels, static_cast<int>(currentSelectionIds().size())));
+
+    auto project = [&mvp, width, height](const glm::vec3& position, QPoint& point) {
+        const glm::vec4 clip = mvp * glm::vec4(position, 1.0f);
+        if (clip.w <= 0.0f) {
+            return false;
+        }
+        const float ndcX = clip.x / clip.w;
+        const float ndcY = clip.y / clip.w;
+        if (ndcX < -1.05f || ndcX > 1.05f || ndcY < -1.05f || ndcY > 1.05f) {
+            return false;
+        }
+        point = QPoint(static_cast<int>((ndcX * 0.5f + 0.5f) * width),
+                       static_cast<int>((ndcY * 0.5f + 0.5f) * height));
+        return true;
+    };
+
+    auto appendLabel = [&labels, &project](const QString& text, const glm::vec3& position) {
+        if (static_cast<int>(labels.size()) >= kMaxIdLabels) {
+            return;
+        }
+        QPoint point;
+        if (project(position, point)) {
+            labels.push_back({text, point});
+        }
+    };
+
+    if (pickMode_ == PickMode::Node) {
+        std::unordered_map<int, size_t> nodeToVertex;
+        const size_t vertexCount = mesh_.vertices.size() / 6;
+        const size_t mapCount = std::min(vertexToNode_.size(), vertexCount);
+        for (size_t vertex = 0; vertex < mapCount; ++vertex) {
+            const int nodeId = vertexToNode_[vertex];
+            if (nodeId >= 0 && nodeToVertex.find(nodeId) == nodeToVertex.end()) {
+                nodeToVertex.emplace(nodeId, vertex);
+            }
+        }
+        for (int nodeId : currentSelectionIds()) {
+            const auto it = nodeToVertex.find(nodeId);
+            if (it == nodeToVertex.end()) {
+                continue;
+            }
+            const size_t base = it->second * 6;
+            if (base + 2 >= mesh_.vertices.size()) {
+                continue;
+            }
+            appendLabel(QString::number(nodeId),
+                        glm::vec3(mesh_.vertices[base],
+                                  mesh_.vertices[base + 1],
+                                  mesh_.vertices[base + 2]));
+        }
+    } else if (pickMode_ == PickMode::Part) {
+        for (int part : pickedPartIndices()) {
+            if (part < 0 || part >= static_cast<int>(partTriangles_.size())) {
+                continue;
+            }
+            const auto visibilityIt = partVisibility_.find(part);
+            if (visibilityIt != partVisibility_.end() && !visibilityIt->second) {
+                continue;
+            }
+            glm::vec3 sum(0.0f);
+            int count = 0;
+            for (int tri : partTriangles_[static_cast<size_t>(part)]) {
+                const size_t triBase = static_cast<size_t>(tri) * 3;
+                if (triBase + 2 >= mesh_.indices.size()) {
+                    continue;
+                }
+                for (int corner = 0; corner < 3; ++corner) {
+                    const size_t vertex = static_cast<size_t>(mesh_.indices[triBase + corner]);
+                    const size_t base = vertex * 6;
+                    if (base + 2 >= mesh_.vertices.size()) {
+                        continue;
+                    }
+                    sum += glm::vec3(mesh_.vertices[base],
+                                     mesh_.vertices[base + 1],
+                                     mesh_.vertices[base + 2]);
+                    ++count;
+                }
+            }
+            if (count > 0) {
+                appendLabel(QStringLiteral("Part %1").arg(part + 1), sum / static_cast<float>(count));
+            }
+        }
+    } else {
+        struct Accum {
+            glm::vec3 sum{0.0f};
+            int count = 0;
+        };
+        std::unordered_map<int, Accum> centroids;
+        const size_t triCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
+        for (size_t tri = 0; tri < triCount; ++tri) {
+            const int elementId = triangleToElement_[tri];
+            if (!selection_.isElementSelected(elementId) ||
+                !isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            Accum& accum = centroids[elementId];
+            for (int corner = 0; corner < 3; ++corner) {
+                const size_t vertex = static_cast<size_t>(mesh_.indices[tri * 3 + corner]);
+                const size_t base = vertex * 6;
+                if (base + 2 >= mesh_.vertices.size()) {
+                    continue;
+                }
+                accum.sum += glm::vec3(mesh_.vertices[base],
+                                       mesh_.vertices[base + 1],
+                                       mesh_.vertices[base + 2]);
+                ++accum.count;
+            }
+        }
+        std::vector<int> elementIds;
+        elementIds.reserve(centroids.size());
+        for (const auto& [elementId, accum] : centroids) {
+            if (accum.count > 0) {
+                elementIds.push_back(elementId);
+            }
+        }
+        std::sort(elementIds.begin(), elementIds.end());
+        for (int elementId : elementIds) {
+            const Accum& accum = centroids[elementId];
+            appendLabel(QString::number(elementId), accum.sum / static_cast<float>(accum.count));
+        }
+    }
+
+    while (idLabels_.size() < labels.size()) {
+        auto* label = new QLabel(this);
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+        label->setAlignment(Qt::AlignCenter);
+        QFont font = label->font();
+        font.setBold(true);
+        font.setPixelSize(11);
+        label->setFont(font);
+        label->setStyleSheet(QStringLiteral(
+            "QLabel { color: rgb(255, 205, 64); background: rgba(0, 0, 0, 150); "
+            "border-radius: 3px; padding: 1px 4px; }"));
+        label->hide();
+        idLabels_.push_back(label);
+    }
+
+    for (size_t i = 0; i < idLabels_.size(); ++i) {
+        QLabel* label = idLabels_[i];
+        if (!label) {
+            continue;
+        }
+        if (i >= labels.size()) {
+            label->hide();
+            continue;
+        }
+        label->setText(labels[i].text);
+        label->adjustSize();
+        label->move(labels[i].point - QPoint(label->width() / 2, label->height() + 8));
         label->show();
         label->raise();
     }

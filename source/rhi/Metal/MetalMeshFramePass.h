@@ -36,6 +36,7 @@ struct MetalMeshFramePassInputs {
     MetalMeshFramePassDraw clipPreviewLines;
     MetalMeshFramePassDraw selection;
     MetalMeshFramePassDraw axes;
+    MetalMeshFramePassDraw axesSolid;
     size_t axesUniformOffsets[3] = {0, 0, 0};
 };
 

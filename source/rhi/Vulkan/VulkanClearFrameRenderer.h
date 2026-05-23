@@ -44,8 +44,9 @@ public:
     void destroy(const VulkanDevice& device);
 
     bool renderClearFrame(const VulkanDevice& device,
-                          const VulkanSwapchain& swapchain,
-                          const VkClearColorValue& clearColor);
+                         const VulkanSwapchain& swapchain,
+                         const VkClearColorValue& clearColor,
+                         const QMatrix4x4& axesMvp = QMatrix4x4());
     bool renderTriangleFrame(const VulkanDevice& device,
                              const VulkanSwapchain& swapchain,
                              const VkClearColorValue& clearColor,
@@ -160,6 +161,8 @@ private:
     uint32_t selectionLineVertexCount_ = 0;
     VulkanBufferResource axesLineVertexResource_;
     uint32_t axesLineVertexCount_ = 0;
+    VulkanBufferResource axesSolidVertexResource_;
+    uint32_t axesSolidVertexCount_ = 0;
     VulkanCommandResource commandResource_;
     VkSemaphore imageAvailableSemaphore_ = VK_NULL_HANDLE;
     VkSemaphore renderFinishedSemaphore_ = VK_NULL_HANDLE;

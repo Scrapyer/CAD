@@ -64,7 +64,11 @@ public:
     bool uploadClipPreviewMesh(const Mesh& mesh);
     bool uploadSelectionLines(const std::vector<float>& lineVertices);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
-    bool renderClearFrame(float red, float green, float blue, float alpha = 1.0f);
+    bool renderClearFrame(float red,
+                         float green,
+                         float blue,
+                         float alpha = 1.0f,
+                         const QMatrix4x4& axesMvp = QMatrix4x4());
     bool renderTriangleFrame(float red = 0.04f,
                              float green = 0.05f,
                              float blue = 0.07f,

@@ -13,11 +13,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <vector>
 
 namespace {
 constexpr size_t kMaxInteractiveEdgeIndices = 8000000;
+constexpr uint32_t kAxesVerticesPerAxis = 26;
+constexpr float kPi = 3.14159265358979323846f;
 
 struct VulkanMeshVertex {
     float position[3];
@@ -25,6 +29,193 @@ struct VulkanMeshVertex {
     float color[3];
     float pickColor[3];
 };
+
+struct Vec3 {
+    float x;
+    float y;
+    float z;
+};
+
+Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+Vec3 scale(const Vec3& v, float s) { return {v.x * s, v.y * s, v.z * s}; }
+Vec3 cross(const Vec3& a, const Vec3& b)
+{
+    return {
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    };
+}
+
+float dot(const Vec3& a, const Vec3& b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+Vec3 normalize(const Vec3& v)
+{
+    const float len2 = dot(v, v);
+    if (len2 <= 1.0e-12f) {
+        return {0.0f, 0.0f, 1.0f};
+    }
+    return scale(v, 1.0f / std::sqrt(len2));
+}
+
+std::vector<float> buildAxesLineVertices()
+{
+    std::vector<float> vertices;
+    vertices.reserve(static_cast<size_t>(kAxesVerticesPerAxis * 3 * 3));
+    auto appendLine = [&vertices](const Vec3& a, const Vec3& b) {
+        vertices.insert(vertices.end(), {a.x, a.y, a.z, b.x, b.y, b.z});
+    };
+
+    const std::array<Vec3, 3> dirs = {{
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f}
+    }};
+    const std::array<Vec3, 3> ups = {{
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {1.0f, 0.0f, 0.0f}
+    }};
+
+    constexpr float shaftLength = 0.78f;
+    constexpr float tipLength = 1.0f;
+    constexpr float shaftRadius = 0.025f;
+    constexpr float arrowRadius = 0.12f;
+    for (size_t axis = 0; axis < dirs.size(); ++axis) {
+        const Vec3 dir = dirs[axis];
+        const Vec3 right = cross(dir, ups[axis]);
+        const Vec3 up = cross(right, dir);
+        const Vec3 origin{0.0f, 0.0f, 0.0f};
+        const Vec3 shaftEnd = scale(dir, shaftLength);
+        const Vec3 tip = scale(dir, tipLength);
+        const std::array<Vec3, 4> base = {{
+            add(shaftEnd, scale(right, arrowRadius)),
+            add(shaftEnd, scale(up, arrowRadius)),
+            add(shaftEnd, scale(right, -arrowRadius)),
+            add(shaftEnd, scale(up, -arrowRadius))
+        }};
+
+        appendLine(origin, shaftEnd);
+        appendLine(scale(right, shaftRadius), add(shaftEnd, scale(right, shaftRadius)));
+        appendLine(scale(up, shaftRadius), add(shaftEnd, scale(up, shaftRadius)));
+        appendLine(scale(right, -shaftRadius), add(shaftEnd, scale(right, -shaftRadius)));
+        appendLine(scale(up, -shaftRadius), add(shaftEnd, scale(up, -shaftRadius)));
+        for (const Vec3& p : base) {
+            appendLine(tip, p);
+        }
+        for (size_t i = 0; i < base.size(); ++i) {
+            appendLine(base[i], base[(i + 1) % base.size()]);
+        }
+    }
+    return vertices;
+}
+
+std::vector<VulkanMeshVertex> buildAxesSolidVertices()
+{
+    std::vector<VulkanMeshVertex> vertices;
+    vertices.reserve(3 * 24 * 12 + 8 * 12 * 6);
+
+    auto appendVertex = [&vertices](const Vec3& position, const Vec3& normal, const Vec3& color) {
+        VulkanMeshVertex vertex{};
+        vertex.position[0] = position.x;
+        vertex.position[1] = position.y;
+        vertex.position[2] = position.z;
+        const Vec3 n = normalize(normal);
+        vertex.normal[0] = n.x;
+        vertex.normal[1] = n.y;
+        vertex.normal[2] = n.z;
+        vertex.color[0] = color.x;
+        vertex.color[1] = color.y;
+        vertex.color[2] = color.z;
+        vertices.push_back(vertex);
+    };
+    auto appendTri = [&appendVertex](const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& color) {
+        const Vec3 normal = normalize(cross(sub(b, a), sub(c, a)));
+        appendVertex(a, normal, color);
+        appendVertex(b, normal, color);
+        appendVertex(c, normal, color);
+    };
+
+    constexpr int segs = 24;
+    constexpr float shaftLen = 0.70f;
+    constexpr float shaftRadius = 0.028f;
+    constexpr float coneRadius = 0.10f;
+    constexpr float coneLen = 0.30f;
+    constexpr float ballRadius = 0.065f;
+    const std::array<Vec3, 3> dirs = {{
+        {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f}
+    }};
+    const std::array<Vec3, 3> ups = {{
+        {0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        {1.0f, 0.0f, 0.0f}
+    }};
+    const std::array<Vec3, 3> colors = {{
+        {0.95f, 0.30f, 0.30f},
+        {0.35f, 0.90f, 0.35f},
+        {0.35f, 0.55f, 1.00f}
+    }};
+
+    for (size_t axis = 0; axis < dirs.size(); ++axis) {
+        const Vec3 dir = dirs[axis];
+        const Vec3 right = normalize(cross(dir, ups[axis]));
+        const Vec3 up = normalize(cross(right, dir));
+        const Vec3 color = colors[axis];
+        const Vec3 shaftColor = scale(color, 0.85f);
+        for (int i = 0; i < segs; ++i) {
+            const float a0 = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(segs);
+            const float a1 = 2.0f * kPi * static_cast<float>(i + 1) / static_cast<float>(segs);
+            const Vec3 radial0 = add(scale(right, std::cos(a0)), scale(up, std::sin(a0)));
+            const Vec3 radial1 = add(scale(right, std::cos(a1)), scale(up, std::sin(a1)));
+            const Vec3 b0 = scale(radial0, shaftRadius);
+            const Vec3 b1 = scale(radial1, shaftRadius);
+            const Vec3 t0 = add(scale(dir, shaftLen), b0);
+            const Vec3 t1 = add(scale(dir, shaftLen), b1);
+            appendVertex(b0, radial0, shaftColor);
+            appendVertex(t0, radial0, shaftColor);
+            appendVertex(t1, radial1, shaftColor);
+            appendVertex(b0, radial0, shaftColor);
+            appendVertex(t1, radial1, shaftColor);
+            appendVertex(b1, radial1, shaftColor);
+
+            const Vec3 coneBase0 = add(scale(dir, shaftLen), scale(radial0, coneRadius));
+            const Vec3 coneBase1 = add(scale(dir, shaftLen), scale(radial1, coneRadius));
+            const Vec3 tip = scale(dir, shaftLen + coneLen);
+            appendTri(tip, coneBase0, coneBase1, color);
+            appendTri(scale(dir, shaftLen), coneBase1, coneBase0, scale(color, 0.55f));
+        }
+    }
+
+    const Vec3 ballColor{0.82f, 0.82f, 0.85f};
+    constexpr int ballRings = 8;
+    constexpr int ballSectors = 12;
+    for (int r = 0; r < ballRings; ++r) {
+        const float phi0 = kPi * static_cast<float>(r) / static_cast<float>(ballRings) - kPi * 0.5f;
+        const float phi1 = kPi * static_cast<float>(r + 1) / static_cast<float>(ballRings) - kPi * 0.5f;
+        for (int s = 0; s < ballSectors; ++s) {
+            const float theta0 = 2.0f * kPi * static_cast<float>(s) / static_cast<float>(ballSectors);
+            const float theta1 = 2.0f * kPi * static_cast<float>(s + 1) / static_cast<float>(ballSectors);
+            const Vec3 p00 = scale({std::cos(phi0) * std::cos(theta0), std::sin(phi0), std::cos(phi0) * std::sin(theta0)}, ballRadius);
+            const Vec3 p10 = scale({std::cos(phi1) * std::cos(theta0), std::sin(phi1), std::cos(phi1) * std::sin(theta0)}, ballRadius);
+            const Vec3 p01 = scale({std::cos(phi0) * std::cos(theta1), std::sin(phi0), std::cos(phi0) * std::sin(theta1)}, ballRadius);
+            const Vec3 p11 = scale({std::cos(phi1) * std::cos(theta1), std::sin(phi1), std::cos(phi1) * std::sin(theta1)}, ballRadius);
+            appendVertex(p00, p00, ballColor);
+            appendVertex(p10, p10, ballColor);
+            appendVertex(p11, p11, ballColor);
+            appendVertex(p00, p00, ballColor);
+            appendVertex(p11, p11, ballColor);
+            appendVertex(p01, p01, ballColor);
+        }
+    }
+
+    return vertices;
+}
 
 bool isPartVisible(const VulkanMeshUploadOptions& options, int part)
 {
@@ -130,6 +321,8 @@ void VulkanClearFrameRenderer::destroy(const VulkanDevice& device)
     sliceLineVertexCount_ = 0;
     axesLineVertexResource_.destroy(device);
     axesLineVertexCount_ = 0;
+    axesSolidVertexResource_.destroy(device);
+    axesSolidVertexCount_ = 0;
     pickRenderPass_.destroy(device);
     renderPass_.destroy(device);
 }
@@ -137,7 +330,8 @@ void VulkanClearFrameRenderer::destroy(const VulkanDevice& device)
 bool VulkanClearFrameRenderer::renderClearFrame(
     const VulkanDevice& device,
     const VulkanSwapchain& swapchain,
-    const VkClearColorValue& clearColor)
+    const VkClearColorValue& clearColor,
+    const QMatrix4x4& axesMvp)
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
@@ -162,8 +356,12 @@ bool VulkanClearFrameRenderer::renderClearFrame(
     if (!commandResource_.resetCommandBuffer(device, lastError_)) {
         return false;
     }
-    if (!recordCommandBuffer(
-            commandResource_.buffer(), swapchainFrameResources_.framebuffer(imageIndex), swapchain.extent(), clearColor, false)) {
+    if (!recordCommandBuffer(commandResource_.buffer(),
+                             swapchainFrameResources_.framebuffer(imageIndex),
+                             swapchain.extent(),
+                             clearColor,
+                             false,
+                             axesMvp)) {
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -731,7 +929,7 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
         return false;
     }
     if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
-        return renderClearFrame(device, swapchain, clearColor);
+        return renderClearFrame(device, swapchain, clearColor, axesMvp);
     }
 
     VkDevice vkDevice = device.device();
@@ -851,9 +1049,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
     VkExtent2D extent,
     const QMatrix4x4& axesMvp)
 {
-    if (pipelines_.line.pipeline() == VK_NULL_HANDLE ||
-        !axesLineVertexResource_.isValid() ||
-        axesLineVertexCount_ < 6 ||
+    if ((pipelines_.line.pipeline() == VK_NULL_HANDLE && pipelines_.isoSurface.pipeline() == VK_NULL_HANDLE) ||
         extent.width == 0 ||
         extent.height == 0) {
         return;
@@ -893,17 +1089,48 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
 
     vkCmdSetViewport(commandBuffer, 0, 1, &axesViewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &axesScissor);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.line.pipeline());
 
     VkDeviceSize offsets[] = {0};
-    VkBuffer axesVertexBuffer = axesLineVertexResource_.buffer();
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &axesVertexBuffer, offsets);
+    if (pipelines_.isoSurface.pipeline() != VK_NULL_HANDLE &&
+        axesSolidVertexResource_.isValid() &&
+        axesSolidVertexCount_ > 0) {
+        std::array<float, 20> pushConstants{};
+        std::memcpy(pushConstants.data(), axesMvp.constData(), 16 * sizeof(float));
+        pushConstants[16] = 0.0f;
+        pushConstants[17] = 0.0f;
+        pushConstants[18] = 0.0f;
+        pushConstants[19] = 1.0f;
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.isoSurface.pipeline());
+        vkCmdPushConstants(commandBuffer,
+                           pipelines_.isoSurface.layout(),
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0,
+                           static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
+                           pushConstants.data());
+        VkBuffer axesSolidVertexBuffer = axesSolidVertexResource_.buffer();
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &axesSolidVertexBuffer, offsets);
+        vkCmdDraw(commandBuffer, axesSolidVertexCount_, 1, 0, 0);
+    }
+
+    if (pipelines_.line.pipeline() == VK_NULL_HANDLE ||
+        !axesLineVertexResource_.isValid() ||
+        axesLineVertexCount_ < 6) {
+        return;
+    }
 
     const std::array<std::array<float, 4>, 3> axisColors = {{
         {{0.95f, 0.30f, 0.30f, 1.0f}},
         {{0.35f, 0.90f, 0.35f, 1.0f}},
         {{0.35f, 0.55f, 1.00f, 1.0f}}
     }};
+
+    const uint32_t axisVertexCount = axesLineVertexCount_ / 3;
+    if (axisVertexCount < 2) {
+        return;
+    }
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.line.pipeline());
+    VkBuffer axesVertexBuffer = axesLineVertexResource_.buffer();
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &axesVertexBuffer, offsets);
 
     for (uint32_t axis = 0; axis < 3; ++axis) {
         std::array<float, 20> pushConstants{};
@@ -918,7 +1145,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
                            0,
                            static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
                            pushConstants.data());
-        vkCmdDraw(commandBuffer, 2, 1, axis * 2, 0);
+        vkCmdDraw(commandBuffer, axisVertexCount, 1, axis * axisVertexCount, 0);
     }
 }
 
@@ -2260,12 +2487,10 @@ bool VulkanClearFrameRenderer::createAxesIndicatorResource(const VulkanDevice& d
 {
     axesLineVertexResource_.destroy(device);
     axesLineVertexCount_ = 0;
+    axesSolidVertexResource_.destroy(device);
+    axesSolidVertexCount_ = 0;
 
-    const std::array<float, 18> axesVertices = {
-        0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f
-    };
+    const std::vector<float> axesVertices = buildAxesLineVertices();
     if (!axesLineVertexResource_.uploadHostVisible(device,
                                                    axesVertices.data(),
                                                    static_cast<VkDeviceSize>(axesVertices.size() * sizeof(float)),
@@ -2275,6 +2500,17 @@ bool VulkanClearFrameRenderer::createAxesIndicatorResource(const VulkanDevice& d
         return false;
     }
     axesLineVertexCount_ = static_cast<uint32_t>(axesVertices.size() / 3);
+
+    const std::vector<VulkanMeshVertex> axesSolidVertices = buildAxesSolidVertices();
+    if (!axesSolidVertexResource_.uploadHostVisible(device,
+                                                    axesSolidVertices.data(),
+                                                    static_cast<VkDeviceSize>(axesSolidVertices.size() * sizeof(VulkanMeshVertex)),
+                                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                                    "axes indicator solid vertex",
+                                                    lastError_)) {
+        return false;
+    }
+    axesSolidVertexCount_ = static_cast<uint32_t>(axesSolidVertices.size());
     return true;
 }
 

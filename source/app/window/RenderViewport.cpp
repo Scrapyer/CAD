@@ -125,6 +125,24 @@ void RenderViewport::fitToModel(const glm::vec3& center, float size)
     }
 #endif
 }
+
+void RenderViewport::setStandardView(StandardView view)
+{
+    standardView_ = view;
+    hasStandardView_ = true;
+    glWidget_->setStandardView(view);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setStandardView(view);
+    }
+#endif
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setStandardView(view);
+    }
+#endif
+}
+
 void RenderViewport::applyTheme(const Theme& theme)
 {
     glWidget_->applyTheme(theme);
@@ -224,7 +242,21 @@ void RenderViewport::setPickMode(PickMode mode)
     }
 #endif
 }
-void RenderViewport::setShowLabels(bool show) { glWidget_->setShowLabels(show); }
+void RenderViewport::setShowLabels(bool show)
+{
+    showLabels_ = show;
+    glWidget_->setShowLabels(show);
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setShowLabels(show);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setShowLabels(show);
+    }
+#endif
+}
 void RenderViewport::selectByIds(PickMode mode, const std::vector<int>& ids)
 {
     currentPickMode_ = mode;
@@ -730,6 +762,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
             metalViewport_->setVertexColors(vertexColors_);
         }
         metalViewport_->setPickMode(currentPickMode_);
+        metalViewport_->setShowLabels(showLabels_);
         if (!triangleToElement_.empty()) {
             metalViewport_->setTriangleToElementMap(triangleToElement_);
         }
@@ -747,6 +780,9 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
         if (hasModelFit_) {
             metalViewport_->fitToModel(modelCenter_, modelSize_);
+        }
+        if (hasStandardView_) {
+            metalViewport_->setStandardView(standardView_);
         }
         glWidget_->hide();
         metalViewport_->show();
@@ -776,6 +812,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
         vulkanViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
         vulkanViewport_->setPickMode(currentPickMode_);
+        vulkanViewport_->setShowLabels(showLabels_);
         vulkanViewport_->setObjectColor(objectColor_);
         vulkanViewport_->setModelDisplayMode(displayMode_);
         vulkanViewport_->setOverlayMesh(overlayMesh_);
@@ -821,6 +858,9 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         }
         if (hasModelFit_) {
             vulkanViewport_->fitToModel(modelCenter_, modelSize_);
+        }
+        if (hasStandardView_) {
+            vulkanViewport_->setStandardView(standardView_);
         }
         glWidget_->hide();
         vulkanViewport_->show();

@@ -16,6 +16,7 @@ struct MetalMeshFrameDrawFlags {
     bool clipPreviewLines = false;
     bool selection = false;
     bool axes = false;
+    bool axesSolid = false;
 };
 
 struct MetalMeshFrameResourceHandles {
@@ -53,6 +54,8 @@ struct MetalMeshFrameResourceHandles {
     int selectionVertexCount = 0;
     void* axesLineVertexBuffer = nullptr;
     int axesLineVertexCount = 0;
+    void* axesSolidVertexBuffer = nullptr;
+    int axesSolidVertexCount = 0;
 };
 
 struct MetalMeshFrameUniformSet {
@@ -65,6 +68,7 @@ struct MetalMeshFrameUniformSet {
     MetalMeshUniforms clipPreviewLine{};
     MetalMeshUniforms selection{};
     MetalMeshUniforms axes{};
+    MetalMeshUniforms axesSolid{};
 };
 
 MetalMeshFrameUniformSet buildMetalMeshFrameUniformSet(const QMatrix4x4& mvp,

@@ -227,7 +227,11 @@ void VulkanRenderBackend::setBackgroundGradient(const QVector3D& topColor, const
     }
 }
 
-bool VulkanRenderBackend::renderClearFrame(float red, float green, float blue, float alpha)
+bool VulkanRenderBackend::renderClearFrame(float red,
+                                          float green,
+                                          float blue,
+                                          float alpha,
+                                          const QMatrix4x4& axesMvp)
 {
     lastError_.clear();
     if (!hasSwapchain()) {
@@ -241,7 +245,7 @@ bool VulkanRenderBackend::renderClearFrame(float red, float green, float blue, f
     clearColor.float32[2] = blue;
     clearColor.float32[3] = alpha;
 
-    if (!clearFrameRenderer_->renderClearFrame(*device_, *swapchain_, clearColor)) {
+    if (!clearFrameRenderer_->renderClearFrame(*device_, *swapchain_, clearColor, axesMvp)) {
         lastError_ = clearFrameRenderer_->lastError();
         return false;
     }

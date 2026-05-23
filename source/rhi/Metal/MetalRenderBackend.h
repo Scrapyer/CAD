@@ -47,7 +47,11 @@ public:
     bool uploadIsoSurfaceMesh(const Mesh& mesh);
     bool uploadClipPreviewMesh(const Mesh& mesh);
     bool uploadSelectionLines(const std::vector<float>& lineVertices);
-    bool renderClearFrame(float red, float green, float blue, float alpha = 1.0f);
+    bool renderClearFrame(float red,
+                         float green,
+                         float blue,
+                         float alpha = 1.0f,
+                         const QMatrix4x4& axesMvp = QMatrix4x4());
     bool renderMeshFrame(const QMatrix4x4& mvp,
                          const QVector3D& objectColor,
                          ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe,
@@ -167,6 +171,7 @@ private:
     MetalBufferResource sliceVertexBuffer_;
     MetalBufferResource selectionVertexBuffer_;
     MetalBufferResource axesLineVertexBuffer_;
+    MetalBufferResource axesSolidVertexBuffer_;
     MetalBufferResource frameUniformBuffer_;
     size_t frameUniformSlotSize_ = 0;
     int frameUniformSlotIndex_ = 0;
@@ -174,4 +179,5 @@ private:
     int sliceVertexCount_ = 0;
     int selectionVertexCount_ = 0;
     int axesLineVertexCount_ = 0;
+    int axesSolidVertexCount_ = 0;
 };

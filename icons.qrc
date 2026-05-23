@@ -24,8 +24,15 @@
         <file alias="save.svg">icons/toolbar/save.svg</file>
         <file alias="screenshot.svg">icons/toolbar/screenshot.svg</file>
         <file alias="select.svg">icons/toolbar/select.svg</file>
+        <file alias="sidebar.svg">icons/toolbar/sidebar.svg</file>
         <file alias="slice.svg">icons/toolbar/slice.svg</file>
         <file alias="threshold.svg">icons/toolbar/threshold.svg</file>
+        <file alias="view-back.svg">icons/toolbar/view-back.svg</file>
+        <file alias="view-bottom.svg">icons/toolbar/view-bottom.svg</file>
+        <file alias="view-front.svg">icons/toolbar/view-front.svg</file>
+        <file alias="view-left.svg">icons/toolbar/view-left.svg</file>
+        <file alias="view-right.svg">icons/toolbar/view-right.svg</file>
+        <file alias="view-top.svg">icons/toolbar/view-top.svg</file>
         <file alias="zoom.svg">icons/toolbar/zoom.svg</file>
     </qresource>
 </RCC>

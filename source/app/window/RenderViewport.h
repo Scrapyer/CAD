@@ -42,6 +42,7 @@ public:
     void setObjectColor(const glm::vec3& c);
     void setModelDisplayMode(ModelDisplayMode mode);
     void fitToModel(const glm::vec3& center, float size);
+    void setStandardView(StandardView view);
     void applyTheme(const Theme& theme);
 
     void setColorBarVisible(bool visible);
@@ -119,9 +120,12 @@ private:
     glm::vec3 modelCenter_{0.0f, 0.0f, 0.0f};
     glm::vec3 objectColor_{0.48f, 0.72f, 0.76f};
     ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;
+    StandardView standardView_ = StandardView::Front;
     float modelSize_ = 1.0f;
     bool hasModelFit_ = false;
+    bool hasStandardView_ = false;
     bool colorBarVisible_ = false;
+    bool showLabels_ = false;
     float colorBarMin_ = 0.0f;
     float colorBarMax_ = 1.0f;
     QString colorBarTitle_ = QStringLiteral("Result");

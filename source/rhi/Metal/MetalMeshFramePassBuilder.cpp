@@ -70,6 +70,7 @@ MetalMeshFrameUniformSet buildMetalMeshFrameUniformSet(const QMatrix4x4& mvp,
     setMetalUniformColor(frameUniforms.selection, 1.0f, 0.76f, 0.18f, 1.0f);
     frameUniforms.axes =
         makeMetalMeshUniforms(axesMvp, QVector3D(0.0f, 0.0f, 0.0f), 1.0f);
+    frameUniforms.axesSolid = frameUniforms.axes;
     return frameUniforms;
 }
 
@@ -144,5 +145,10 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
                                     resources.axesLineVertexBuffer,
                                     resources.axesLineVertexCount,
                                     uniforms.axes);
+    framePass.axesSolid = makeVertexDraw(flags.axesSolid,
+                                         resources.meshPipelineState,
+                                         resources.axesSolidVertexBuffer,
+                                         resources.axesSolidVertexCount,
+                                         uniforms.axesSolid);
     return framePass;
 }

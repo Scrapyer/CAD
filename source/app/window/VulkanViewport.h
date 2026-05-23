@@ -54,9 +54,11 @@ public:
     void setEdgeToPartMap(const std::vector<int>& map);
     void setPartVisibility(int partIndex, bool visible);
     void setPickMode(PickMode mode);
+    void setShowLabels(bool show);
     void selectByIds(PickMode mode, const std::vector<int>& ids);
     void highlightParts(const std::vector<int>& partIndices);
     void fitToModel(const glm::vec3& center, float size);
+    void setStandardView(StandardView view);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
 
     const RenderBackendInfo& backendInfo() const { return backend_.info(); }
@@ -103,6 +105,7 @@ private:
     void appendPartOutlineHighlight(std::vector<float>& lineVertices) const;
     bool rebuildSelectionHighlight();
     void updateAxesLabels();
+    void updateIdLabels();
     void updateFrameStats(qint64 frameNs);
     void resetFrameStats();
 
@@ -132,8 +135,10 @@ private:
     QPoint boxOrigin_;
     QRubberBand* rubberBand_ = nullptr;
     std::array<QLabel*, 3> axesLabels_{};
+    std::vector<QLabel*> idLabels_;
     Camera cam_;
     PickMode pickMode_ = PickMode::Element;
+    bool showLabels_ = false;
     FESelection selection_;
     glm::vec3 objectColor_{0.48f, 0.72f, 0.76f};
     ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;

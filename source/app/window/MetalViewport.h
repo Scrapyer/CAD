@@ -63,9 +63,11 @@ public:
     void setTriangleToPartMap(const std::vector<int>& map);
     void setEdgeToPartMap(const std::vector<int>& map);
     void setPickMode(PickMode mode);
+    void setShowLabels(bool show);
     void selectByIds(PickMode mode, const std::vector<int>& ids);
     void setPartVisibility(int partIndex, bool visible);
     void fitToModel(const glm::vec3& center, float size);
+    void setStandardView(StandardView view);
     void setClearColor(float red, float green, float blue, float alpha = 1.0f);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
 
@@ -115,6 +117,7 @@ private:
     std::vector<int> currentSelectionIds() const;
     bool isElementVisibleForSelection(int elementId) const;
     void updateAxesLabels();
+    void updateIdLabels();
     void updateFrameStats(qint64 frameNs);
     void resetFrameStats();
 
@@ -143,6 +146,7 @@ private:
     QPoint boxOrigin_;
     QRubberBand* rubberBand_ = nullptr;
     std::array<QLabel*, 3> axesLabels_{};
+    std::vector<QLabel*> idLabels_;
     Mesh mesh_;
     bool useVertexColor_ = false;
     std::vector<float> vertexColors_;
@@ -161,6 +165,7 @@ private:
     std::unordered_map<int, bool> partVisibility_;
     Camera cam_;
     PickMode pickMode_ = PickMode::Element;
+    bool showLabels_ = false;
     FESelection selection_;
     Mesh overlayMesh_;
     bool overlayVisible_ = false;
