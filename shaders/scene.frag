@@ -44,11 +44,6 @@ vec3 jetColor(float t) {
 void main() {
     vec3 surfaceColor = uUseVertexColor ? vColor : uColor;
 
-    if (uWireframe) {
-        outColor = vec4(surfaceColor, uWireAlpha);
-        return;
-    }
-
     if (uContourMode) {
         // 云图模式：标量值量化 + Jet colormap
         float range = uScalarMax - uScalarMin;
@@ -63,6 +58,11 @@ void main() {
         int idx = partIdx % 8;
         if (idx < 0) idx += 8;
         surfaceColor = kPalette[idx];
+    }
+
+    if (uWireframe) {
+        outColor = vec4(surfaceColor, uWireAlpha);
+        return;
     }
 
     vec3 N = normalize(vNormal);

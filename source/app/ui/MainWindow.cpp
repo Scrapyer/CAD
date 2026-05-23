@@ -33,7 +33,9 @@
 
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <map>
 #include <set>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <QVBoxLayout>
@@ -46,6 +48,7 @@
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QLabel>
+#include <QLocale>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QTreeWidget>
@@ -115,6 +118,46 @@ QString modelDisplayModeText(ModelDisplayMode mode)
         return QStringLiteral("点");
     }
     return QStringLiteral("实体+线框");
+}
+
+QString pickModeText(PickMode mode)
+{
+    switch (mode) {
+    case PickMode::Node:
+        return QStringLiteral("节点");
+    case PickMode::Element:
+        return QStringLiteral("单元");
+    case PickMode::Part:
+        return QStringLiteral("部件");
+    }
+    return QStringLiteral("节点");
+}
+
+QString elementTypeText(ElementType type)
+{
+    switch (type) {
+    case ElementType::BAR2: return QStringLiteral("BAR2");
+    case ElementType::BAR3: return QStringLiteral("BAR3");
+    case ElementType::TRI3: return QStringLiteral("TRI3");
+    case ElementType::TRI6: return QStringLiteral("TRI6");
+    case ElementType::QUAD4: return QStringLiteral("QUAD4");
+    case ElementType::QUAD8: return QStringLiteral("QUAD8");
+    case ElementType::TET4: return QStringLiteral("TET4");
+    case ElementType::TET10: return QStringLiteral("TET10");
+    case ElementType::HEX8: return QStringLiteral("HEX8");
+    case ElementType::HEX20: return QStringLiteral("HEX20");
+    case ElementType::WEDGE6: return QStringLiteral("WEDGE6");
+    case ElementType::PYRAMID5: return QStringLiteral("PYRAMID5");
+    }
+    return QStringLiteral("Unknown");
+}
+
+QString vec3Text(const glm::vec3& value)
+{
+    return QStringLiteral("%1, %2, %3")
+        .arg(value.x, 0, 'g', 7)
+        .arg(value.y, 0, 'g', 7)
+        .arg(value.z, 0, 'g', 7);
 }
 
 struct StandardViewActionSpec {
@@ -258,6 +301,12 @@ MainWindow::MainWindow() {
             this, [this](const QPoint& globalPos) {
         QTimer::singleShot(0, this, [this, globalPos]() {
             if (viewportContextMenu_) {
+                const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+                viewportContextMenu_->setModelVisibilityState(!activeModel().isEmpty(),
+                                                              !partIndices.empty(),
+                                                              anyVisibilityPartsVisible(partIndices),
+                                                              anyVisibilityPartsHidden(partIndices),
+                                                              hasHiddenModelParts());
                 viewportContextMenu_->popup(renderViewport_, globalPos);
             }
         });
@@ -305,6 +354,16 @@ MainWindow::MainWindow() {
             statusLabel_->setText(QStringLiteral("  显示模式：%1").arg(modelDisplayModeText(mode)));
         }
     });
+    connect(viewportContextMenu_, &ViewportContextMenu::modelInfoRequested,
+            this, &MainWindow::showModelInfoDialog);
+    connect(viewportContextMenu_, &ViewportContextMenu::hideSelectedRequested,
+            this, &MainWindow::hideSelectedModelParts);
+    connect(viewportContextMenu_, &ViewportContextMenu::showSelectedRequested,
+            this, &MainWindow::showSelectedModelParts);
+    connect(viewportContextMenu_, &ViewportContextMenu::isolateSelectedRequested,
+            this, &MainWindow::isolateSelectedModelParts);
+    connect(viewportContextMenu_, &ViewportContextMenu::showAllRequested,
+            this, &MainWindow::showAllModelParts);
     connect(viewportContextMenu_, &ViewportContextMenu::backgroundSettingsRequested,
             this, &MainWindow::showBackgroundSettingsDialog);
     connect(viewportContextMenu_, &ViewportContextMenu::gridVisibleChanged,
@@ -346,6 +405,9 @@ MainWindow::MainWindow() {
         renderViewport_->setTriangleToElementMap(triToElem);
         renderViewport_->setVertexToNodeMap(vertexToNode);
         renderViewport_->setObjectColor(glm::vec3(0.55f, 0.75f, 0.73f));
+        lastSelectionMode_ = PickMode::Node;
+        lastSelectionIds_.clear();
+        lastSelectedPartIndices_.clear();
         if (size > 0) {
             renderViewport_->fitToModel(center, size);
         }
@@ -365,6 +427,7 @@ MainWindow::MainWindow() {
         renderViewport_->setTriangleToPartMap(triToPart);
         renderViewport_->setEdgeToPartMap(edgeToPart);
         partsPanel_->setParts(modelName, parts, renderViewport_->partColors());
+        syncPartVisibilityToViewport();
         updateProjectTreeSummary();
         updateStatusSummaries();
     });
@@ -400,14 +463,39 @@ MainWindow::MainWindow() {
     });
 
     connect(partsPanel_, &PartsPanel::partVisibilityChanged,
-            renderViewport_, &RenderViewport::setPartVisibility);
+            this, [this](int partIndex, bool visible) {
+        const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+        renderViewport_->setPartVisibility(partIndex, visible);
+        if (!partIndices.empty()) {
+            rememberVisibilitySelection(partIndices, areVisibilityPartsVisible(partIndices));
+        }
+    });
 
     connect(partsPanel_, &PartsPanel::partSelectionChanged,
-            renderViewport_, &RenderViewport::highlightParts);
+            this, [this](const std::vector<int>& selectedParts) {
+        lastSelectionMode_ = PickMode::Part;
+        lastSelectionIds_ = selectedParts;
+        lastSelectedPartIndices_ = selectedParts;
+        updatePickModeSummary(PickMode::Part);
+        renderViewport_->highlightParts(selectedParts);
+    });
 
     // 部件拾取 → 同步模型树选中状态
     connect(renderViewport_, &RenderViewport::partsPicked,
-            partsPanel_, &PartsPanel::selectParts);
+            this, [this](const std::vector<int>& partIndices) {
+        lastSelectedPartIndices_ = partIndices;
+        partsPanel_->selectParts(partIndices);
+    });
+
+    connect(renderViewport_, &RenderViewport::selectionChanged,
+            this, [this](PickMode mode, int, const std::vector<int>& ids) {
+        lastSelectionMode_ = mode;
+        lastSelectionIds_ = ids;
+        updatePickModeSummary(mode);
+        if (mode != PickMode::Part || ids.empty()) {
+            lastSelectedPartIndices_.clear();
+        }
+    });
 
     // ── 结果面板连接 ──
 
@@ -545,6 +633,9 @@ void MainWindow::clearCurrentLayout()
     thresholdPanel_->clearResults();
     if (animController_) animController_->setFrameCount(0);
     loadedResultFrameCount_ = 0;
+    lastSelectionMode_ = PickMode::Node;
+    lastSelectionIds_.clear();
+    lastSelectedPartIndices_.clear();
     importPaths_ = ImportPathState{};
     feModelPanel_->clearModel();
     if (statusProgress_) statusProgress_->setVisible(false);
@@ -786,6 +877,211 @@ void MainWindow::updateStatusSummaries() {
         vertexSummaryLabel_->setText(QString("顶点数 %1").arg(renderViewport_->vertexCount()));
     if (triangleSummaryLabel_)
         triangleSummaryLabel_->setText(QString("三角面 %1").arg(renderViewport_->triangleCount()));
+}
+
+void MainWindow::updatePickModeSummary(PickMode mode)
+{
+    if (pickModeSummaryLabel_) {
+        pickModeSummaryLabel_->setText(QStringLiteral("拾取模式：%1").arg(pickModeText(mode)));
+    }
+}
+
+std::vector<int> MainWindow::selectedPartIndicesForVisibility() const
+{
+    const FEModel& model = activeModel();
+    if (model.parts.empty()) {
+        return {};
+    }
+
+    std::set<int> partSet;
+    if (lastSelectionMode_ == PickMode::Part) {
+        for (int partIndex : lastSelectedPartIndices_) {
+            if (partIndex >= 0 && partIndex < static_cast<int>(model.parts.size())) {
+                partSet.insert(partIndex);
+            }
+        }
+    } else if (lastSelectionMode_ == PickMode::Element) {
+        const std::unordered_set<int> selected(lastSelectionIds_.begin(), lastSelectionIds_.end());
+        for (int partIndex = 0; partIndex < static_cast<int>(model.parts.size()); ++partIndex) {
+            const FEPart& part = model.parts[partIndex];
+            for (int elementId : part.elementIds) {
+                if (selected.count(elementId) > 0) {
+                    partSet.insert(partIndex);
+                    break;
+                }
+            }
+        }
+    } else {
+        const std::unordered_set<int> selected(lastSelectionIds_.begin(), lastSelectionIds_.end());
+        for (int partIndex = 0; partIndex < static_cast<int>(model.parts.size()); ++partIndex) {
+            const FEPart& part = model.parts[partIndex];
+            for (int nodeId : part.nodeIds) {
+                if (selected.count(nodeId) > 0) {
+                    partSet.insert(partIndex);
+                    break;
+                }
+            }
+        }
+    }
+
+    return std::vector<int>(partSet.begin(), partSet.end());
+}
+
+bool MainWindow::areVisibilityPartsVisible(const std::vector<int>& partIndices) const
+{
+    if (!partsPanel_ || partIndices.empty()) {
+        return false;
+    }
+
+    std::set<int> expected(partIndices.begin(), partIndices.end());
+    for (const auto& [partIndex, visible] : partsPanel_->partVisibilityStates()) {
+        if (expected.count(partIndex) > 0 && !visible) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool MainWindow::anyVisibilityPartsVisible(const std::vector<int>& partIndices) const
+{
+    if (!partsPanel_ || partIndices.empty()) {
+        return false;
+    }
+
+    std::set<int> expected(partIndices.begin(), partIndices.end());
+    for (const auto& [partIndex, visible] : partsPanel_->partVisibilityStates()) {
+        if (expected.count(partIndex) > 0 && visible) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MainWindow::anyVisibilityPartsHidden(const std::vector<int>& partIndices) const
+{
+    if (!partsPanel_ || partIndices.empty()) {
+        return false;
+    }
+
+    std::set<int> expected(partIndices.begin(), partIndices.end());
+    for (const auto& [partIndex, visible] : partsPanel_->partVisibilityStates()) {
+        if (expected.count(partIndex) > 0 && !visible) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MainWindow::hasHiddenModelParts() const
+{
+    if (!partsPanel_) {
+        return false;
+    }
+
+    for (const auto& [partIndex, visible] : partsPanel_->partVisibilityStates()) {
+        (void)partIndex;
+        if (!visible) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void MainWindow::syncPartVisibilityToViewport()
+{
+    if (!renderViewport_ || !partsPanel_) {
+        return;
+    }
+
+    for (const auto& [partIndex, visible] : partsPanel_->partVisibilityStates()) {
+        renderViewport_->setPartVisibility(partIndex, visible);
+    }
+}
+
+void MainWindow::rememberVisibilitySelection(const std::vector<int>& partIndices, bool highlightVisibleParts)
+{
+    lastSelectionMode_ = PickMode::Part;
+    lastSelectionIds_ = partIndices;
+    lastSelectedPartIndices_ = partIndices;
+
+    if (partsPanel_) {
+        partsPanel_->selectParts(partIndices);
+    }
+
+    if (highlightVisibleParts && renderViewport_) {
+        renderViewport_->highlightParts(partIndices);
+    }
+}
+
+void MainWindow::hideSelectedModelParts()
+{
+    const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+    if (partIndices.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  请先选择要隐藏的部件、单元或节点"));
+        }
+        return;
+    }
+
+    for (int partIndex : partIndices) {
+        partsPanel_->setPartVisibleByIndex(partIndex, false, true);
+    }
+    rememberVisibilitySelection(partIndices, false);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已隐藏 %1 个部件").arg(partIndices.size()));
+    }
+}
+
+void MainWindow::showSelectedModelParts()
+{
+    const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+    if (partIndices.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  请先选择要显示的部件、单元或节点"));
+        }
+        return;
+    }
+
+    for (int partIndex : partIndices) {
+        partsPanel_->setPartVisibleByIndex(partIndex, true, true);
+    }
+    rememberVisibilitySelection(partIndices, true);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已显示 %1 个部件").arg(partIndices.size()));
+    }
+}
+
+void MainWindow::isolateSelectedModelParts()
+{
+    const std::vector<int> partIndices = selectedPartIndicesForVisibility();
+    if (partIndices.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  请先选择要隔离显示的部件、单元或节点"));
+        }
+        return;
+    }
+
+    partsPanel_->isolateParts(partIndices, true);
+    rememberVisibilitySelection(partIndices, true);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已仅显示 %1 个部件").arg(partIndices.size()));
+    }
+}
+
+void MainWindow::showAllModelParts()
+{
+    const FEModel& model = activeModel();
+    if (model.parts.empty()) {
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  当前没有可显示的部件"));
+        }
+        return;
+    }
+
+    partsPanel_->setAllPartsVisible(true, true);
+    if (statusLabel_) {
+        statusLabel_->setText(QStringLiteral("  已显示全部部件"));
+    }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1075,25 +1371,58 @@ void MainWindow::setupToolBar() {
 
     toolbar_->addSeparator();
 
-    const std::vector<std::pair<QString, QString>> viewActions = {
-        {"选择", "select"},
-        {"平移", "pan"},
-        {"旋转", "rotate"},
-        {"缩放", "zoom"},
-        {"适配", "fit"}
+    struct ViewToolActionSpec {
+        QString text;
+        QString icon;
+        ViewportInteractionMode mode;
+    };
+    auto* viewToolGroup = new QActionGroup(this);
+    viewToolGroup->setExclusive(true);
+    const std::vector<ViewToolActionSpec> viewActions = {
+        {QStringLiteral("拾取"), QStringLiteral("select"), ViewportInteractionMode::Pick},
+        {QStringLiteral("平移"), QStringLiteral("pan"), ViewportInteractionMode::Pan},
+        {QStringLiteral("旋转"), QStringLiteral("rotate"), ViewportInteractionMode::Rotate},
+        {QStringLiteral("缩放"), QStringLiteral("zoom"), ViewportInteractionMode::Zoom}
     };
     for (const auto& actionSpec : viewActions) {
-        const QString text = actionSpec.first;
-        const QString icon = actionSpec.second;
-        auto* action = toolbar_->addAction(toolbarIcon(icon), text);
-        action->setToolTip(QString("%1视图入口").arg(text));
-        connect(action, &QAction::triggered, this, [this, text]() {
-            if (text == "适配" && renderViewport_) {
-                renderViewport_->refresh();
-            }
-            statusLabel_->setText(QString("  %1入口已预留").arg(text));
-        });
+        auto* action = toolbar_->addAction(toolbarIcon(actionSpec.icon), actionSpec.text);
+        action->setCheckable(true);
+        action->setData(static_cast<int>(actionSpec.mode));
+        action->setToolTip(actionSpec.mode == ViewportInteractionMode::Pick
+            ? QStringLiteral("拾取工具：左键按当前拾取模式选择对象，拖拽框选")
+            : QStringLiteral("%1视图工具").arg(actionSpec.text));
+        if (actionSpec.mode == ViewportInteractionMode::Pick) {
+            action->setChecked(true);
+        }
+        viewToolGroup->addAction(action);
     }
+    connect(viewToolGroup, &QActionGroup::triggered, this, [this](QAction* action) {
+        const auto mode = static_cast<ViewportInteractionMode>(action->data().toInt());
+        if (renderViewport_) {
+            renderViewport_->setInteractionMode(mode);
+        }
+        if (statusLabel_) {
+            if (mode == ViewportInteractionMode::Pick) {
+                statusLabel_->setText(QStringLiteral("  拾取工具：当前按%1拾取").arg(pickModeText(lastSelectionMode_)));
+            } else {
+                statusLabel_->setText(QStringLiteral("  视图工具：%1").arg(action->text()));
+            }
+        }
+    });
+
+    auto* fitAction = toolbar_->addAction(toolbarIcon("fit"), "适配");
+    fitAction->setToolTip("适配当前模型到窗口");
+    connect(fitAction, &QAction::triggered, this, [this]() {
+        const FEModel& model = activeModel();
+        if (renderViewport_ && !model.isEmpty()) {
+            renderViewport_->fitToModel(model.computeCenter(), model.computeSize());
+        } else if (renderViewport_) {
+            renderViewport_->refresh();
+        }
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  已适配窗口"));
+        }
+    });
 
     toolbar_->addSeparator();
 
@@ -1313,8 +1642,15 @@ void MainWindow::setupToolBar() {
 
     // ── 连接 ──
     connect(pickGroup_, &QActionGroup::triggered, this, [this](QAction* action) {
-        int mode = action->data().toInt();
-        renderViewport_->setPickMode(static_cast<PickMode>(mode));
+        const auto mode = static_cast<PickMode>(action->data().toInt());
+        lastSelectionMode_ = mode;
+        lastSelectionIds_.clear();
+        lastSelectedPartIndices_.clear();
+        renderViewport_->setPickMode(mode);
+        updatePickModeSummary(mode);
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  拾取模式：%1").arg(pickModeText(mode)));
+        }
     });
 }
 
@@ -1408,6 +1744,9 @@ void MainWindow::setupStatusBar() {
     statusProgress_->setVisible(false);
     sb->addPermanentWidget(statusProgress_);
 
+    pickModeSummaryLabel_ = new QLabel(QStringLiteral("拾取模式：节点"));
+    sb->addPermanentWidget(pickModeSummaryLabel_);
+
     fpsSummaryLabel_ = new QLabel("FPS --");
     sb->addPermanentWidget(fpsSummaryLabel_);
 
@@ -1427,6 +1766,7 @@ void MainWindow::setupStatusBar() {
     fpsTimer->setInterval(500);
     connect(fpsTimer, &QTimer::timeout, this, &MainWindow::updateStatusSummaries);
     fpsTimer->start();
+    updatePickModeSummary(PickMode::Node);
     updateStatusSummaries();
 }
 
@@ -1603,6 +1943,163 @@ void MainWindow::showBackgroundSettingsDialog()
     dialog.exec();
 }
 
+void MainWindow::showModelInfoDialog()
+{
+    const FEModel& model = activeModel();
+    if (model.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("模型信息"), QStringLiteral("当前没有已加载的模型。"));
+        return;
+    }
+
+    const FERenderData& rd = displayRenderData();
+    const Mesh& mesh = rd.mesh;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("模型信息"));
+    dialog.resize(620, 560);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(8);
+
+    auto* tree = new QTreeWidget(&dialog);
+    tree->setColumnCount(2);
+    tree->setHeaderLabels({QStringLiteral("项目"), QStringLiteral("值")});
+    tree->header()->setStretchLastSection(true);
+    tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    tree->setAlternatingRowColors(false);
+    layout->addWidget(tree, 1);
+
+    auto addGroup = [tree](const QString& title) {
+        auto* item = new QTreeWidgetItem(tree);
+        item->setText(0, title);
+        QFont font = item->font(0);
+        font.setBold(true);
+        item->setFont(0, font);
+        return item;
+    };
+    auto addRow = [](QTreeWidgetItem* parent, const QString& name, const QString& value) {
+        auto* item = new QTreeWidgetItem(parent);
+        item->setText(0, name);
+        item->setText(1, value);
+    };
+    auto numberText = [](size_t value) {
+        return QLocale().toString(static_cast<qlonglong>(value));
+    };
+
+    const QString filePath = QString::fromStdString(model.filePath);
+    const QFileInfo fileInfo(filePath);
+    const QString modelName = model.name.empty()
+        ? (fileInfo.fileName().isEmpty() ? QStringLiteral("未命名模型") : fileInfo.fileName())
+        : QString::fromStdString(model.name);
+    const QString formatText = fileInfo.suffix().isEmpty()
+        ? QStringLiteral("未知")
+        : fileInfo.suffix().toUpper();
+
+    QTreeWidgetItem* basic = addGroup(QStringLiteral("基本信息"));
+    addRow(basic, QStringLiteral("模型名称"), modelName);
+    addRow(basic, QStringLiteral("文件路径"), filePath.isEmpty() ? QStringLiteral("未知") : filePath);
+    addRow(basic, QStringLiteral("文件格式"), formatText);
+    addRow(basic, QStringLiteral("单位"), QStringLiteral("未知"));
+    addRow(basic, QStringLiteral("当前渲染后端"),
+           renderViewport_ ? QString::fromLatin1(renderBackendName(renderViewport_->activeRenderBackendKind()))
+                           : QStringLiteral("未知"));
+
+    QTreeWidgetItem* counts = addGroup(QStringLiteral("规模统计"));
+    addRow(counts, QStringLiteral("节点数"), numberText(model.nodes.size()));
+    addRow(counts, QStringLiteral("单元数"), numberText(model.elements.size()));
+    addRow(counts, QStringLiteral("部件数"), numberText(model.parts.size()));
+    addRow(counts, QStringLiteral("节点集数"), numberText(model.nodeSets.size()));
+    addRow(counts, QStringLiteral("单元集数"), numberText(model.elementSets.size()));
+    addRow(counts, QStringLiteral("标量场数"), numberText(model.scalarFields.size()));
+    addRow(counts, QStringLiteral("矢量场数"), numberText(model.vectorFields.size()));
+    addRow(counts, QStringLiteral("结果帧数"), QLocale().toString(loadedResultFrameCount_));
+    addRow(counts, QStringLiteral("渲染顶点数"), numberText(mesh.vertices.size() / 6));
+    addRow(counts, QStringLiteral("渲染三角面数"), numberText(mesh.indices.size() / 3));
+    addRow(counts, QStringLiteral("渲染边线数"), numberText(mesh.edgeIndices.size() / 2));
+
+    glm::vec3 bbMin(0.0f);
+    glm::vec3 bbMax(0.0f);
+    model.computeBoundingBox(bbMin, bbMax);
+    const glm::vec3 span = bbMax - bbMin;
+    QTreeWidgetItem* bounds = addGroup(QStringLiteral("空间尺寸"));
+    addRow(bounds, QStringLiteral("包围盒 Min"), vec3Text(bbMin));
+    addRow(bounds, QStringLiteral("包围盒 Max"), vec3Text(bbMax));
+    addRow(bounds, QStringLiteral("尺寸 X/Y/Z"), vec3Text(span));
+    addRow(bounds, QStringLiteral("几何中心"), vec3Text(model.computeCenter()));
+    addRow(bounds, QStringLiteral("最大尺寸/对角线"), QString::number(model.computeSize(), 'g', 7));
+
+    std::map<ElementType, int> elementTypeCounts;
+    for (const auto& [id, element] : model.elements) {
+        (void)id;
+        ++elementTypeCounts[element.type];
+    }
+    QTreeWidgetItem* elementTypes = addGroup(QStringLiteral("单元类型统计"));
+    if (elementTypeCounts.empty()) {
+        addRow(elementTypes, QStringLiteral("无"), QStringLiteral("0"));
+    } else {
+        for (const auto& [type, count] : elementTypeCounts) {
+            addRow(elementTypes, elementTypeText(type), QLocale().toString(count));
+        }
+    }
+
+    int visiblePartCount = 0;
+    int hiddenPartCount = 0;
+    if (partsPanel_) {
+        for (const auto& [partIndex, visible] : partsPanel_->partVisibilityStates()) {
+            (void)partIndex;
+            visible ? ++visiblePartCount : ++hiddenPartCount;
+        }
+    } else {
+        visiblePartCount = static_cast<int>(model.parts.size());
+    }
+
+    QString largestPartName = QStringLiteral("无");
+    size_t largestPartElements = 0;
+    for (const FEPart& part : model.parts) {
+        if (part.elementIds.size() > largestPartElements) {
+            largestPartElements = part.elementIds.size();
+            largestPartName = QString::fromStdString(part.name);
+            if (largestPartName.isEmpty()) {
+                largestPartName = QStringLiteral("未命名部件");
+            }
+        }
+    }
+    QTreeWidgetItem* parts = addGroup(QStringLiteral("部件摘要"));
+    addRow(parts, QStringLiteral("可见部件"), QLocale().toString(visiblePartCount));
+    addRow(parts, QStringLiteral("隐藏部件"), QLocale().toString(hiddenPartCount));
+    addRow(parts, QStringLiteral("当前选中部件"), numberText(lastSelectedPartIndices_.size()));
+    addRow(parts, QStringLiteral("最大部件"),
+           QStringLiteral("%1（%2 单元）").arg(largestPartName, numberText(largestPartElements)));
+
+    tree->expandAll();
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::accept);
+    layout->addWidget(buttons);
+
+    dialog.setStyleSheet(QStringLiteral(
+        "QDialog { background: %1; color: %2; }"
+        "QTreeWidget { background: %3; color: %2; border: 1px solid %4; border-radius: 6px; }"
+        "QTreeWidget::item { background: %3; color: %2; padding: 4px; }"
+        "QTreeWidget::item:hover { background: %4; }"
+        "QTreeWidget::item:selected { background: %5; color: %2; }"
+        "QTreeWidget::branch { background: %3; }"
+        "QHeaderView::section { background: %3; color: %6; border: none; padding: 5px 8px; font-weight: bold; }"
+        "QPushButton { background: %6; color: %7; border: none; border-radius: 6px; padding: 6px 18px; }"
+        "QPushButton:hover { background: %8; }"
+    ).arg(currentTheme_.base,
+          currentTheme_.text,
+          currentTheme_.mantle,
+          currentTheme_.surface0,
+          currentTheme_.surface1,
+          currentTheme_.blue,
+          currentTheme_.crust,
+          currentTheme_.teal));
+    dialog.exec();
+}
+
 void MainWindow::applyTheme(const Theme& t) {
     // 主题按钮文字更新
     themeAction_->setText(t.name);
@@ -1701,6 +2198,10 @@ void MainWindow::applyTheme(const Theme& t) {
         QString("color: %1; font-size: 11px; padding-right: 8px;").arg(t.blue));
     const QString summaryStyle =
         QString("color: %1; font-size: 11px; padding: 0 8px;").arg(t.subtext1);
+    if (pickModeSummaryLabel_) {
+        pickModeSummaryLabel_->setStyleSheet(
+            QString("color: %1; font-size: 11px; font-weight: 600; padding: 0 8px;").arg(t.blue));
+    }
     if (fpsSummaryLabel_) fpsSummaryLabel_->setStyleSheet(summaryStyle);
     if (frameTimeSummaryLabel_) frameTimeSummaryLabel_->setStyleSheet(summaryStyle);
     if (vertexSummaryLabel_) vertexSummaryLabel_->setStyleSheet(summaryStyle);
@@ -1783,6 +2284,7 @@ void MainWindow::pushRenderDataToGL(const FERenderData& rd)
     renderViewport_->setVertexToNodeMap(rd.vertexToNode);
     renderViewport_->setTriangleToPartMap(rd.triangleToPart);
     renderViewport_->setEdgeToPartMap(rd.edgeToPart);
+    syncPartVisibilityToViewport();
 }
 
 void MainWindow::reapplyContourIfNeeded()
@@ -1893,13 +2395,16 @@ void MainWindow::applyContour(const FEScalarField& field, const QString& title)
 
     const FERenderData& rd = displayRenderData();
     int vertCount = static_cast<int>(rd.mesh.vertices.size() / 6);
-    if (vertCount == 0) return;
+    int edgeVertCount = static_cast<int>(rd.mesh.edgeVertices.size() / 3);
+    if (vertCount == 0 && edgeVertCount == 0) return;
 
     const int numBands = 9;
 
     FEMappedScalars mapped = FEResultMapper::mapScalarToVertices(field, rd, model);
+    if (mapped.scalars.empty() && mapped.edgeScalars.empty()) return;
 
     renderViewport_->setVertexScalars(mapped.scalars, mapped.minValue, mapped.maxValue, numBands);
+    renderViewport_->setEdgeScalars(mapped.edgeScalars, mapped.minValue, mapped.maxValue, numBands);
     renderViewport_->setColorBarVisible(true);
     renderViewport_->setColorBarRange(mapped.minValue, mapped.maxValue);
     renderViewport_->setColorBarTitle(title);

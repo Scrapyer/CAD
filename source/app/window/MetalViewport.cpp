@@ -1,5 +1,6 @@
 #include "MetalViewport.h"
 
+#include "ScreenSpacePicking.h"
 #include "ViewportGridMetrics.h"
 
 #include <QEvent>
@@ -28,11 +29,11 @@ void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
     }
 }
 
-constexpr int kAxesLabelSize = 24;
+constexpr int kAxesLabelSize = 30;
 constexpr int kAxesMargin = 8;
-constexpr int kAxesViewportSize = 120;
+constexpr int kAxesViewportSize = 152;
 constexpr int kMaxIdLabels = 160;
-constexpr float kAxesClickPadding = 7.0f;
+constexpr float kAxesClickPadding = 10.0f;
 
 glm::mat4 depthZeroToOneRemap()
 {
@@ -70,23 +71,6 @@ void applyStandardViewToCamera(Camera& camera, StandardView view)
         camera.pitch = -89.0f;
         break;
     }
-}
-
-float distanceSquaredToSegment(const QPointF& p, const QPointF& a, const QPointF& b)
-{
-    const QPointF ab = b - a;
-    const QPointF ap = p - a;
-    const float len2 = static_cast<float>(ab.x() * ab.x() + ab.y() * ab.y());
-    if (len2 <= 1.0e-6f) {
-        const QPointF d = p - a;
-        return static_cast<float>(d.x() * d.x() + d.y() * d.y());
-    }
-
-    float t = static_cast<float>((ap.x() * ab.x() + ap.y() * ab.y()) / len2);
-    t = std::clamp(t, 0.0f, 1.0f);
-    const QPointF closest(a.x() + ab.x() * t, a.y() + ab.y() * t);
-    const QPointF d = p - closest;
-    return static_cast<float>(d.x() * d.x() + d.y() * d.y());
 }
 
 Mesh makeClipPlanePreviewMesh(const glm::vec3& bbMin,
@@ -186,7 +170,7 @@ MetalViewport::MetalViewport(QWidget* parent)
         axesLabels_[i]->setFixedSize(kAxesLabelSize, kAxesLabelSize);
         QFont labelFont = axesLabels_[i]->font();
         labelFont.setBold(true);
-        labelFont.setPixelSize(14);
+        labelFont.setPixelSize(17);
         axesLabels_[i]->setFont(labelFont);
         axesLabels_[i]->setStyleSheet(QStringLiteral("QLabel { color: %1; background: transparent; }")
                                           .arg(axesColors[i]));
@@ -289,7 +273,12 @@ void MetalViewport::setMesh(const Mesh& mesh)
     elementToPart_.clear();
     partColors_.clear();
     partVisibility_.clear();
-    hasMesh_ = !mesh_.vertices.empty() && !mesh_.indices.empty();
+    vertexColors_.clear();
+    vertexScalars_.clear();
+    edgeScalars_.clear();
+    useVertexColor_ = false;
+    hasMesh_ = (!mesh_.vertices.empty() && !mesh_.indices.empty()) ||
+        (!mesh_.edgeVertices.empty() && !mesh_.edgeIndices.empty());
     meshDirty_ = true;
     selection_.clear();
     selectionDirty_ = true;
@@ -322,6 +311,7 @@ void MetalViewport::setVertexColors(const std::vector<float>& colors)
 {
     vertexColors_ = colors;
     vertexScalars_.clear();
+    edgeScalars_.clear();
     useVertexColor_ = true;
     meshDirty_ = true;
     renderFrame();
@@ -330,6 +320,9 @@ void MetalViewport::setVertexColors(const std::vector<float>& colors)
 void MetalViewport::setUseVertexColor(bool use)
 {
     useVertexColor_ = use;
+    if (!edgeScalars_.empty()) {
+        meshDirty_ = true;
+    }
     updateScalarBufferOrMarkDirty(useVertexColor_ && !vertexScalars_.empty());
     renderFrame();
 }
@@ -345,7 +338,21 @@ void MetalViewport::setVertexScalars(const std::vector<float>& scalars,
     scalarMax_ = maxVal;
     numBands_ = std::max(1, numBands);
     useVertexColor_ = true;
-    updateScalarBufferOrMarkDirty(true);
+    updateScalarBufferOrMarkDirty(!vertexScalars_.empty());
+    renderFrame();
+}
+
+void MetalViewport::setEdgeScalars(const std::vector<float>& scalars,
+                                   float minVal,
+                                   float maxVal,
+                                   int numBands)
+{
+    edgeScalars_ = scalars;
+    scalarMin_ = minVal;
+    scalarMax_ = maxVal;
+    numBands_ = std::max(1, numBands);
+    useVertexColor_ = true;
+    meshDirty_ = true;
     renderFrame();
 }
 
@@ -469,6 +476,7 @@ void MetalViewport::setEdgeToPartMap(const std::vector<int>& map)
     edgeToPart_ = map;
     int edgeCount = static_cast<int>(mesh_.edgeIndices.size() / 2);
     alignSize(edgeToPart_, edgeCount, -1);
+    rebuildPartLookup();
     meshDirty_ = true;
     renderFrame();
 }
@@ -484,6 +492,21 @@ void MetalViewport::setPickMode(PickMode mode)
     }
     updateIdLabels();
     renderFrame();
+}
+
+void MetalViewport::setInteractionMode(ViewportInteractionMode mode)
+{
+    interactionMode_ = mode;
+    rotating_ = false;
+    panning_ = false;
+    zooming_ = false;
+    leftPressForPick_ = false;
+    rightPressForDeselect_ = false;
+    boxSelecting_ = false;
+    boxDeselecting_ = false;
+    if (rubberBand_) {
+        rubberBand_->hide();
+    }
 }
 
 void MetalViewport::setShowLabels(bool show)
@@ -502,7 +525,7 @@ void MetalViewport::selectByIds(PickMode mode, const std::vector<int>& ids)
 
     if (mode == PickMode::Node) {
         for (int id : ids) {
-            if (id >= 0) {
+            if (id >= 0 && isNodeVisibleForSelection(id)) {
                 selection_.selectedNodes.insert(id);
             }
         }
@@ -532,10 +555,24 @@ void MetalViewport::selectByIds(PickMode mode, const std::vector<int>& ids)
 void MetalViewport::setPartVisibility(int partIndex, bool visible)
 {
     partVisibility_[partIndex] = visible;
-    if (!visible && partIndex >= 0 && partIndex < static_cast<int>(partElementIds_.size())) {
-        for (int element : partElementIds_[static_cast<size_t>(partIndex)]) {
-            selection_.selectedElements.erase(element);
+    bool selectionWasChanged = false;
+    for (auto it = selection_.selectedElements.begin(); it != selection_.selectedElements.end();) {
+        if (!isElementVisibleForSelection(*it)) {
+            it = selection_.selectedElements.erase(it);
+            selectionWasChanged = true;
+        } else {
+            ++it;
         }
+    }
+    for (auto it = selection_.selectedNodes.begin(); it != selection_.selectedNodes.end();) {
+        if (!isNodeVisibleForSelection(*it)) {
+            it = selection_.selectedNodes.erase(it);
+            selectionWasChanged = true;
+        } else {
+            ++it;
+        }
+    }
+    if (selectionWasChanged) {
         const std::vector<int> selectedIds = currentSelectionIds();
         selectionDirty_ = true;
         emit selectionChanged(pickMode_, static_cast<int>(selectedIds.size()), selectedIds);
@@ -668,6 +705,7 @@ bool MetalViewport::uploadMeshIfNeeded()
     options.useVertexColor = useVertexColor_;
     options.vertexColors = vertexColors_;
     options.vertexScalars = vertexScalars_;
+    options.edgeScalars = edgeScalars_;
     options.scalarMin = scalarMin_;
     options.scalarMax = scalarMax_;
     options.numBands = numBands_;
@@ -780,14 +818,17 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
     switch (event->type()) {
     case QEvent::MouseButtonPress: {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        const bool selectionGesture =
+        const bool modifierSelection =
             (mouseEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) != 0;
-        if (!selectionGesture && mouseEvent->button() == Qt::LeftButton) {
+        const bool selectionGesture = modifierSelection ||
+            interactionMode_ == ViewportInteractionMode::Pick;
+        if (!modifierSelection && mouseEvent->button() == Qt::LeftButton) {
             StandardView view = StandardView::Front;
             if (standardViewFromAxesClick(mouseEvent->position(), &view)) {
                 setStandardView(view);
                 rotating_ = false;
                 panning_ = false;
+                zooming_ = false;
                 leftPressForPick_ = false;
                 rightPressForDeselect_ = false;
                 boxSelecting_ = false;
@@ -801,17 +842,25 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
         pressMousePos_ = mouseEvent->position();
         boxOrigin_ = mouseEvent->position().toPoint();
         mouseMovedSincePress_ = false;
-        leftPressForPick_ = mouseEvent->button() == Qt::LeftButton;
+        leftPressForPick_ = mouseEvent->button() == Qt::LeftButton && selectionGesture;
         rightPressForDeselect_ = mouseEvent->button() == Qt::RightButton;
         boxSelecting_ = leftPressForPick_ && selectionGesture;
-        boxDeselecting_ = rightPressForDeselect_ && selectionGesture;
+        boxDeselecting_ = rightPressForDeselect_ && modifierSelection;
         if (boxSelecting_ || boxDeselecting_) {
             updateRubberBand(boxOrigin_);
         }
-        rotating_ = mouseEvent->button() == Qt::LeftButton && !boxSelecting_;
+        rotating_ = mouseEvent->button() == Qt::LeftButton &&
+            !boxSelecting_ &&
+            interactionMode_ == ViewportInteractionMode::Rotate;
+        zooming_ = mouseEvent->button() == Qt::LeftButton &&
+            !boxSelecting_ &&
+            interactionMode_ == ViewportInteractionMode::Zoom;
         panning_ = mouseEvent->button() == Qt::MiddleButton ||
-            (mouseEvent->button() == Qt::RightButton && !boxDeselecting_);
-        return rotating_ || panning_ || boxSelecting_ || boxDeselecting_;
+            (mouseEvent->button() == Qt::RightButton && !boxDeselecting_) ||
+            (mouseEvent->button() == Qt::LeftButton &&
+             !boxSelecting_ &&
+             interactionMode_ == ViewportInteractionMode::Pan);
+        return rotating_ || panning_ || zooming_ || boxSelecting_ || boxDeselecting_;
     }
     case QEvent::MouseMove: {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -834,6 +883,11 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
             renderFrame();
             return true;
         }
+        if (zooming_) {
+            cam_.zoom(static_cast<float>(-delta.y()) / 120.0f);
+            renderFrame();
+            return true;
+        }
         break;
     }
     case QEvent::MouseButtonRelease: {
@@ -846,6 +900,7 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
             !mouseMovedSincePress_;
         rotating_ = false;
         panning_ = false;
+        zooming_ = false;
         leftPressForPick_ = false;
         rightPressForDeselect_ = false;
         const bool contextMenuClick =
@@ -868,9 +923,11 @@ bool MetalViewport::handleMouseEvent(QEvent* event)
             if (rect.width() > 3 && rect.height() > 3) {
                 return selectInRect(rect, removeSelection);
             }
+            const bool appendSelection =
+                (mouseEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) != 0;
             return removeSelection
                 ? deselectAtPosition(mouseEvent->position())
-                : pickAtPosition(mouseEvent->position(), true);
+                : pickAtPosition(mouseEvent->position(), appendSelection);
         }
         if (shouldPick) {
             const bool appendSelection =
@@ -930,6 +987,9 @@ bool MetalViewport::pickAtPosition(const QPointF& position, bool appendSelection
     if (!backend_.pickElementAt(currentMvp(), pixelX, pixelY, elementId)) {
         lastError_ = backend_.lastError();
         return false;
+    }
+    if (elementId < 0) {
+        elementId = edgeElementAtPosition(position, currentGlmMvp(), 8.0f);
     }
 
     if (!appendSelection) {
@@ -998,6 +1058,9 @@ bool MetalViewport::deselectAtPosition(const QPointF& position)
         lastError_ = backend_.lastError();
         return false;
     }
+    if (elementId < 0) {
+        elementId = edgeElementAtPosition(position, currentGlmMvp(), 8.0f);
+    }
 
     if (pickMode_ == PickMode::Node) {
         const int nodeId = closestNodeForElement(elementId, position);
@@ -1050,6 +1113,15 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
     }
 
     const glm::mat4 mvp = currentGlmMvp();
+    auto pointInside = [&mvp, ndcLeft, ndcRight, ndcTop, ndcBottom](const glm::vec3& point) -> bool {
+        const glm::vec4 clip = mvp * glm::vec4(point, 1.0f);
+        if (clip.w <= 0.0f) {
+            return false;
+        }
+        const float x = clip.x / clip.w;
+        const float y = clip.y / clip.w;
+        return x >= ndcLeft && x <= ndcRight && y >= ndcBottom && y <= ndcTop;
+    };
     auto vertexInside = [this, &mvp, ndcLeft, ndcRight, ndcTop, ndcBottom](unsigned int vertexIndex) -> bool {
         const size_t base = static_cast<size_t>(vertexIndex) * 6;
         if (base + 2 >= mesh_.vertices.size()) {
@@ -1070,26 +1142,61 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
 
     if (pickMode_ == PickMode::Node) {
         std::unordered_set<int> touchedNodes;
-        const size_t vertexCount = mesh_.vertices.size() / 6;
-        const size_t mapCount = std::min(vertexToNode_.size(), vertexCount);
-        for (size_t vertex = 0; vertex < mapCount; ++vertex) {
-            if (!vertexInside(static_cast<unsigned int>(vertex))) {
+        const size_t triCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
+        for (size_t tri = 0; tri < triCount; ++tri) {
+            if (!isTriangleVisibleForSelection(tri)) {
                 continue;
             }
-            const int nodeId = vertexToNode_[vertex];
-            if (nodeId < 0 || !touchedNodes.insert(nodeId).second) {
+            for (int corner = 0; corner < 3; ++corner) {
+                const unsigned int vertex = mesh_.indices[tri * 3 + static_cast<size_t>(corner)];
+                if (!vertexInside(vertex)) {
+                    continue;
+                }
+                const int nodeId = vertex < vertexToNode_.size()
+                    ? vertexToNode_[vertex]
+                    : static_cast<int>(vertex);
+                if (nodeId < 0 || !touchedNodes.insert(nodeId).second) {
+                    continue;
+                }
+                if (removeSelection) {
+                    selection_.selectedNodes.erase(nodeId);
+                } else {
+                    selection_.selectedNodes.insert(nodeId);
+                }
+            }
+        }
+        const size_t elemEdgeCount =
+            std::min(mesh_.elemEdgeToElement.size(), mesh_.elemEdgeVertices.size() / 6);
+        for (size_t edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (!isElementVisibleForSelection(elementId) ||
+                edge >= mesh_.elemEdgeNodeIds.size()) {
                 continue;
             }
-            if (removeSelection) {
-                selection_.selectedNodes.erase(nodeId);
-            } else {
-                selection_.selectedNodes.insert(nodeId);
+            const size_t base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            const auto [node0, node1] = mesh_.elemEdgeNodeIds[edge];
+            if (node0 >= 0 && pointInside(p0) && touchedNodes.insert(node0).second) {
+                if (removeSelection) selection_.selectedNodes.erase(node0);
+                else selection_.selectedNodes.insert(node0);
+            }
+            if (node1 >= 0 && pointInside(p1) && touchedNodes.insert(node1).second) {
+                if (removeSelection) selection_.selectedNodes.erase(node1);
+                else selection_.selectedNodes.insert(node1);
             }
         }
     } else if (pickMode_ == PickMode::Part) {
         std::unordered_set<int> hitParts;
         const size_t triCount = std::min(triangleToPart_.size(), mesh_.indices.size() / 3);
         for (size_t tri = 0; tri < triCount; ++tri) {
+            if (!isTriangleVisibleForSelection(tri)) {
+                continue;
+            }
             bool anyInside = false;
             for (int corner = 0; corner < 3; ++corner) {
                 if (vertexInside(mesh_.indices[tri * 3 + static_cast<size_t>(corner)])) {
@@ -1099,9 +1206,27 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
             }
             const int part = triangleToPart_[tri];
             if (anyInside && part >= 0) {
-                const auto visibilityIt = partVisibility_.find(part);
-                if (visibilityIt == partVisibility_.end() || visibilityIt->second) {
-                    hitParts.insert(part);
+                hitParts.insert(part);
+            }
+        }
+        const size_t elemEdgeCount =
+            std::min(mesh_.elemEdgeToElement.size(), mesh_.elemEdgeVertices.size() / 6);
+        for (size_t edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (!isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            const size_t base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            if (pointInside(p0) || pointInside(p1)) {
+                const auto partIt = elementToPart_.find(elementId);
+                if (partIt != elementToPart_.end()) {
+                    hitParts.insert(partIt->second);
                 }
             }
         }
@@ -1115,6 +1240,9 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
     } else {
         const size_t triCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
         for (size_t tri = 0; tri < triCount; ++tri) {
+            if (!isTriangleVisibleForSelection(tri)) {
+                continue;
+            }
             bool anyInside = false;
             for (int corner = 0; corner < 3; ++corner) {
                 if (vertexInside(mesh_.indices[tri * 3 + static_cast<size_t>(corner)])) {
@@ -1124,6 +1252,28 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
             }
             const int elementId = triangleToElement_[tri];
             if (anyInside && elementId >= 0 && isElementVisibleForSelection(elementId)) {
+                if (removeSelection) {
+                    selection_.selectedElements.erase(elementId);
+                } else {
+                    selection_.selectedElements.insert(elementId);
+                }
+            }
+        }
+        const size_t elemEdgeCount =
+            std::min(mesh_.elemEdgeToElement.size(), mesh_.elemEdgeVertices.size() / 6);
+        for (size_t edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (elementId < 0 || !isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            const size_t base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            if (pointInside(p0) || pointInside(p1)) {
                 if (removeSelection) {
                     selection_.selectedElements.erase(elementId);
                 } else {
@@ -1142,6 +1292,22 @@ bool MetalViewport::selectInRect(const QRect& rect, bool removeSelection)
     updateIdLabels();
     renderFrame();
     return true;
+}
+
+int MetalViewport::edgeElementAtPosition(const QPointF& position,
+                                         const glm::mat4& mvp,
+                                         float thresholdPx) const
+{
+    const QSize size = nativeWindow_->size().isValid() ? nativeWindow_->size() : this->size();
+    return ScreenSpacePicking::edgeElementAtPoint(
+        mesh_,
+        position,
+        mvp,
+        static_cast<float>(std::max(1, size.width())),
+        static_cast<float>(std::max(1, size.height())),
+        true,
+        thresholdPx,
+        [this](int elementId) { return isElementVisibleForSelection(elementId); });
 }
 
 QMatrix4x4 MetalViewport::currentMvp() const
@@ -1209,7 +1375,7 @@ bool MetalViewport::standardViewFromAxesClick(const QPointF& position, StandardV
 
     int bestAxis = -1;
     float bestDist2 = 1.0e30f;
-    const float lineThreshold2 = 10.0f * 10.0f;
+    const float lineThreshold2 = 13.0f * 13.0f;
     for (size_t i = 0; i < axisDirs.size(); ++i) {
         const QPointF end = project(axisDirs[i] * 1.12f);
         const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
@@ -1221,7 +1387,7 @@ bool MetalViewport::standardViewFromAxesClick(const QPointF& position, StandardV
             return true;
         }
 
-        const float dist2 = distanceSquaredToSegment(position, origin, end);
+        const float dist2 = ScreenSpacePicking::distanceSquaredToSegment(position, origin, end);
         if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
             bestAxis = static_cast<int>(i);
             bestDist2 = dist2;
@@ -1261,6 +1427,11 @@ void MetalViewport::rebuildPartLookup()
             numParts = std::max(numParts, part + 1);
         }
     }
+    for (int part : edgeToPart_) {
+        if (part >= 0) {
+            numParts = std::max(numParts, part + 1);
+        }
+    }
 
     partTriangles_.resize(static_cast<size_t>(numParts));
     partElementIds_.resize(static_cast<size_t>(numParts));
@@ -1275,6 +1446,16 @@ void MetalViewport::rebuildPartLookup()
             ? triangleToElement_[tri]
             : static_cast<int>(tri);
         if (element < 0) {
+            continue;
+        }
+        partElementSets[static_cast<size_t>(part)].insert(element);
+        elementToPart_[element] = part;
+    }
+    const size_t edgeCount = std::min(edgeToPart_.size(), mesh_.edgeToElement.size());
+    for (size_t edge = 0; edge < edgeCount; ++edge) {
+        const int part = edgeToPart_[edge];
+        const int element = mesh_.edgeToElement[edge];
+        if (part < 0 || element < 0 || part >= numParts) {
             continue;
         }
         partElementSets[static_cast<size_t>(part)].insert(element);
@@ -1529,52 +1710,16 @@ bool MetalViewport::rebuildSelectionHighlight()
 
 int MetalViewport::closestNodeForElement(int elementId, const QPointF& position) const
 {
-    if (elementId < 0 || triangleToElement_.empty()) {
-        return -1;
-    }
-
     const QSize size = nativeWindow_->size().isValid() ? nativeWindow_->size() : this->size();
-    const float width = static_cast<float>(std::max(1, size.width()));
-    const float height = static_cast<float>(std::max(1, size.height()));
-    const float ndcX = static_cast<float>((2.0 * position.x() / width) - 1.0);
-    const float ndcY = static_cast<float>((2.0 * position.y() / height) - 1.0);
-    const glm::mat4 mvp = currentGlmMvp();
-
-    float minDist2 = 1.0e30f;
-    int closestNode = -1;
-    const size_t triCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
-    for (size_t tri = 0; tri < triCount; ++tri) {
-        if (triangleToElement_[tri] != elementId) {
-            continue;
-        }
-        for (int vertexInTri = 0; vertexInTri < 3; ++vertexInTri) {
-            const unsigned int vertexIndex = mesh_.indices[tri * 3 + static_cast<size_t>(vertexInTri)];
-            const size_t base = static_cast<size_t>(vertexIndex) * 6;
-            if (base + 2 >= mesh_.vertices.size()) {
-                continue;
-            }
-            const glm::vec4 world(mesh_.vertices[base],
-                                  mesh_.vertices[base + 1],
-                                  mesh_.vertices[base + 2],
-                                  1.0f);
-            const glm::vec4 clip = mvp * world;
-            if (clip.w <= 0.0f) {
-                continue;
-            }
-            const float sx = clip.x / clip.w;
-            const float sy = clip.y / clip.w;
-            const float dx = sx - ndcX;
-            const float dy = sy - ndcY;
-            const float dist2 = dx * dx + dy * dy;
-            if (dist2 < minDist2) {
-                minDist2 = dist2;
-                closestNode = vertexIndex < vertexToNode_.size()
-                    ? vertexToNode_[vertexIndex]
-                    : static_cast<int>(vertexIndex);
-            }
-        }
-    }
-    return closestNode;
+    return ScreenSpacePicking::closestNodeForElement(mesh_,
+                                                     triangleToElement_,
+                                                     vertexToNode_,
+                                                     elementId,
+                                                     position,
+                                                     currentGlmMvp(),
+                                                     static_cast<float>(std::max(1, size.width())),
+                                                     static_cast<float>(std::max(1, size.height())),
+                                                     true);
 }
 
 void MetalViewport::selectPart(int partIndex)
@@ -1582,8 +1727,7 @@ void MetalViewport::selectPart(int partIndex)
     if (partIndex < 0 || partIndex >= static_cast<int>(partElementIds_.size())) {
         return;
     }
-    const auto visibilityIt = partVisibility_.find(partIndex);
-    if (visibilityIt != partVisibility_.end() && !visibilityIt->second) {
+    if (!isPartVisible(partIndex)) {
         return;
     }
     for (int element : partElementIds_[static_cast<size_t>(partIndex)]) {
@@ -1639,14 +1783,65 @@ std::vector<int> MetalViewport::currentSelectionIds() const
     return ids;
 }
 
+bool MetalViewport::isPartVisible(int partIndex) const
+{
+    if (partIndex < 0) {
+        return true;
+    }
+    const auto visibilityIt = partVisibility_.find(partIndex);
+    return visibilityIt == partVisibility_.end() || visibilityIt->second;
+}
+
+bool MetalViewport::isTriangleVisibleForSelection(size_t triangleIndex) const
+{
+    const size_t triangleCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
+    if (triangleIndex >= triangleCount) {
+        return false;
+    }
+    const int part = triangleIndex < triangleToPart_.size()
+        ? triangleToPart_[triangleIndex]
+        : -1;
+    return isPartVisible(part);
+}
+
 bool MetalViewport::isElementVisibleForSelection(int elementId) const
 {
     const auto partIt = elementToPart_.find(elementId);
     if (partIt == elementToPart_.end()) {
         return true;
     }
-    const auto visibilityIt = partVisibility_.find(partIt->second);
-    return visibilityIt == partVisibility_.end() || visibilityIt->second;
+    return isPartVisible(partIt->second);
+}
+
+bool MetalViewport::isNodeVisibleForSelection(int nodeId) const
+{
+    const size_t triCount = std::min(triangleToElement_.size(), mesh_.indices.size() / 3);
+    for (size_t tri = 0; tri < triCount; ++tri) {
+        if (!isTriangleVisibleForSelection(tri)) {
+            continue;
+        }
+        for (int corner = 0; corner < 3; ++corner) {
+            const unsigned int vertex = mesh_.indices[tri * 3 + static_cast<size_t>(corner)];
+            const int mappedNode = vertex < vertexToNode_.size()
+                ? vertexToNode_[vertex]
+                : static_cast<int>(vertex);
+            if (mappedNode == nodeId) {
+                return true;
+            }
+        }
+    }
+    const size_t elemEdgeCount = std::min(mesh_.elemEdgeToElement.size(), mesh_.elemEdgeNodeIds.size());
+    for (size_t edge = 0; edge < elemEdgeCount; ++edge) {
+        const int elementId = mesh_.elemEdgeToElement[edge];
+        if (!isElementVisibleForSelection(elementId)) {
+            continue;
+        }
+        const auto [node0, node1] = mesh_.elemEdgeNodeIds[edge];
+        if (node0 == nodeId || node1 == nodeId) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void MetalViewport::updateAxesLabels()

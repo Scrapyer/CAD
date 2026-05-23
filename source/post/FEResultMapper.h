@@ -14,6 +14,7 @@
 
 struct FERENDER_EXPORT FEMappedScalars {
     std::vector<float> scalars;               // 每个渲染顶点对应的标量值
+    std::vector<float> edgeScalars;           // 每个边线顶点对应的标量值
     float minValue = 0.0f;                    // 色标最小值
     float maxValue = 0.0f;                    // 色标最大值
     int minId = -1;                           // 最小值对应的节点/单元 ID
@@ -24,7 +25,7 @@ struct FERENDER_EXPORT FEMappedScalars {
 class FERENDER_EXPORT FEResultMapper {
 public:
     /**
-     * @brief 将节点/单元标量场映射为 GLWidget::setVertexScalars() 所需数组
+     * @brief 将节点/单元标量场映射为面顶点与边线顶点标量数组
      * @param field 标量结果场
      * @param renderData FEMeshConverter 生成的渲染数据和反查映射
      * @param model 原始 FEM 模型（用于节点 ID 重映射）

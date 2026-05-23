@@ -6,17 +6,15 @@
 #include "PartsPanel.h"
 #include "Theme.h"
 
-#include <QFrame>
-#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
-#include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <set>
+#include <unordered_set>
 
 namespace {
 constexpr int kNameColumn = 0;
@@ -32,23 +30,6 @@ PartsPanel::PartsPanel(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(8, 8, 8, 8);
     layout->setSpacing(8);
 
-    auto* header = new QFrame;
-    header->setObjectName(QStringLiteral("itemsHeader"));
-    auto* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(10, 5, 8, 5);
-    headerLayout->setSpacing(6);
-
-    auto* title = new QLabel(QStringLiteral("All Items"));
-    title->setObjectName(QStringLiteral("itemsHeaderTitle"));
-    headerLayout->addWidget(title, 1);
-
-    auto* headerButton = new QToolButton;
-    headerButton->setObjectName(QStringLiteral("itemsHeaderButton"));
-    headerButton->setText(QStringLiteral("..."));
-    headerButton->setToolTip(QStringLiteral("更多"));
-    headerLayout->addWidget(headerButton);
-    layout->addWidget(header);
-
     tree_ = new QTreeWidget;
     tree_->setHeaderHidden(true);
     tree_->setColumnCount(2);
@@ -60,6 +41,7 @@ PartsPanel::PartsPanel(QWidget* parent) : QWidget(parent) {
     tree_->setItemsExpandable(true);
     tree_->setExpandsOnDoubleClick(true);
     tree_->setAllColumnsShowFocus(false);
+    tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     tree_->header()->setStretchLastSection(false);
     tree_->header()->setSectionResizeMode(kNameColumn, QHeaderView::Stretch);
     tree_->header()->setSectionResizeMode(kVisibilityColumn, QHeaderView::Fixed);
@@ -68,24 +50,8 @@ PartsPanel::PartsPanel(QWidget* parent) : QWidget(parent) {
 
     connect(tree_, &QTreeWidget::itemClicked, this, &PartsPanel::onItemClicked);
     connect(tree_, &QTreeWidget::itemSelectionChanged, this, &PartsPanel::onSelectionChanged);
-
-    auto* footer = new QFrame;
-    footer->setObjectName(QStringLiteral("itemsFooter"));
-    auto* footerLayout = new QHBoxLayout(footer);
-    footerLayout->setContentsMargins(0, 0, 0, 0);
-    footerLayout->setSpacing(6);
-    auto* addButton = new QToolButton;
-    addButton->setObjectName(QStringLiteral("itemsFooterButton"));
-    addButton->setText(QStringLiteral("+"));
-    addButton->setToolTip(QStringLiteral("添加入口预留"));
-    auto* moreButton = new QToolButton;
-    moreButton->setObjectName(QStringLiteral("itemsFooterButton"));
-    moreButton->setText(QStringLiteral("..."));
-    moreButton->setToolTip(QStringLiteral("更多"));
-    footerLayout->addWidget(addButton);
-    footerLayout->addStretch();
-    footerLayout->addWidget(moreButton);
-    layout->addWidget(footer);
+    connect(tree_, &QTreeWidget::customContextMenuRequested,
+            this, &PartsPanel::onContextMenuRequested);
 
     // 默认主题在 MainWindow 中统一调用 applyTheme() 设置
 }
@@ -94,15 +60,6 @@ void PartsPanel::applyTheme(const Theme& t) {
     iconColor_ = QColor(t.overlay2);
     QString style = QStringLiteral(
         "QWidget { background: @base@; color: @text@; }"
-        "QFrame#itemsHeader {"
-        "  background: @mantle@; border: 1px solid @surface0@; border-radius: 6px; }"
-        "QLabel#itemsHeaderTitle {"
-        "  color: @text@; font-weight: 600; font-size: 12px; }"
-        "QToolButton#itemsHeaderButton, QToolButton#itemsFooterButton {"
-        "  background: transparent; color: @surface2@; border: none;"
-        "  min-width: 24px; min-height: 24px; border-radius: 4px; }"
-        "QToolButton#itemsHeaderButton:hover, QToolButton#itemsFooterButton:hover {"
-        "  background: @surface0@; color: @text@; }"
         "QTreeWidget {"
         "  background: transparent; border: none;"
         "  outline: none; padding: 0; }"
@@ -117,7 +74,6 @@ void PartsPanel::applyTheme(const Theme& t) {
         "  image: none; border-image: none; }"
         "QTreeWidget::branch:open:has-children {"
         "  image: none; border-image: none; }"
-        "QFrame#itemsFooter { background: transparent; }"
         "QScrollBar:vertical {"
         "  background: transparent; width: 8px; margin: 4px 0; }"
         "QScrollBar::handle:vertical {"
@@ -265,6 +221,23 @@ void PartsPanel::setParts(const QString& modelName,
     updating_ = false;
 }
 
+std::vector<std::pair<int, bool>> PartsPanel::partVisibilityStates() const
+{
+    std::vector<std::pair<int, bool>> states;
+    if (!rootItem_) {
+        return states;
+    }
+
+    states.reserve(static_cast<size_t>(rootItem_->childCount()));
+    for (int i = 0; i < rootItem_->childCount(); ++i) {
+        QTreeWidgetItem* child = rootItem_->child(i);
+        const int partIndex = child->data(kNameColumn, kPartRole).toInt();
+        const bool visible = child->data(kNameColumn, kVisibleRole).toBool();
+        states.emplace_back(partIndex, visible);
+    }
+    return states;
+}
+
 void PartsPanel::onItemClicked(QTreeWidgetItem* item, int column)
 {
     if (updating_ || !item || column != kVisibilityColumn) {
@@ -272,8 +245,7 @@ void PartsPanel::onItemClicked(QTreeWidgetItem* item, int column)
     }
 
     if (item == rootItem_) {
-        const bool anyVisible = rootItem_->data(kNameColumn, kVisibleRole).toBool();
-        const bool visible = !anyVisible;
+        const bool visible = !allPartsVisible();
         updating_ = true;
         for (int i = 0; i < rootItem_->childCount(); ++i) {
             setPartVisible(rootItem_->child(i), visible, true);
@@ -297,6 +269,61 @@ void PartsPanel::onSelectionChanged() {
             selected.push_back(v.toInt());
     }
     emit partSelectionChanged(selected);
+}
+
+void PartsPanel::onContextMenuRequested(const QPoint& pos)
+{
+    if (!rootItem_) {
+        return;
+    }
+
+    QTreeWidgetItem* item = tree_->itemAt(pos);
+    if (item && item != rootItem_ && !item->isSelected()) {
+        updating_ = true;
+        tree_->clearSelection();
+        item->setSelected(true);
+        updating_ = false;
+        onSelectionChanged();
+    }
+
+    const std::vector<int> selected = selectedPartIndices();
+    const bool hasSelection = !selected.empty();
+    const bool hasHidden = !allPartsVisible();
+    const bool hasVisible = anyPartsVisible();
+
+    QMenu menu(this);
+    QAction* hideAction = menu.addAction(QStringLiteral("隐藏选中"));
+    hideAction->setEnabled(hasSelection);
+    QAction* showAction = menu.addAction(QStringLiteral("显示选中"));
+    showAction->setEnabled(hasSelection);
+    QAction* isolateAction = menu.addAction(QStringLiteral("仅显示选中"));
+    isolateAction->setEnabled(hasSelection);
+    menu.addSeparator();
+    QAction* showAllAction = menu.addAction(QStringLiteral("显示全部"));
+    showAllAction->setEnabled(hasHidden);
+    QAction* hideAllAction = menu.addAction(QStringLiteral("隐藏全部"));
+    hideAllAction->setEnabled(hasVisible);
+
+    QAction* chosen = menu.exec(tree_->viewport()->mapToGlobal(pos));
+    if (!chosen) {
+        return;
+    }
+
+    if (chosen == hideAction) {
+        for (int partIndex : selected) {
+            setPartVisibleByIndex(partIndex, false, true);
+        }
+    } else if (chosen == showAction) {
+        for (int partIndex : selected) {
+            setPartVisibleByIndex(partIndex, true, true);
+        }
+    } else if (chosen == isolateAction) {
+        isolateParts(selected, true);
+    } else if (chosen == showAllAction) {
+        setAllPartsVisible(true, true);
+    } else if (chosen == hideAllAction) {
+        setAllPartsVisible(false, true);
+    }
 }
 
 void PartsPanel::selectParts(const std::vector<int>& partIndices) {
@@ -325,6 +352,105 @@ void PartsPanel::selectParts(const std::vector<int>& partIndices) {
     }
 
     updating_ = false;
+}
+
+void PartsPanel::setPartVisibleByIndex(int partIndex, bool visible, bool notify)
+{
+    if (!rootItem_) {
+        return;
+    }
+    if (QTreeWidgetItem* item = itemForPartIndex(partIndex)) {
+        setPartVisible(item, visible, notify);
+        updateRootVisibilityIcon();
+    }
+}
+
+void PartsPanel::setAllPartsVisible(bool visible, bool notify)
+{
+    if (!rootItem_) {
+        return;
+    }
+    updating_ = true;
+    for (int i = 0; i < rootItem_->childCount(); ++i) {
+        setPartVisible(rootItem_->child(i), visible, notify);
+    }
+    updating_ = false;
+    updateRootVisibilityIcon();
+}
+
+void PartsPanel::isolateParts(const std::vector<int>& partIndices, bool notify)
+{
+    if (!rootItem_) {
+        return;
+    }
+
+    const std::unordered_set<int> isolated(partIndices.begin(), partIndices.end());
+    updating_ = true;
+    for (int i = 0; i < rootItem_->childCount(); ++i) {
+        QTreeWidgetItem* child = rootItem_->child(i);
+        const int partIndex = child->data(kNameColumn, kPartRole).toInt();
+        setPartVisible(child, isolated.count(partIndex) > 0, notify);
+    }
+    updating_ = false;
+    updateRootVisibilityIcon();
+}
+
+QTreeWidgetItem* PartsPanel::itemForPartIndex(int partIndex) const
+{
+    if (!rootItem_) {
+        return nullptr;
+    }
+    for (int i = 0; i < rootItem_->childCount(); ++i) {
+        QTreeWidgetItem* child = rootItem_->child(i);
+        if (child->data(kNameColumn, kPartRole).toInt() == partIndex) {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<int> PartsPanel::selectedPartIndices() const
+{
+    std::vector<int> selected;
+    if (!tree_) {
+        return selected;
+    }
+    for (auto* item : tree_->selectedItems()) {
+        if (!item || item == rootItem_) {
+            continue;
+        }
+        QVariant v = item->data(kNameColumn, kPartRole);
+        if (v.isValid()) {
+            selected.push_back(v.toInt());
+        }
+    }
+    return selected;
+}
+
+bool PartsPanel::allPartsVisible() const
+{
+    if (!rootItem_ || rootItem_->childCount() == 0) {
+        return false;
+    }
+    for (int i = 0; i < rootItem_->childCount(); ++i) {
+        if (!rootItem_->child(i)->data(kNameColumn, kVisibleRole).toBool()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PartsPanel::anyPartsVisible() const
+{
+    if (!rootItem_) {
+        return false;
+    }
+    for (int i = 0; i < rootItem_->childCount(); ++i) {
+        if (rootItem_->child(i)->data(kNameColumn, kVisibleRole).toBool()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void PartsPanel::setPartVisible(QTreeWidgetItem* item, bool visible, bool notify)

@@ -19,10 +19,11 @@
  * │  └─────────────┴──────────────┴───────────────┘         │
  * │       ↓                                                  │
  * │  FERenderData                                            │
- * │  ├── Mesh (顶点 + 法线 [+ 颜色] + 索引)                │
+ * │  ├── Mesh (顶点 + 法线 [+ 颜色] + 索引 + 边线)         │
  * │  ├── triangleToElement[] (三角形→单元映射)              │
  * │  ├── triangleToFace[]    (三角形→面索引映射)            │
- * │  └── vertexToNode[]      (顶点→节点映射)               │
+ * │  ├── vertexToNode[]      (顶点→节点映射)               │
+ * │  └── edgeToPart[]        (边线→部件映射)               │
  * │       ↓                                                  │
  * │  GLWidget 渲染 + 拾取                                   │
  * └──────────────────────────────────────────────────────────┘
@@ -83,12 +84,12 @@ public:
      * @return FERenderData（三角网格 + 反向映射表）
      *
      * 自动处理：
+     *   - 1D 单元生成边线，并填充 edgeToElement / edgeToPart
      *   - 2D 单元直接三角化
      *   - 3D 单元提取外表面后三角化
-     *   - 1D 单元暂时跳过（后续可生成管状几何）
      *
-     * 同时填充 triangleToElement、triangleToFace、vertexToNode 映射表，
-     * 使得拾取时可以从渲染三角形/顶点反查 FEM 单元/节点。
+     * 同时填充 triangleToElement、triangleToFace、vertexToNode、edgeToPart 等映射表，
+     * 使得拾取时可以从渲染三角形/顶点/边线反查 FEM 单元/节点/部件。
      */
     static FERenderData toRenderData(const FEModel& model, const ProgressCallback& progress = nullptr);
 

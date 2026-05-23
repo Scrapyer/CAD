@@ -58,8 +58,11 @@ MTLVertexDescriptor* createVertexDescriptor(MetalPipelineVertexLayout layout)
         break;
     case MetalPipelineVertexLayout::Line:
         descriptor.attributes[0].format = MTLVertexFormatFloat3;
-        descriptor.attributes[0].offset = 0;
+        descriptor.attributes[0].offset = offsetof(MetalLineVertex, position);
         descriptor.attributes[0].bufferIndex = 0;
+        descriptor.attributes[1].format = MTLVertexFormatFloat;
+        descriptor.attributes[1].offset = offsetof(MetalLineVertex, scalar);
+        descriptor.attributes[1].bufferIndex = 0;
         descriptor.layouts[0].stride = kMetalLineVertexStride;
         descriptor.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
         break;

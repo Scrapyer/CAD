@@ -480,11 +480,19 @@ bool MetalRenderBackend::uploadMesh(const Mesh& mesh, const MetalMeshUploadOptio
 
     destroyMeshResources();
     destroyEdgeResources();
-    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.vertices.size() % 6 != 0) {
+    const bool hasSurfaceMesh =
+        !mesh.vertices.empty() && !mesh.indices.empty() && mesh.vertices.size() % 6 == 0;
+    const bool hasEdgeMesh =
+        !mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0;
+    if (!hasSurfaceMesh && !hasEdgeMesh) {
         return true;
     }
 
-    meshUseVertexScalars_ = options.useVertexColor && !options.vertexScalars.empty();
+    meshUseVertexScalars_ = hasSurfaceMesh && options.useVertexColor && !options.vertexScalars.empty();
+    edgeUseVertexScalars_ =
+        hasEdgeMesh &&
+        options.useVertexColor &&
+        options.edgeScalars.size() == mesh.edgeVertices.size() / 3;
     meshScalarMin_ = options.scalarMin;
     meshScalarMax_ = options.scalarMax;
     meshNumBands_ = std::max(1, options.numBands);
@@ -724,6 +732,7 @@ bool MetalRenderBackend::renderClearFrame(float red,
                                       0.0f,
                                       1.0f,
                                       std::max(1, meshNumBands_),
+                                      false,
                                       false,
                                       axesMvp);
     MetalMeshFramePassInputs framePass = buildMetalMeshFramePassInputs(drawFlags,
@@ -972,6 +981,7 @@ bool MetalRenderBackend::renderMeshFrame(const QMatrix4x4& mvp,
                                       meshScalarMax_,
                                       meshNumBands_,
                                       meshUseVertexScalars_,
+                                      edgeUseVertexScalars_,
                                       axesMvp);
     const MetalMeshFrameResourceHandles frameResources = buildMeshFrameResourceHandles();
     MetalMeshFramePassInputs framePass =
@@ -1039,6 +1049,7 @@ void MetalRenderBackend::destroyMeshResources()
     meshVertexCount_ = 0;
     meshIndexCount_ = 0;
     meshUseVertexScalars_ = false;
+    edgeUseVertexScalars_ = false;
     meshScalarMin_ = 0.0f;
     meshScalarMax_ = 1.0f;
     meshNumBands_ = 10;

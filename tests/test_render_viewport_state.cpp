@@ -39,6 +39,18 @@ static Mesh makeMeshWithFrontEdges()
     return mesh;
 }
 
+static Mesh makeLineOnlyMesh()
+{
+    Mesh mesh;
+    mesh.edgeVertices = {
+        -0.6f, -0.2f, 0.0f,
+         0.0f,  0.3f, 0.0f,
+         0.6f, -0.2f, 0.0f,
+    };
+    mesh.edgeIndices = {0, 1, 1, 2};
+    return mesh;
+}
+
 static std::vector<int> makeTriangleIds(const Mesh& mesh)
 {
     std::vector<int> ids(mesh.indices.size() / 3);
@@ -88,9 +100,23 @@ int main(int argc, char** argv)
     viewport.show();
     pumpEvents(app, 250);
 
+    Mesh lineOnly = makeLineOnlyMesh();
+    viewport.setMesh(lineOnly);
+    viewport.setModelDisplayMode(ModelDisplayMode::Wireframe);
+    viewport.setEdgeToPartMap({0, 1});
+    viewport.setEdgeScalars(std::vector<float>(lineOnly.edgeVertices.size() / 3, 0.5f),
+                            0.0f,
+                            1.0f,
+                            6);
+    viewport.setPartVisibility(1, false);
+    viewport.fitToModel(glm::vec3(0.0f), 1.0f);
+    viewport.refresh();
+    pumpEvents(app, 150);
+
     Mesh mesh = makeMeshWithFrontEdges();
     viewport.setMesh(mesh);
     pushMappings(viewport, mesh);
+    viewport.setModelDisplayMode(ModelDisplayMode::SolidWireframe);
     viewport.fitToModel(glm::vec3(0.0f), 1.0f);
     viewport.setOverlayMesh(mesh);
     viewport.setOverlayVisible(true);
@@ -107,8 +133,30 @@ int main(int argc, char** argv)
                               0.0f,
                               1.0f,
                               6);
+    viewport.setEdgeScalars(std::vector<float>(mesh.edgeVertices.size() / 3, 0.75f),
+                            0.0f,
+                            1.0f,
+                            6);
+    std::vector<int> lastSelectionIds;
+    PickMode lastSelectionMode = PickMode::Node;
+    QObject::connect(&viewport, &RenderViewport::selectionChanged,
+                     [&lastSelectionMode, &lastSelectionIds](PickMode mode, int, const std::vector<int>& ids) {
+        lastSelectionMode = mode;
+        lastSelectionIds = ids;
+    });
+
+    std::vector<int> lastPickedParts;
+    QObject::connect(&viewport, &RenderViewport::partsPicked,
+                     [&lastPickedParts](const std::vector<int>& partIndices) {
+        lastPickedParts = partIndices;
+    });
+
     viewport.setPartVisibility(1, false);
-    viewport.selectByIds(PickMode::Element, {100});
+    viewport.selectByIds(PickMode::Element, {100, 101});
+    assert(lastSelectionMode == PickMode::Element);
+    assert((lastSelectionIds == std::vector<int>{100}));
+    viewport.selectByIds(PickMode::Part, {0, 1});
+    assert((lastPickedParts == std::vector<int>{0}));
     viewport.setShowLabels(true);
     viewport.refresh();
     pumpEvents(app, 300);
@@ -178,6 +226,10 @@ int main(int argc, char** argv)
             scalars[i] = static_cast<float>(i);
         }
         metalViewport.setVertexScalars(scalars, 0.0f, static_cast<float>(scalars.size()), 5);
+        metalViewport.setEdgeScalars(std::vector<float>(metalMesh.edgeVertices.size() / 3, 0.25f),
+                                     0.0f,
+                                     1.0f,
+                                     5);
         metalViewport.setPartVisibility(1, false);
         metalViewport.selectByIds(PickMode::Element, {100});
         metalViewport.selectByIds(PickMode::Node, {0});

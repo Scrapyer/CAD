@@ -9,6 +9,7 @@
 #include "OpenGLRenderBackend.h"
 #include "RenderBackendFactory.h"
 #include "RenderSettings.h"
+#include "ScreenSpacePicking.h"
 #include "ViewportGridMetrics.h"
 
 #include <QMouseEvent>
@@ -34,10 +35,10 @@ static const glm::vec3 kPartPalette[] = {
 static const int kPartPaletteSize = static_cast<int>(sizeof(kPartPalette) / sizeof(kPartPalette[0]));
 
 namespace {
-constexpr int kAxesLabelSize = 24;
+constexpr int kAxesLabelSize = 30;
 constexpr int kAxesMargin = 8;
-constexpr int kAxesViewportSize = 120;
-constexpr float kAxesClickPadding = 7.0f;
+constexpr int kAxesViewportSize = 152;
+constexpr float kAxesClickPadding = 10.0f;
 
 template <typename T>
 void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
@@ -49,23 +50,6 @@ void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
     } else if (static_cast<int>(arr.size()) < targetSize) {
         arr.resize(static_cast<size_t>(targetSize), fillValue);
     }
-}
-
-float distanceSquaredToSegment(const QPointF& p, const QPointF& a, const QPointF& b)
-{
-    const QPointF ab = b - a;
-    const QPointF ap = p - a;
-    const float len2 = static_cast<float>(ab.x() * ab.x() + ab.y() * ab.y());
-    if (len2 <= 1.0e-6f) {
-        const QPointF d = p - a;
-        return static_cast<float>(d.x() * d.x() + d.y() * d.y());
-    }
-
-    float t = static_cast<float>((ap.x() * ab.x() + ap.y() * ab.y()) / len2);
-    t = std::clamp(t, 0.0f, 1.0f);
-    const QPointF closest(a.x() + ab.x() * t, a.y() + ab.y() * t);
-    const QPointF d = p - closest;
-    return static_cast<float>(d.x() * d.x() + d.y() * d.y());
 }
 
 void applyStandardViewToCamera(Camera& camera, StandardView view)
@@ -241,6 +225,26 @@ void GLWidget::setVertexScalars(const std::vector<float>& scalars, float minVal,
     update();
 }
 
+void GLWidget::setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands) {
+    edgeScalars_ = scalars;
+    useVertexColor_ = true;
+    scalarMin_ = minVal;
+    scalarMax_ = maxVal;
+    numBands_ = numBands;
+    // 先完成待上传的网格，防止 paintGL 中 uploadMesh() 覆盖标量数据
+    if (needsUpload_) {
+        makeCurrent();
+        uploadMesh();
+    }
+    if (edgeResource_) {
+        auto* glBackend = openGLBackend();
+        glBackend->uploadEdgeScalarBuffer(*edgeResource_,
+                                          edgeScalars_.data(),
+                                          static_cast<int>(edgeScalars_.size() * sizeof(float)));
+    }
+    update();
+}
+
 void GLWidget::setSliceLines(const std::vector<float>& lineVertices) {
     sliceVertCount_ = static_cast<int>(lineVertices.size() / 3);
     if (sliceVertCount_ > 0 && sliceResource_) {
@@ -328,6 +332,8 @@ void GLWidget::setMesh(const Mesh& mesh) {
     selection_.clear();
     partVisibility_.clear();
     partColors_.clear();
+    edgeScalars_.clear();
+    useVertexColor_ = false;
     partTriangles_.clear();
     partElementIds_.clear();
     elemToPart_.clear();
@@ -817,6 +823,12 @@ void GLWidget::renderMeshEdges() {
     const float wireAlpha = displayMode_ == ModelDisplayMode::Wireframe ? 1.0f : 0.85f;
 
     if (activeEdgeIndexCount_ > 0) {
+        const int edgeVertCount = static_cast<int>(mesh_.edgeVertices.size() / 3);
+        const bool useEdgeContour =
+            useVertexColor_ &&
+            colorBarVisible_ &&
+            edgeVertCount > 0 &&
+            static_cast<int>(edgeScalars_.size()) == edgeVertCount;
         float lineW = (count == 0) ? 3.0f : 1.25f;
         float alpha = (count == 0) ? 1.0f : wireAlpha;
         SceneDrawUniforms drawUniforms;
@@ -824,7 +836,9 @@ void GLWidget::renderMeshEdges() {
             ? QVector3D(color_.x, color_.y, color_.z)
             : QVector3D(0.2f, 0.2f, 0.22f);
         drawUniforms.wireframe = true;
-        drawUniforms.useVertexColor = false;
+        drawUniforms.useVertexColor = useEdgeContour;
+        drawUniforms.overrideContourMode = true;
+        drawUniforms.contourMode = useEdgeContour;
         drawUniforms.wireAlpha = alpha;
         ScenePassState passState;
         passState.applyLineWidth = true;
@@ -848,6 +862,8 @@ void GLWidget::renderMeshEdges() {
         drawUniforms.color = QVector3D(0.2f, 0.2f, 0.22f);
         drawUniforms.wireframe = true;
         drawUniforms.useVertexColor = false;
+        drawUniforms.overrideContourMode = true;
+        drawUniforms.contourMode = false;
         drawUniforms.wireAlpha = wireAlpha;
         ScenePassState passState;
         passState.applyLineWidth = true;
@@ -967,6 +983,8 @@ void GLWidget::renderOverlayMesh() {
     drawUniforms.wireframe = true;
     drawUniforms.useVertexColor = false;
     drawUniforms.wireAlpha = 0.3f;
+    drawUniforms.overrideContourMode = true;
+    drawUniforms.contourMode = false;
     ScenePassState passState;
     passState.applyBlend = true;
     passState.blendEnabled = true;
@@ -1049,6 +1067,8 @@ void GLWidget::renderSliceLines() {
     drawUniforms.wireframe = true;
     drawUniforms.useVertexColor = false;
     drawUniforms.wireAlpha = 1.0f;
+    drawUniforms.overrideContourMode = true;
+    drawUniforms.contourMode = false;
     ScenePassState passState;
     passState.applyDepthTest = true;
     passState.depthTestEnabled = false;
@@ -1119,6 +1139,8 @@ void GLWidget::renderSelectionHighlight() {
     drawUniforms.wireframe = true;
     drawUniforms.useVertexColor = false;
     drawUniforms.wireAlpha = 1.0f;
+    drawUniforms.overrideContourMode = true;
+    drawUniforms.contourMode = false;
     ScenePassState passState;
     passState.applyDepthTest = true;
     passState.depthTestEnabled = false;
@@ -1204,6 +1226,7 @@ void GLWidget::mousePressEvent(QMouseEvent* e) {
     isBoxDeselecting_ = false;
 
     bool hasMod = (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier));
+    const bool pickTool = interactionMode_ == ViewportInteractionMode::Pick;
 
     if (!hasMod && e->button() == Qt::LeftButton) {
         StandardView view = StandardView::Front;
@@ -1214,16 +1237,16 @@ void GLWidget::mousePressEvent(QMouseEvent* e) {
         }
     }
 
-    if (hasMod) {
+    if (hasMod || pickTool) {
         if (e->button() == Qt::LeftButton) {
-            // Ctrl/Shift + 左键 → 框选/点选（添加选中）
+            // 拾取工具或 Ctrl/Shift + 左键 → 框选/点选
             isBoxSelecting_ = true;
             boxOrigin_ = pos;
             if (!rubberBand_)
                 rubberBand_ = new QRubberBand(QRubberBand::Rectangle, this);
             rubberBand_->setGeometry(QRect(boxOrigin_, QSize()));
             rubberBand_->show();
-        } else if (e->button() == Qt::RightButton) {
+        } else if (hasMod && e->button() == Qt::RightButton) {
             // Ctrl/Shift + 右键 → 框选/点选（取消选中）
             isBoxDeselecting_ = true;
             boxOrigin_ = pos;
@@ -1257,10 +1280,17 @@ void GLWidget::mouseMoveEvent(QMouseEvent* e) {
             return;
     }
 
-    // Ctrl/Shift + 左键用于拾取，不旋转
+    // 拾取工具和 Ctrl/Shift 手势用于选取，不做视图导航
     if ((e->buttons() & Qt::LeftButton) &&
-        !(e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
-        cam_.rotate(dx, dy);
+        !(e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+        if (interactionMode_ == ViewportInteractionMode::Rotate) {
+            cam_.rotate(dx, dy);
+        } else if (interactionMode_ == ViewportInteractionMode::Pan) {
+            cam_.pan(dx, dy);
+        } else if (interactionMode_ == ViewportInteractionMode::Zoom) {
+            cam_.zoom(-dy / 120.0f);
+        }
+    }
     // Ctrl/Shift + 右键用于取消拾取，不平移
     if ((e->buttons() & (Qt::RightButton | Qt::MiddleButton)) &&
         !(e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)))
@@ -1373,6 +1403,32 @@ int GLWidget::colorToId(unsigned char r, unsigned char g, unsigned char b) {
     return id - 1;
 }
 
+int GLWidget::edgeElementAtPoint(const QPointF& pos, const glm::mat4& mvp, float thresholdPx) const
+{
+    return ScreenSpacePicking::edgeElementAtPoint(
+        mesh_,
+        pos,
+        mvp,
+        static_cast<float>(width()),
+        static_cast<float>(height()),
+        true,
+        thresholdPx,
+        [this](int elementId) { return isElementVisibleForSelection(elementId); });
+}
+
+int GLWidget::closestNodeForElement(int elementId, const QPointF& pos, const glm::mat4& mvp) const
+{
+    return ScreenSpacePicking::closestNodeForElement(mesh_,
+                                                     triToElem_,
+                                                     vertexToNode_,
+                                                     elementId,
+                                                     pos,
+                                                     mvp,
+                                                     static_cast<float>(width()),
+                                                     static_cast<float>(height()),
+                                                     true);
+}
+
 void GLWidget::renderPickBuffer(const glm::mat4& mvp) {
     if (!pickFramebuffer_ || !pickFramebuffer_->isValid() ||
         !pickVertexArray_ || !pickVertexArray_->isValid() ||
@@ -1393,13 +1449,8 @@ void GLWidget::renderPickBuffer(const glm::mat4& mvp) {
         int start = i;
         while (i < triCount && triToElem_[i] == elemId) ++i;
 
-        if (start < static_cast<int>(triToPart_.size())) {
-            int partIdx = triToPart_[start];
-            if (partIdx >= 0) {
-                auto it = partVisibility_.find(partIdx);
-                if (it != partVisibility_.end() && !it->second)
-                    continue;
-            }
+        if (!isTriangleVisible(start)) {
+            continue;
         }
 
         PickDrawItem item;
@@ -1426,8 +1477,6 @@ void GLWidget::renderPickBuffer(const glm::mat4& mvp) {
 }
 
 void GLWidget::pickAtPoint(const QPoint& pos, bool ctrlHeld) {
-    if (!pickFramebuffer_ || !pickFramebuffer_->isValid() || triToElem_.empty()) return;
-
     // 注意：此函数现在仅在 paintGL() 内调用，GL 上下文已由 Qt 管理，
     // 无需手动 makeCurrent/doneCurrent。
 
@@ -1437,45 +1486,26 @@ void GLWidget::pickAtPoint(const QPoint& pos, bool ctrlHeld) {
     glm::mat4 view = cam_.viewMatrix();
     glm::mat4 mvp = projection * view;
 
-    renderPickBuffer(mvp);
+    int elemId = -1;
+    if (pickFramebuffer_ && pickFramebuffer_->isValid() && !triToElem_.empty()) {
+        renderPickBuffer(mvp);
 
-    // 读取点击位置像素（使用原始 GL 调用，避免 Qt FBO 状态追踪污染）
-    unsigned char pixel[4] = {0};
-    int dpr = devicePixelRatio();
-    int px = pos.x() * dpr;
-    int py = (height() - pos.y()) * dpr;  // OpenGL Y 轴翻转
-    auto* glBackend = openGLBackend();
-    glBackend->readFramebufferPixel(*pickFramebuffer_, px, py, pixel);
-
-    int elemId = colorToId(pixel[0], pixel[1], pixel[2]);
+        // 读取点击位置像素（使用原始 GL 调用，避免 Qt FBO 状态追踪污染）
+        unsigned char pixel[4] = {0};
+        int dpr = devicePixelRatio();
+        int px = pos.x() * dpr;
+        int py = (height() - pos.y()) * dpr;  // OpenGL Y 轴翻转
+        auto* glBackend = openGLBackend();
+        glBackend->readFramebufferPixel(*pickFramebuffer_, px, py, pixel);
+        elemId = colorToId(pixel[0], pixel[1], pixel[2]);
+    }
+    if (elemId < 0) {
+        elemId = edgeElementAtPoint(pos, mvp, 8.0f);
+    }
 
     if (pickMode_ == PickMode::Node) {
         // ── 节点拾取：找到点击处最近的顶点 ──
-        int closestNode = -1;
-        if (elemId >= 0) {
-            float ndcX = (2.0f * pos.x() / width()) - 1.0f;
-            float ndcY = 1.0f - (2.0f * pos.y() / height());
-            float minDist2 = 1e30f;
-            int triCount = static_cast<int>(triToElem_.size());
-            for (int t = 0; t < triCount; ++t) {
-                if (triToElem_[t] != elemId) continue;
-                for (int v = 0; v < 3; ++v) {
-                    unsigned int vi = mesh_.indices[t * 3 + v];
-                    glm::vec4 wp(mesh_.vertices[vi * 6],
-                                 mesh_.vertices[vi * 6 + 1],
-                                 mesh_.vertices[vi * 6 + 2], 1.0f);
-                    glm::vec4 clip = mvp * wp;
-                    if (clip.w <= 0) continue;
-                    float sx = clip.x / clip.w;
-                    float sy = clip.y / clip.w;
-                    float d2 = (sx - ndcX) * (sx - ndcX) + (sy - ndcY) * (sy - ndcY);
-                    if (d2 < minDist2) {
-                        minDist2 = d2;
-                        closestNode = (vi < vertexToNode_.size()) ? vertexToNode_[vi] : static_cast<int>(vi);
-                    }
-                }
-            }
-        }
+        int closestNode = closestNodeForElement(elemId, pos, mvp);
         if (!ctrlHeld) {
             selection_.clear();
             if (closestNode >= 0) selection_.selectedNodes.insert(closestNode);
@@ -1536,7 +1566,7 @@ void GLWidget::pickAtPoint(const QPoint& pos, bool ctrlHeld) {
 }
 
 void GLWidget::pickInRect(const QRect& rect) {
-    if (triToElem_.empty()) return;
+    if (triToElem_.empty() && mesh_.elemEdgeToElement.empty()) return;
 
     // 注意：此函数现在仅在 paintGL() 内调用，GL 上下文已由 Qt 管理。
 
@@ -1552,32 +1582,68 @@ void GLWidget::pickInRect(const QRect& rect) {
     if (ndcL > ndcR) std::swap(ndcL, ndcR);
     if (ndcB > ndcT) std::swap(ndcB, ndcT);
 
+    auto pointInside = [&](const glm::vec3& p) {
+        glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
+        if (clip.w <= 0) return false;
+        float sx = clip.x / clip.w;
+        float sy = clip.y / clip.w;
+        return sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT;
+    };
+
     selection_.clear();
 
-    int vertCount = static_cast<int>(mesh_.vertices.size() / 6);
-
     if (pickMode_ == PickMode::Node) {
-        // 节点模式：遍历所有渲染顶点，投影到屏幕判断是否在框内
+        // 节点模式：只遍历可见三角形的顶点，避免隐藏部件被框选
         std::unordered_set<int> addedNodes;
-        for (int vi = 0; vi < vertCount; ++vi) {
-            glm::vec4 wp(mesh_.vertices[vi * 6],
-                         mesh_.vertices[vi * 6 + 1],
-                         mesh_.vertices[vi * 6 + 2], 1.0f);
-            glm::vec4 clip = mvp * wp;
-            if (clip.w <= 0) continue;
+        auto pointInside = [&](const glm::vec3& p) {
+            glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
+            if (clip.w <= 0) return false;
             float sx = clip.x / clip.w;
             float sy = clip.y / clip.w;
-            if (sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT) {
-                int nodeId = (vi < static_cast<int>(vertexToNode_.size())) ? vertexToNode_[vi] : vi;
-                if (nodeId >= 0 && addedNodes.insert(nodeId).second)
-                    selection_.selectedNodes.insert(nodeId);
+            return sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT;
+        };
+        const int triCount = static_cast<int>(triToElem_.size());
+        for (int t = 0; t < triCount; ++t) {
+            if (!isTriangleVisible(t)) continue;
+            for (int v = 0; v < 3; ++v) {
+                unsigned int vi = mesh_.indices[t * 3 + v];
+                glm::vec3 p(mesh_.vertices[vi * 6],
+                            mesh_.vertices[vi * 6 + 1],
+                            mesh_.vertices[vi * 6 + 2]);
+                if (pointInside(p)) {
+                    int nodeId = (vi < static_cast<int>(vertexToNode_.size())) ? vertexToNode_[vi] : static_cast<int>(vi);
+                    if (nodeId >= 0 && addedNodes.insert(nodeId).second)
+                        selection_.selectedNodes.insert(nodeId);
+                }
             }
+        }
+        const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                           static_cast<int>(mesh_.elemEdgeVertices.size() / 6));
+        for (int edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (!isElementVisibleForSelection(elementId) ||
+                edge >= static_cast<int>(mesh_.elemEdgeNodeIds.size())) {
+                continue;
+            }
+            const int base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            const auto [node0, node1] = mesh_.elemEdgeNodeIds[edge];
+            if (node0 >= 0 && pointInside(p0) && addedNodes.insert(node0).second)
+                selection_.selectedNodes.insert(node0);
+            if (node1 >= 0 && pointInside(p1) && addedNodes.insert(node1).second)
+                selection_.selectedNodes.insert(node1);
         }
     } else if (pickMode_ == PickMode::Part) {
         // 部件模式：框内三角形 → 收集部件索引 → 选中这些部件所有单元
         std::unordered_set<int> hitParts;
         int triCount = static_cast<int>(triToElem_.size());
         for (int t = 0; t < triCount; ++t) {
+            if (!isTriangleVisible(t)) continue;
             bool anyInside = false;
             for (int v = 0; v < 3; ++v) {
                 unsigned int vi = mesh_.indices[t * 3 + v];
@@ -1593,17 +1659,39 @@ void GLWidget::pickInRect(const QRect& rect) {
                     break;
                 }
             }
-            if (anyInside && t < static_cast<int>(triToPart_.size())) {
+            if (anyInside && t < static_cast<int>(triToPart_.size()) && triToPart_[t] >= 0) {
                 hitParts.insert(triToPart_[t]);
             }
         }
         for (int p : hitParts) {
             selectPart(p);
         }
+        const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                           static_cast<int>(mesh_.elemEdgeVertices.size() / 6));
+        for (int edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (!isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            const int base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            if (pointInside(p0) || pointInside(p1)) {
+                const auto partIt = elemToPart_.find(elementId);
+                if (partIt != elemToPart_.end()) {
+                    selectPart(partIt->second);
+                }
+            }
+        }
     } else {
         // 单元模式：遍历所有三角形，如果三角形任意一个顶点在框内则选中该单元
         int triCount = static_cast<int>(triToElem_.size());
         for (int t = 0; t < triCount; ++t) {
+            if (!isTriangleVisible(t)) continue;
             int elemId = triToElem_[t];
             if (selection_.isElementSelected(elemId)) continue;  // 已选中，跳过
 
@@ -1624,6 +1712,26 @@ void GLWidget::pickInRect(const QRect& rect) {
             }
             if (anyInside) {
                 selection_.selectedElements.insert(elemId);
+            }
+        }
+        const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                           static_cast<int>(mesh_.elemEdgeVertices.size() / 6));
+        for (int edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (elementId < 0 ||
+                selection_.isElementSelected(elementId) ||
+                !isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            const int base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            if (pointInside(p0) || pointInside(p1)) {
+                selection_.selectedElements.insert(elementId);
             }
         }
     }
@@ -1652,46 +1760,29 @@ void GLWidget::pickInRect(const QRect& rect) {
 }
 
 void GLWidget::deselectAtPoint(const QPoint& pos) {
-    if (!pickFramebuffer_ || !pickFramebuffer_->isValid() || triToElem_.empty()) return;
-
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
     glm::mat4 projection = projectionMatrix(aspect);
     glm::mat4 view = cam_.viewMatrix();
     glm::mat4 mvp = projection * view;
 
-    renderPickBuffer(mvp);
+    int elemId = -1;
+    if (pickFramebuffer_ && pickFramebuffer_->isValid() && !triToElem_.empty()) {
+        renderPickBuffer(mvp);
 
-    unsigned char pixel[4] = {0};
-    int dpr = devicePixelRatio();
-    int px = pos.x() * dpr;
-    int py = (height() - pos.y()) * dpr;
-    auto* glBackend = openGLBackend();
-    glBackend->readFramebufferPixel(*pickFramebuffer_, px, py, pixel);
-
-    int elemId = colorToId(pixel[0], pixel[1], pixel[2]);
+        unsigned char pixel[4] = {0};
+        int dpr = devicePixelRatio();
+        int px = pos.x() * dpr;
+        int py = (height() - pos.y()) * dpr;
+        auto* glBackend = openGLBackend();
+        glBackend->readFramebufferPixel(*pickFramebuffer_, px, py, pixel);
+        elemId = colorToId(pixel[0], pixel[1], pixel[2]);
+    }
+    if (elemId < 0) {
+        elemId = edgeElementAtPoint(pos, mvp, 8.0f);
+    }
 
     if (pickMode_ == PickMode::Node) {
-        int closestNode = -1;
-        if (elemId >= 0) {
-            float ndcX = (2.0f * pos.x() / width()) - 1.0f;
-            float ndcY = 1.0f - (2.0f * pos.y() / height());
-            float minDist2 = 1e30f;
-            int triCount = static_cast<int>(triToElem_.size());
-            for (int t = 0; t < triCount; ++t) {
-                if (triToElem_[t] != elemId) continue;
-                for (int v = 0; v < 3; ++v) {
-                    unsigned int vi = mesh_.indices[t * 3 + v];
-                    glm::vec4 wp(mesh_.vertices[vi * 6], mesh_.vertices[vi * 6 + 1],
-                                 mesh_.vertices[vi * 6 + 2], 1.0f);
-                    glm::vec4 clip = mvp * wp;
-                    if (clip.w <= 0) continue;
-                    float sx = clip.x / clip.w;
-                    float sy = clip.y / clip.w;
-                    float d2 = (sx - ndcX) * (sx - ndcX) + (sy - ndcY) * (sy - ndcY);
-                    if (d2 < minDist2) { minDist2 = d2; closestNode = (vi < vertexToNode_.size()) ? vertexToNode_[vi] : static_cast<int>(vi); }
-                }
-            }
-        }
+        int closestNode = closestNodeForElement(elemId, pos, mvp);
         if (closestNode >= 0) selection_.selectedNodes.erase(closestNode);
 
     } else if (pickMode_ == PickMode::Part) {
@@ -1723,7 +1814,7 @@ void GLWidget::deselectAtPoint(const QPoint& pos) {
 }
 
 void GLWidget::deselectInRect(const QRect& rect) {
-    if (triToElem_.empty()) return;
+    if (triToElem_.empty() && mesh_.elemEdgeToElement.empty()) return;
 
     float aspect = (height() > 0) ? static_cast<float>(width()) / height() : 1.0f;
     glm::mat4 projection = projectionMatrix(aspect);
@@ -1736,27 +1827,64 @@ void GLWidget::deselectInRect(const QRect& rect) {
     if (ndcL > ndcR) std::swap(ndcL, ndcR);
     if (ndcB > ndcT) std::swap(ndcB, ndcT);
 
-    int vertCount = static_cast<int>(mesh_.vertices.size() / 6);
+    auto pointInside = [&](const glm::vec3& p) {
+        glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
+        if (clip.w <= 0) return false;
+        float sx = clip.x / clip.w;
+        float sy = clip.y / clip.w;
+        return sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT;
+    };
 
     if (pickMode_ == PickMode::Node) {
         std::unordered_set<int> removedNodes;
-        for (int vi = 0; vi < vertCount; ++vi) {
-            glm::vec4 wp(mesh_.vertices[vi * 6], mesh_.vertices[vi * 6 + 1],
-                         mesh_.vertices[vi * 6 + 2], 1.0f);
-            glm::vec4 clip = mvp * wp;
-            if (clip.w <= 0) continue;
+        auto pointInside = [&](const glm::vec3& p) {
+            glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
+            if (clip.w <= 0) return false;
             float sx = clip.x / clip.w;
             float sy = clip.y / clip.w;
-            if (sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT) {
-                int nodeId = (vi < static_cast<int>(vertexToNode_.size())) ? vertexToNode_[vi] : vi;
-                if (nodeId >= 0 && removedNodes.insert(nodeId).second)
-                    selection_.selectedNodes.erase(nodeId);
+            return sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT;
+        };
+        const int triCount = static_cast<int>(triToElem_.size());
+        for (int t = 0; t < triCount; ++t) {
+            if (!isTriangleVisible(t)) continue;
+            for (int v = 0; v < 3; ++v) {
+                unsigned int vi = mesh_.indices[t * 3 + v];
+                glm::vec3 p(mesh_.vertices[vi * 6],
+                            mesh_.vertices[vi * 6 + 1],
+                            mesh_.vertices[vi * 6 + 2]);
+                if (pointInside(p)) {
+                    int nodeId = (vi < static_cast<int>(vertexToNode_.size())) ? vertexToNode_[vi] : static_cast<int>(vi);
+                    if (nodeId >= 0 && removedNodes.insert(nodeId).second)
+                        selection_.selectedNodes.erase(nodeId);
+                }
             }
+        }
+        const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                           static_cast<int>(mesh_.elemEdgeVertices.size() / 6));
+        for (int edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (!isElementVisibleForSelection(elementId) ||
+                edge >= static_cast<int>(mesh_.elemEdgeNodeIds.size())) {
+                continue;
+            }
+            const int base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            const auto [node0, node1] = mesh_.elemEdgeNodeIds[edge];
+            if (node0 >= 0 && pointInside(p0) && removedNodes.insert(node0).second)
+                selection_.selectedNodes.erase(node0);
+            if (node1 >= 0 && pointInside(p1) && removedNodes.insert(node1).second)
+                selection_.selectedNodes.erase(node1);
         }
     } else if (pickMode_ == PickMode::Part) {
         std::unordered_set<int> hitParts;
         int triCount = static_cast<int>(triToElem_.size());
         for (int t = 0; t < triCount; ++t) {
+            if (!isTriangleVisible(t)) continue;
             bool anyInside = false;
             for (int v = 0; v < 3; ++v) {
                 unsigned int vi = mesh_.indices[t * 3 + v];
@@ -1768,13 +1896,35 @@ void GLWidget::deselectInRect(const QRect& rect) {
                 float sy = clip.y / clip.w;
                 if (sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT) { anyInside = true; break; }
             }
-            if (anyInside && t < static_cast<int>(triToPart_.size()))
+            if (anyInside && t < static_cast<int>(triToPart_.size()) && triToPart_[t] >= 0)
                 hitParts.insert(triToPart_[t]);
         }
         for (int p : hitParts) deselectPart(p);
+        const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                           static_cast<int>(mesh_.elemEdgeVertices.size() / 6));
+        for (int edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (!isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            const int base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            if (pointInside(p0) || pointInside(p1)) {
+                const auto partIt = elemToPart_.find(elementId);
+                if (partIt != elemToPart_.end()) {
+                    deselectPart(partIt->second);
+                }
+            }
+        }
     } else {
         int triCount = static_cast<int>(triToElem_.size());
         for (int t = 0; t < triCount; ++t) {
+            if (!isTriangleVisible(t)) continue;
             int elemId = triToElem_[t];
             if (!selection_.isElementSelected(elemId)) continue;
             bool anyInside = false;
@@ -1789,6 +1939,26 @@ void GLWidget::deselectInRect(const QRect& rect) {
                 if (sx >= ndcL && sx <= ndcR && sy >= ndcB && sy <= ndcT) { anyInside = true; break; }
             }
             if (anyInside) selection_.selectedElements.erase(elemId);
+        }
+        const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                           static_cast<int>(mesh_.elemEdgeVertices.size() / 6));
+        for (int edge = 0; edge < elemEdgeCount; ++edge) {
+            const int elementId = mesh_.elemEdgeToElement[edge];
+            if (elementId < 0 ||
+                !selection_.isElementSelected(elementId) ||
+                !isElementVisibleForSelection(elementId)) {
+                continue;
+            }
+            const int base = edge * 6;
+            const glm::vec3 p0(mesh_.elemEdgeVertices[base],
+                               mesh_.elemEdgeVertices[base + 1],
+                               mesh_.elemEdgeVertices[base + 2]);
+            const glm::vec3 p1(mesh_.elemEdgeVertices[base + 3],
+                               mesh_.elemEdgeVertices[base + 4],
+                               mesh_.elemEdgeVertices[base + 5]);
+            if (pointInside(p0) || pointInside(p1)) {
+                selection_.selectedElements.erase(elementId);
+            }
         }
     }
 
@@ -1831,8 +2001,71 @@ void GLWidget::setPickMode(PickMode mode) {
     }
 }
 
+void GLWidget::setInteractionMode(ViewportInteractionMode mode)
+{
+    interactionMode_ = mode;
+    isDragging_ = false;
+    isBoxSelecting_ = false;
+    isBoxDeselecting_ = false;
+    if (rubberBand_) {
+        rubberBand_->hide();
+    }
+}
+
+void GLWidget::rebuildPartLookup()
+{
+    int numParts = 0;
+    for (int part : triToPart_) {
+        if (part >= 0) numParts = std::max(numParts, part + 1);
+    }
+    for (int part : edgeToPart_) {
+        if (part >= 0) numParts = std::max(numParts, part + 1);
+    }
+
+    partColors_.resize(numParts);
+    for (int i = 0; i < numParts; ++i)
+        partColors_[i] = kPartPalette[i % kPartPaletteSize];
+
+    partTriangles_.clear();
+    partTriangles_.resize(numParts);
+    partElementIds_.clear();
+    partElementIds_.resize(numParts);
+    elemToPart_.clear();
+
+    std::vector<std::unordered_set<int>> partElementSets(numParts);
+
+    const int triCount = std::min(static_cast<int>(triToPart_.size()),
+                                  static_cast<int>(triToElem_.size()));
+    for (int t = 0; t < triCount; ++t) {
+        const int part = triToPart_[t];
+        const int element = triToElem_[t];
+        if (part < 0 || part >= numParts || element < 0) continue;
+        partTriangles_[part].push_back(t);
+        partElementSets[part].insert(element);
+    }
+
+    const int edgeCount = std::min(static_cast<int>(edgeToPart_.size()),
+                                   static_cast<int>(mesh_.edgeToElement.size()));
+    for (int edge = 0; edge < edgeCount; ++edge) {
+        const int part = edgeToPart_[edge];
+        const int element = mesh_.edgeToElement[edge];
+        if (part < 0 || part >= numParts || element < 0) continue;
+        partElementSets[part].insert(element);
+    }
+
+    for (int part = 0; part < numParts; ++part) {
+        auto& ids = partElementIds_[part];
+        ids.assign(partElementSets[part].begin(), partElementSets[part].end());
+        std::sort(ids.begin(), ids.end());
+        for (int element : ids) {
+            elemToPart_[element] = part;
+        }
+    }
+}
+
 void GLWidget::selectPart(int partIndex) {
     if (partIndex < 0 || partIndex >= static_cast<int>(partElementIds_.size())) return;
+    if (!isPartVisible(partIndex)) return;
     for (int eid : partElementIds_[partIndex]) {
         selection_.selectedElements.insert(eid);
     }
@@ -1853,6 +2086,63 @@ bool GLWidget::isPartFullySelected(int partIndex) const {
         if (!selection_.isElementSelected(eid)) return false;
     }
     return true;
+}
+
+bool GLWidget::isPartVisible(int partIndex) const
+{
+    if (partIndex < 0) {
+        return true;
+    }
+    auto it = partVisibility_.find(partIndex);
+    return it == partVisibility_.end() || it->second;
+}
+
+bool GLWidget::isTriangleVisible(int triangleIndex) const
+{
+    if (triangleIndex < 0 || triangleIndex >= static_cast<int>(triToElem_.size())) {
+        return false;
+    }
+    const int partIndex = triangleIndex < static_cast<int>(triToPart_.size())
+        ? triToPart_[triangleIndex]
+        : -1;
+    return isPartVisible(partIndex);
+}
+
+bool GLWidget::isElementVisibleForSelection(int elementId) const
+{
+    auto it = elemToPart_.find(elementId);
+    if (it == elemToPart_.end()) {
+        return true;
+    }
+    return isPartVisible(it->second);
+}
+
+bool GLWidget::isNodeVisibleForSelection(int nodeId) const
+{
+    const int triCount = static_cast<int>(triToElem_.size());
+    for (int t = 0; t < triCount; ++t) {
+        if (!isTriangleVisible(t)) continue;
+        for (int corner = 0; corner < 3; ++corner) {
+            const unsigned int vertexIndex = mesh_.indices[t * 3 + corner];
+            const int mappedNode = vertexIndex < vertexToNode_.size()
+                ? vertexToNode_[vertexIndex]
+                : static_cast<int>(vertexIndex);
+            if (mappedNode == nodeId) {
+                return true;
+            }
+        }
+    }
+    const int elemEdgeCount = std::min(static_cast<int>(mesh_.elemEdgeToElement.size()),
+                                       static_cast<int>(mesh_.elemEdgeNodeIds.size()));
+    for (int edge = 0; edge < elemEdgeCount; ++edge) {
+        const int elementId = mesh_.elemEdgeToElement[edge];
+        if (!isElementVisibleForSelection(elementId)) continue;
+        const auto [node0, node1] = mesh_.elemEdgeNodeIds[edge];
+        if (node0 == nodeId || node1 == nodeId) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void GLWidget::rebuildSelectionEdges() {
@@ -2153,13 +2443,16 @@ void GLWidget::drawAxesLabels(QPainter& painter) {
 
     QFont font = painter.font();
     font.setBold(true);
-    font.setPixelSize(14);
+    font.setPixelSize(17);
     painter.setFont(font);
 
     for (const auto& l : labels) {
         QPointF pos = project(l.dir * 1.15f);
         painter.setPen(l.color);
-        painter.drawText(QRectF(pos.x() - 12, pos.y() - 12, 24, 24),
+        painter.drawText(QRectF(pos.x() - kAxesLabelSize / 2.0f,
+                                pos.y() - kAxesLabelSize / 2.0f,
+                                kAxesLabelSize,
+                                kAxesLabelSize),
                          Qt::AlignCenter, l.name);
     }
 }
@@ -2196,7 +2489,7 @@ bool GLWidget::standardViewFromAxesClick(const QPoint& pos, StandardView* view) 
 
     int bestAxis = -1;
     float bestDist2 = 1.0e30f;
-    const float lineThreshold2 = 10.0f * 10.0f;
+    const float lineThreshold2 = 13.0f * 13.0f;
     for (size_t i = 0; i < axisDirs.size(); ++i) {
         const QPointF end = project(axisDirs[i] * 1.15f);
         const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
@@ -2208,7 +2501,7 @@ bool GLWidget::standardViewFromAxesClick(const QPoint& pos, StandardView* view) 
             return true;
         }
 
-        const float dist2 = distanceSquaredToSegment(p, origin, end);
+        const float dist2 = ScreenSpacePicking::distanceSquaredToSegment(p, origin, end);
         if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
             bestAxis = static_cast<int>(i);
             bestDist2 = dist2;
@@ -2237,7 +2530,7 @@ void GLWidget::selectByIds(PickMode mode, const std::vector<int>& ids) {
         // 过滤：只保留网格中实际存在的节点 ID
         std::unordered_set<int> validNodes(vertexToNode_.begin(), vertexToNode_.end());
         for (int id : ids) {
-            if (validNodes.count(id))
+            if (validNodes.count(id) && isNodeVisibleForSelection(id))
                 selection_.selectedNodes.insert(id);
         }
     } else if (mode == PickMode::Part) {
@@ -2248,7 +2541,7 @@ void GLWidget::selectByIds(PickMode mode, const std::vector<int>& ids) {
         for (int eid : mesh_.elemEdgeToElement)
             validElems.insert(eid);
         for (int id : ids) {
-            if (validElems.count(id))
+            if (validElems.count(id) && isElementVisibleForSelection(id))
                 selection_.selectedElements.insert(id);
         }
     }
@@ -2260,7 +2553,8 @@ void GLWidget::selectByIds(PickMode mode, const std::vector<int>& ids) {
     if (mode == PickMode::Node) {
         matchedIds.assign(selection_.selectedNodes.begin(), selection_.selectedNodes.end());
     } else if (mode == PickMode::Part) {
-        matchedIds.assign(ids.begin(), ids.end());
+        for (int pi = 0; pi < static_cast<int>(partElementIds_.size()); ++pi)
+            if (isPartFullySelected(pi)) matchedIds.push_back(pi);
     } else {
         matchedIds.assign(selection_.selectedElements.begin(), selection_.selectedElements.end());
     }
@@ -2486,40 +2780,7 @@ void GLWidget::setTriangleToPartMap(const std::vector<int>& map) {
     triToPart_ = map;
     int triCount = static_cast<int>(mesh_.indices.size() / 3);
     alignSize(triToPart_, triCount, -1);
-    // Assign palette colors to parts
-    int numParts = 0;
-    for (int p : triToPart_) if (p >= 0) numParts = std::max(numParts, p + 1);
-    partColors_.resize(numParts);
-    for (int i = 0; i < numParts; ++i)
-        partColors_[i] = kPartPalette[i % kPartPaletteSize];
-
-    // ── 预构建每部件的三角形索引和单元 ID 列表 ──
-    partTriangles_.clear();
-    partTriangles_.resize(numParts);
-    partElementIds_.clear();
-    partElementIds_.resize(numParts);
-
-    triCount = static_cast<int>(triToPart_.size());
-    for (int t = 0; t < triCount; ++t) {
-        int p = triToPart_[t];
-        if (p >= 0 && p < numParts) {
-            partTriangles_[p].push_back(t);
-        }
-    }
-    // 从 triToElem_ 提取每部件的去重单元 ID，并构建 elemToPart_ 反查表
-    elemToPart_.clear();
-    for (int p = 0; p < numParts; ++p) {
-        std::unordered_set<int> elemSet;
-        for (int t : partTriangles_[p]) {
-            if (t < static_cast<int>(triToElem_.size())) {
-                elemSet.insert(triToElem_[t]);
-            }
-        }
-        partElementIds_[p].assign(elemSet.begin(), elemSet.end());
-        for (int eid : partElementIds_[p]) {
-            elemToPart_[eid] = p;
-        }
-    }
+    rebuildPartLookup();
 
     // 上传 triToPart 到 texture buffer（供片段着色器用 gl_PrimitiveID 查表）
     triPartDirty_ = true;
@@ -2531,6 +2792,7 @@ void GLWidget::setEdgeToPartMap(const std::vector<int>& map) {
     edgeToPart_ = map;
     int edgeCount = static_cast<int>(mesh_.edgeIndices.size() / 2);
     alignSize(edgeToPart_, edgeCount, -1);
+    rebuildPartLookup();
     edgeVisibilityDirty_ = true;
     update();
 }
@@ -2539,10 +2801,42 @@ void GLWidget::setPartVisibility(int partIndex, bool visible) {
     partVisibility_[partIndex] = visible;
     partVisibilityDirty_ = true;
     edgeVisibilityDirty_ = true;
+    bool selectionChangedNow = false;
+    for (auto it = selection_.selectedElements.begin(); it != selection_.selectedElements.end();) {
+        if (!isElementVisibleForSelection(*it)) {
+            it = selection_.selectedElements.erase(it);
+            selectionChangedNow = true;
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = selection_.selectedNodes.begin(); it != selection_.selectedNodes.end();) {
+        if (!isNodeVisibleForSelection(*it)) {
+            it = selection_.selectedNodes.erase(it);
+            selectionChangedNow = true;
+        } else {
+            ++it;
+        }
+    }
     // 可见性变化影响选中高亮（隐藏部件不显示高亮）
-    if (selection_.hasSelection()) {
+    if (selection_.hasSelection() || selectionChangedNow) {
         partEdgeCacheValid_ = false;
         selectionDirty_ = true;
+    }
+    if (selectionChangedNow) {
+        std::vector<int> ids;
+        if (pickMode_ == PickMode::Node)
+            ids.assign(selection_.selectedNodes.begin(), selection_.selectedNodes.end());
+        else
+            ids.assign(selection_.selectedElements.begin(), selection_.selectedElements.end());
+        std::sort(ids.begin(), ids.end());
+        emit selectionChanged(pickMode_, static_cast<int>(ids.size()), ids);
+        if (pickMode_ == PickMode::Part) {
+            std::vector<int> pickedParts;
+            for (int pi = 0; pi < static_cast<int>(partElementIds_.size()); ++pi)
+                if (isPartFullySelected(pi)) pickedParts.push_back(pi);
+            emit partsPicked(pickedParts);
+        }
     }
     update();
 }
@@ -2668,5 +2962,11 @@ void GLWidget::uploadMesh() {
             static_cast<int>(mesh_.edgeVertices.size() * sizeof(float)),
             mesh_.edgeIndices.data(),
             static_cast<int>(mesh_.edgeIndices.size() * sizeof(unsigned int)));
+        const int edgeVertCount = static_cast<int>(mesh_.edgeVertices.size() / 3);
+        const std::vector<float> defaultEdgeScalars(edgeVertCount, 0.0f);
+        glBackend->uploadEdgeScalarBuffer(
+            *edgeResource_,
+            defaultEdgeScalars.data(),
+            static_cast<int>(defaultEdgeScalars.size() * sizeof(float)));
     }
 }

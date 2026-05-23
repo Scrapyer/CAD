@@ -147,6 +147,7 @@ private:
     float meshScalarMin_ = 0.0f;
     float meshScalarMax_ = 1.0f;
     int meshNumBands_ = 10;
+    bool edgeUseVertexScalars_ = false;
     QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
     QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
     bool viewportGridVisible_ = true;

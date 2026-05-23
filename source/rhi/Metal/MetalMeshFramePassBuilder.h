@@ -64,6 +64,7 @@ struct MetalMeshFrameResourceHandles {
 struct MetalMeshFrameUniformSet {
     MetalMeshUniforms mesh{};
     MetalMeshUniforms line{};
+    MetalMeshUniforms points{};
     MetalMeshUniforms overlay{};
     MetalMeshUniforms slice{};
     MetalMeshUniforms isoSurface{};
@@ -80,6 +81,7 @@ MetalMeshFrameUniformSet buildMetalMeshFrameUniformSet(const QMatrix4x4& mvp,
                                                        float scalarMax,
                                                        int numBands,
                                                        bool useVertexScalars,
+                                                       bool useEdgeScalars,
                                                        const QMatrix4x4& axesMvp);
 
 MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawFlags& flags,

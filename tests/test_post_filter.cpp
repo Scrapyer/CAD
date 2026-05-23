@@ -5,10 +5,12 @@
 
 #include "FEPostFilter.h"
 #include "FEIsoSurface.h"
+#include "FEMeshConverter.h"
 #include "FEModel.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 // 构建含两个 QUAD4 单元的简单 FERenderData（每个单元 2 个三角形）
 static FERenderData buildTwoQuadData() {
@@ -83,6 +85,31 @@ static FERenderData buildCrossingTriangleData() {
     return rd;
 }
 
+static FEModel buildTwoBarModel() {
+    FEModel model;
+    model.name = "TwoBars";
+    model.addNode(1, glm::vec3(0, 0, 0));
+    model.addNode(2, glm::vec3(1, 0, 0));
+    model.addNode(3, glm::vec3(2, 0, 0));
+
+    model.addElement(10, ElementType::BAR2, {1, 2});
+    model.addElement(20, ElementType::BAR2, {2, 3});
+
+    FEPart left;
+    left.name = "LeftBar";
+    left.nodeIds = {1, 2};
+    left.elementIds = {10};
+    model.parts.push_back(left);
+
+    FEPart right;
+    right.name = "RightBar";
+    right.nodeIds = {2, 3};
+    right.elementIds = {20};
+    model.parts.push_back(right);
+
+    return model;
+}
+
 static void testThresholdKeepsTargetElement() {
     auto rd = buildTwoQuadData();
 
@@ -121,6 +148,96 @@ static void testThresholdPreservesMapping() {
     }
     assert(hasNode1 && hasNode2);
     printf("  PASS: threshold preserves mapping\n");
+}
+
+static void testBarElementsGenerateEdgeElementMapping() {
+    FEModel model = buildTwoBarModel();
+    FERenderData rd = FEMeshConverter::toRenderData(model);
+
+    assert(rd.triangleCount() == 0);
+    assert(rd.mesh.edgeIndices.size() == 4);
+    assert(rd.mesh.edgeToElement.size() == 2);
+    assert(rd.mesh.edgeNodeIds.size() == 2);
+    assert(rd.edgeToPart.size() == 2);
+    assert(rd.mesh.elemEdgeToElement.size() == 2);
+    assert(rd.mesh.edgeToElement[0] == 10);
+    assert(rd.mesh.edgeToElement[1] == 20);
+    assert(rd.edgeToPart[0] == 0);
+    assert(rd.edgeToPart[1] == 1);
+    assert((rd.mesh.edgeNodeIds[0] == std::pair<int, int>{1, 2}));
+    assert((rd.mesh.edgeNodeIds[1] == std::pair<int, int>{2, 3}));
+    bool hasElemEdge10 = false;
+    bool hasElemEdge20 = false;
+    for (int elemId : rd.mesh.elemEdgeToElement) {
+        hasElemEdge10 = hasElemEdge10 || elemId == 10;
+        hasElemEdge20 = hasElemEdge20 || elemId == 20;
+    }
+    assert(hasElemEdge10 && hasElemEdge20);
+
+    printf("  PASS: BAR2 conversion generates edge-to-element mapping\n");
+}
+
+static void testThresholdFiltersLineOnlyElements() {
+    FEModel model = buildTwoBarModel();
+    FERenderData rd = FEMeshConverter::toRenderData(model);
+
+    FEScalarField field;
+    field.location = FieldLocation::Element;
+    field.values[10] = 0.25f;
+    field.values[20] = 0.75f;
+
+    FERenderData filtered = FEPostFilter::thresholdByElementValue(rd, field, 0.5f, 1.0f);
+
+    assert(filtered.triangleCount() == 0);
+    assert(filtered.mesh.edgeIndices.size() == 2);
+    assert(filtered.mesh.edgeToElement.size() == 1);
+    assert(filtered.mesh.edgeToElement[0] == 20);
+    assert(filtered.mesh.edgeNodeIds.size() == 1);
+    assert((filtered.mesh.edgeNodeIds[0] == std::pair<int, int>{2, 3}));
+    assert(filtered.edgeToPart.size() == 1);
+    assert(filtered.edgeToPart[0] == 1);
+    assert(filtered.mesh.elemEdgeToElement.size() == 1);
+    assert(filtered.mesh.elemEdgeToElement[0] == 20);
+
+    printf("  PASS: threshold filters line-only BAR2 elements\n");
+}
+
+static void testClipFiltersLineOnlyElements() {
+    FEModel model = buildTwoBarModel();
+    FERenderData rd = FEMeshConverter::toRenderData(model);
+
+    FEPlane plane;
+    plane.origin = glm::vec3(1.5f, 0.0f, 0.0f);
+    plane.normal = glm::vec3(1.0f, 0.0f, 0.0f);
+
+    FERenderData clipped = FEPostFilter::clipByPlane(rd, plane, true);
+
+    assert(clipped.triangleCount() == 0);
+    assert(clipped.mesh.edgeIndices.size() == 2);
+    assert(clipped.mesh.edgeToElement.size() == 1);
+    assert(clipped.mesh.edgeToElement[0] == 20);
+    assert(clipped.mesh.edgeNodeIds.size() == 1);
+    assert(clipped.mesh.edgeNodeIds[0].first == -1);
+    assert(clipped.mesh.edgeNodeIds[0].second == 3);
+    assert(clipped.edgeToPart.size() == 1);
+    assert(clipped.edgeToPart[0] == 1);
+    assert(clipped.mesh.elemEdgeToElement.size() == 1);
+    assert(clipped.mesh.elemEdgeToElement[0] == 20);
+
+    const unsigned int firstVertex = clipped.mesh.edgeIndices[0];
+    const unsigned int secondVertex = clipped.mesh.edgeIndices[1];
+    const float x0 = clipped.mesh.edgeVertices[firstVertex * 3];
+    const float x1 = clipped.mesh.edgeVertices[secondVertex * 3];
+    assert(std::abs(x0 - 1.5f) < 1.0e-5f);
+    assert(std::abs(x1 - 2.0f) < 1.0e-5f);
+    assert(clipped.mesh.elemEdgeVertices.size() == 6);
+    assert(std::abs(clipped.mesh.elemEdgeVertices[0] - 1.5f) < 1.0e-5f);
+    assert(std::abs(clipped.mesh.elemEdgeVertices[3] - 2.0f) < 1.0e-5f);
+    assert(clipped.mesh.elemEdgeNodeIds.size() == 1);
+    assert(clipped.mesh.elemEdgeNodeIds[0].first == -1);
+    assert(clipped.mesh.elemEdgeNodeIds[0].second == 3);
+
+    printf("  PASS: clip filters line-only BAR2 elements\n");
 }
 
 static void testClipByPlane() {
@@ -313,6 +430,9 @@ int main() {
     printf("=== FEPostFilter Tests ===\n");
     testThresholdKeepsTargetElement();
     testThresholdPreservesMapping();
+    testBarElementsGenerateEdgeElementMapping();
+    testThresholdFiltersLineOnlyElements();
+    testClipFiltersLineOnlyElements();
     testClipByPlane();
     testClipNegativeSide();
     testClipCutsTriangleAtPlane();

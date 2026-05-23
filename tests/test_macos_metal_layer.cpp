@@ -9,6 +9,41 @@
 
 #include <cstdio>
 
+namespace {
+
+Mesh makeLineOnlyMesh()
+{
+    Mesh mesh;
+    mesh.edgeVertices = {
+        -0.6f, -0.2f, 0.0f,
+         0.0f,  0.3f, 0.0f,
+         0.6f, -0.2f, 0.0f
+    };
+    mesh.edgeIndices = {0, 1, 1, 2};
+    return mesh;
+}
+
+MetalMeshUploadOptions makeLineOnlyOptions(const Mesh& mesh)
+{
+    MetalMeshUploadOptions options;
+    options.edgeToPart = {0, 1};
+    options.partColors = {
+        QVector3D(0.61f, 0.86f, 0.63f),
+        QVector3D(0.94f, 0.56f, 0.66f)
+    };
+    options.useVertexColor = true;
+    options.edgeScalars.resize(mesh.edgeVertices.size() / 3);
+    for (size_t i = 0; i < options.edgeScalars.size(); ++i) {
+        options.edgeScalars[i] = static_cast<float>(i);
+    }
+    options.scalarMin = 0.0f;
+    options.scalarMax = static_cast<float>(options.edgeScalars.size() - 1);
+    options.numBands = 6;
+    return options;
+}
+
+} // namespace
+
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
@@ -76,6 +111,10 @@ int main(int argc, char** argv)
     uploadOptions.vertexScalars.resize(cube.vertices.size() / 6);
     for (size_t i = 0; i < uploadOptions.vertexScalars.size(); ++i) {
         uploadOptions.vertexScalars[i] = static_cast<float>(i);
+    }
+    uploadOptions.edgeScalars.resize(cube.edgeVertices.size() / 3);
+    for (size_t i = 0; i < uploadOptions.edgeScalars.size(); ++i) {
+        uploadOptions.edgeScalars[i] = static_cast<float>(i);
     }
     uploadOptions.scalarMin = 0.0f;
     uploadOptions.scalarMax = static_cast<float>(uploadOptions.vertexScalars.size() - 1);
@@ -165,6 +204,40 @@ int main(int argc, char** argv)
                      backend.lastError().toUtf8().constData());
         return 30;
     }
+
+    Mesh lineOnly = makeLineOnlyMesh();
+    MetalMeshUploadOptions lineOnlyOptions = makeLineOnlyOptions(lineOnly);
+    if (!backend.uploadMesh(lineOnly, lineOnlyOptions)) {
+        std::fprintf(stderr, "uploadMesh(line-only) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 31;
+    }
+    if (!backend.renderMeshFrame(mvp,
+                                 QVector3D(0.48f, 0.72f, 0.76f),
+                                 ModelDisplayMode::Wireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(line-only wireframe) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 32;
+    }
+    lineOnlyOptions.partVisibility[1] = false;
+    if (!backend.uploadMesh(lineOnly, lineOnlyOptions)) {
+        std::fprintf(stderr, "uploadMesh(line-only hidden part) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 33;
+    }
+    if (!backend.renderMeshFrame(mvp,
+                                 QVector3D(0.48f, 0.72f, 0.76f),
+                                 ModelDisplayMode::SolidWireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(line-only hidden part) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 34;
+    }
+    if (!backend.uploadMesh(cube, uploadOptions)) {
+        std::fprintf(stderr, "uploadMesh(restore cube after line-only) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 35;
+    }
+
     const std::vector<float> selectionLine = {
         -0.5f, -0.5f, 0.5f,
          0.5f, -0.5f, 0.5f

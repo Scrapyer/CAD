@@ -72,7 +72,7 @@ void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePass
     const NSUInteger availableHeight = inputs.drawableSize.height() > static_cast<int>(margin * 2)
         ? static_cast<NSUInteger>(inputs.drawableSize.height()) - margin * 2
         : 0;
-    const NSUInteger axesSize = std::min<NSUInteger>(120, std::min(availableWidth, availableHeight));
+    const NSUInteger axesSize = std::min<NSUInteger>(152, std::min(availableWidth, availableHeight));
     if (axesSize == 0) {
         return;
     }

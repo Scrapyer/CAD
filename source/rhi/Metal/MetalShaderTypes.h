@@ -22,8 +22,13 @@ struct MetalMeshVertex {
     float scalar;
 };
 
+struct MetalLineVertex {
+    float position[3];
+    float scalar;
+};
+
 constexpr size_t kMetalFloat3ByteSize = sizeof(float) * 3;
-constexpr size_t kMetalLineVertexStride = kMetalFloat3ByteSize;
+constexpr size_t kMetalLineVertexStride = sizeof(MetalLineVertex);
 
 static_assert(sizeof(MetalMeshVertex) == sizeof(float) * 13,
               "MetalMeshVertex must match Metal vertex shader attributes");
@@ -35,3 +40,7 @@ static_assert(offsetof(MetalMeshVertex, pickColor) == kMetalFloat3ByteSize * 3,
               "MetalMeshVertex pickColor offset must match pipeline descriptor");
 static_assert(offsetof(MetalMeshVertex, scalar) == sizeof(float) * 12,
               "MetalMeshVertex scalar offset must match pipeline descriptor");
+static_assert(sizeof(MetalLineVertex) == sizeof(float) * 4,
+              "MetalLineVertex must match Metal line vertex shader attributes");
+static_assert(offsetof(MetalLineVertex, scalar) == kMetalFloat3ByteSize,
+              "MetalLineVertex scalar offset must match pipeline descriptor");

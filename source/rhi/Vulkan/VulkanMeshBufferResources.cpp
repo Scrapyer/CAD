@@ -18,5 +18,9 @@ void VulkanMeshBufferResources::destroy(const VulkanDevice& device)
     meshNumBands = 10;
     meshScalarSourceIndices.clear();
     meshScalarCount = 0;
+    edgeUseVertexScalars = false;
+    edgeScalarMin = 0.0f;
+    edgeScalarMax = 1.0f;
+    edgeNumBands = 10;
     edgeIndexCount = 0;
 }

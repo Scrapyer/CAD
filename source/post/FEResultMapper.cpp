@@ -17,9 +17,11 @@ FEMappedScalars FEResultMapper::mapScalarToVertices(const FEScalarField& field,
     mapped.location = field.location;
 
     const int vertCount = renderData.vertexCount();
+    const int edgeVertCount = static_cast<int>(renderData.mesh.edgeVertices.size() / 3);
     mapped.scalars.assign(vertCount, 0.0f);
+    mapped.edgeScalars.assign(edgeVertCount, 0.0f);
 
-    if (field.values.empty() || vertCount <= 0) {
+    if (field.values.empty()) {
         return mapped;
     }
 
@@ -62,6 +64,27 @@ FEMappedScalars FEResultMapper::mapScalarToVertices(const FEScalarField& field,
                 unsigned int vertexIndex = renderData.mesh.indices[indexOffset];
                 if (vertexIndex < mapped.scalars.size()) {
                     mapped.scalars[vertexIndex] = valueIt->second;
+                }
+            }
+        }
+        const int edgeCount = static_cast<int>(renderData.mesh.edgeIndices.size() / 2);
+        for (int e = 0; e < edgeCount; ++e) {
+            if (e >= static_cast<int>(renderData.mesh.edgeToElement.size())) {
+                continue;
+            }
+            int elemId = renderData.mesh.edgeToElement[e];
+            auto valueIt = field.values.find(elemId);
+            if (valueIt == field.values.end()) {
+                continue;
+            }
+            for (int k = 0; k < 2; ++k) {
+                int indexOffset = e * 2 + k;
+                if (indexOffset >= static_cast<int>(renderData.mesh.edgeIndices.size())) {
+                    continue;
+                }
+                unsigned int edgeVertexIndex = renderData.mesh.edgeIndices[indexOffset];
+                if (edgeVertexIndex < mapped.edgeScalars.size()) {
+                    mapped.edgeScalars[edgeVertexIndex] = valueIt->second;
                 }
             }
         }
@@ -138,6 +161,32 @@ FEMappedScalars FEResultMapper::mapScalarToVertices(const FEScalarField& field,
         auto valueIt = nodeValueMap.find(nodeId);
         if (valueIt != nodeValueMap.end()) {
             mapped.scalars[i] = valueIt->second;
+        }
+    }
+
+    const int edgeCount = static_cast<int>(renderData.mesh.edgeIndices.size() / 2);
+    for (int e = 0; e < edgeCount; ++e) {
+        if (e >= static_cast<int>(renderData.mesh.edgeNodeIds.size())) {
+            continue;
+        }
+        const auto [node0, node1] = renderData.mesh.edgeNodeIds[e];
+        const int nodeIds[2] = {node0, node1};
+        for (int k = 0; k < 2; ++k) {
+            if (nodeIds[k] < 0) {
+                continue;
+            }
+            auto valueIt = nodeValueMap.find(nodeIds[k]);
+            if (valueIt == nodeValueMap.end()) {
+                continue;
+            }
+            int indexOffset = e * 2 + k;
+            if (indexOffset >= static_cast<int>(renderData.mesh.edgeIndices.size())) {
+                continue;
+            }
+            unsigned int edgeVertexIndex = renderData.mesh.edgeIndices[indexOffset];
+            if (edgeVertexIndex < mapped.edgeScalars.size()) {
+                mapped.edgeScalars[edgeVertexIndex] = valueIt->second;
+            }
         }
     }
 

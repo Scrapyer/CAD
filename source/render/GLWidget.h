@@ -96,6 +96,9 @@ public:
     /** @brief 设置拾取模式 */
     void setPickMode(PickMode mode);
 
+    /** @brief 设置当前视口鼠标左键工具 */
+    void setInteractionMode(ViewportInteractionMode mode);
+
     /** @brief 设置是否显示选中项的 ID 标签 */
     void setShowLabels(bool show);
 
@@ -143,6 +146,9 @@ public:
 
     /** @brief 上传 per-vertex 标量值到 GPU，由片段着色器做量化 + 颜色映射 */
     void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
+
+    /** @brief 上传边线 per-vertex 标量值到 GPU，用于线/梁单元云图。 */
+    void setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
 
     /** @brief 设置三角形 → 部件索引映射表 */
     void setTriangleToPartMap(const std::vector<int>& map);
@@ -232,15 +238,22 @@ private:
     void pickInRect(const QRect& rect);
     void deselectAtPoint(const QPoint& pos);
     void deselectInRect(const QRect& rect);
+    int edgeElementAtPoint(const QPointF& pos, const glm::mat4& mvp, float thresholdPx) const;
+    int closestNodeForElement(int elementId, const QPointF& pos, const glm::mat4& mvp) const;
     glm::vec3 idToColor(int id);
     int colorToId(unsigned char r, unsigned char g, unsigned char b);
     void rebuildSelectionEdges();
     void buildPartEdgeCache();       // 选中变化时构建边缓存（重操作）
     void updateSilhouetteFromCache(); // 相机变化时从缓存刷新轮廓边（轻操作）
     void buildEdgeAdjacency();       // 预建全局边邻接表（网格加载后一次性构建）
+    void rebuildPartLookup();        // 根据三角形/边线映射重建部件反查表
     void selectPart(int partIndex);  // 将 partIndex 对应的所有单元加入 selection_.selectedElements
     void deselectPart(int partIndex);  // 从 selection_ 中移除该部件所有单元
     bool isPartFullySelected(int partIndex) const;  // 检查部件是否全部已选中
+    bool isPartVisible(int partIndex) const;
+    bool isTriangleVisible(int triangleIndex) const;
+    bool isElementVisibleForSelection(int elementId) const;
+    bool isNodeVisibleForSelection(int nodeId) const;
 
     // ── 场景对象 ──
     Camera cam_;
@@ -288,6 +301,7 @@ private:
     bool needsColorUpload_ = false;          // 需要上传颜色数据到 GPU
 
     // ── 标量值缓冲（per-vertex，片段着色器量化，存放于 meshResource_） ──
+    std::vector<float> edgeScalars_;
     float scalarMin_ = 0.0f;
     float scalarMax_ = 1.0f;
     int numBands_ = 10;
@@ -348,6 +362,7 @@ private:
     // ── 交互状态 ──
     QPoint lastPos_;
     QPoint pressPos_;                   // 鼠标按下位置（区分点击和拖拽）
+    ViewportInteractionMode interactionMode_ = ViewportInteractionMode::Pick; // 当前鼠标左键工具
     bool isDragging_ = false;           // 是否正在拖拽旋转/平移
     bool isBoxSelecting_ = false;       // 是否正在框选（添加）
     bool isBoxDeselecting_ = false;     // 是否正在框选（取消）

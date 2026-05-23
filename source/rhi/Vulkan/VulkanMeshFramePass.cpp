@@ -27,6 +27,26 @@ void pushMvpColorConstants(VkCommandBuffer commandBuffer,
                        pushConstants.data());
 }
 
+void pushMvpColorContourConstants(VkCommandBuffer commandBuffer,
+                                  VkPipelineLayout layout,
+                                  const QMatrix4x4& mvp,
+                                  const std::array<float, 4>& color,
+                                  const std::array<float, 4>& contour)
+{
+    std::array<float, 24> pushConstants{};
+    std::memcpy(pushConstants.data(), mvp.constData(), 16 * sizeof(float));
+    for (size_t i = 0; i < color.size(); ++i) {
+        pushConstants[16 + i] = color[i];
+        pushConstants[20 + i] = contour[i];
+    }
+    vkCmdPushConstants(commandBuffer,
+                       layout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0,
+                       static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
+                       pushConstants.data());
+}
+
 void recordIndexedSurfaceDraw(VkCommandBuffer commandBuffer,
                               const VulkanPipelineResource* pipeline,
                               const VulkanBufferResource* vertexResource,
@@ -73,7 +93,7 @@ void recordLineDraw(VkCommandBuffer commandBuffer,
     VkDeviceSize offsets[] = {0};
     VkBuffer vertexBuffer = vertexResource->buffer();
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline());
-    pushMvpColorConstants(commandBuffer, pipeline->layout(), mvp, color);
+    pushMvpColorContourConstants(commandBuffer, pipeline->layout(), mvp, color, {{0.0f, 1.0f, 1.0f, 0.0f}});
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
     vkCmdDraw(commandBuffer, vertexCount, 1, 0, 0);
 }
@@ -84,7 +104,8 @@ void recordIndexedLineDraw(VkCommandBuffer commandBuffer,
                            const VulkanBufferResource* indexResource,
                            uint32_t indexCount,
                            const QMatrix4x4& mvp,
-                           const std::array<float, 4>& color)
+                           const std::array<float, 4>& color,
+                           const std::array<float, 4>& contour)
 {
     if (pipeline == nullptr ||
         vertexResource == nullptr ||
@@ -100,7 +121,7 @@ void recordIndexedLineDraw(VkCommandBuffer commandBuffer,
     VkBuffer vertexBuffer = vertexResource->buffer();
     VkBuffer indexBuffer = indexResource->buffer();
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline());
-    pushMvpColorConstants(commandBuffer, pipeline->layout(), mvp, color);
+    pushMvpColorContourConstants(commandBuffer, pipeline->layout(), mvp, color, contour);
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, offsets);
     vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
@@ -112,13 +133,7 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
                                  const QMatrix4x4& mvp,
                                  const Resources& resources)
 {
-    if (resources.meshPipeline == nullptr ||
-        resources.meshVertexResource == nullptr ||
-        resources.meshIndexResource == nullptr ||
-        !resources.meshPipeline->isValid() ||
-        !resources.meshVertexResource->isValid() ||
-        !resources.meshIndexResource->isValid() ||
-        resources.meshIndexCount == 0) {
+    if (commandBuffer == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
         return;
     }
 
@@ -138,8 +153,12 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
 
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    VkBuffer meshVertexBuffer = resources.meshVertexResource->buffer();
-    VkBuffer meshIndexBuffer = resources.meshIndexResource->buffer();
+    VkBuffer meshVertexBuffer = resources.meshVertexResource && resources.meshVertexResource->isValid()
+        ? resources.meshVertexResource->buffer()
+        : VK_NULL_HANDLE;
+    VkBuffer meshIndexBuffer = resources.meshIndexResource && resources.meshIndexResource->isValid()
+        ? resources.meshIndexResource->buffer()
+        : VK_NULL_HANDLE;
 
     const bool drawSurface =
         resources.displayMode == ModelDisplayMode::Solid ||
@@ -149,7 +168,12 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
         resources.displayMode == ModelDisplayMode::SolidWireframe;
     const bool drawPoints = resources.displayMode == ModelDisplayMode::Points;
 
-    if (drawSurface) {
+    if (drawSurface &&
+        resources.meshPipeline != nullptr &&
+        resources.meshPipeline->isValid() &&
+        meshVertexBuffer != VK_NULL_HANDLE &&
+        meshIndexBuffer != VK_NULL_HANDLE &&
+        resources.meshIndexCount > 0) {
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.meshPipeline->pipeline());
         std::array<float, 20> meshPushConstants{};
         std::memcpy(meshPushConstants.data(), mvp.constData(), 16 * sizeof(float));
@@ -209,13 +233,20 @@ void VulkanMeshFramePass::record(VkCommandBuffer commandBuffer,
                    mvp,
                    {{0.5f, 0.5f, 0.5f, 0.35f}});
     if (drawEdges) {
+        const std::array<float, 4> edgeContour = {{
+            resources.edgeScalarMin,
+            resources.edgeScalarMax,
+            static_cast<float>(resources.edgeNumBands),
+            resources.edgeUseVertexScalars ? 1.0f : 0.0f
+        }};
         recordIndexedLineDraw(commandBuffer,
                               resources.linePipeline,
                               resources.edgeVertexResource,
                               resources.edgeIndexResource,
                               resources.edgeIndexCount,
                               mvp,
-                              {{0.2f, 0.2f, 0.22f, 1.0f}});
+                              {{0.2f, 0.2f, 0.22f, 1.0f}},
+                              edgeContour);
     }
     recordLineDraw(commandBuffer,
                    resources.linePipeline,

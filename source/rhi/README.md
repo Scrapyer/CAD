@@ -98,8 +98,10 @@ Metal 后端通过 `FEMODELVIEWER_ENABLE_METAL_RHI` 控制，默认在 macOS 上
 `setTriangleToElementMap()`、`setPartVisibility()` 和 `fitToModel()` 状态，上传阶段会按部件显隐过滤
 三角形/边线并写入基础部件颜色。Metal 当前通过 RGBA8 离屏 pick texture 编码可见三角形的
 element id，并用 blit readback 支持 Element / Part 单点拾取、`selectionChanged` 和
-`partsPicked` 信号；Node 模式会基于命中的单元和 `vertexToNode` 选择屏幕最近节点。
-Ctrl/Shift 左键框选添加和 Ctrl/Shift 右键点选/框选取消会按当前 PickMode 更新选择状态。选中 Node 会绘制小型三轴标记，选中 Element 会绘制完整单元边，选中 Part 会绘制边界/开放/特征/视角轮廓边；左下角坐标轴线由 Metal line pipeline 绘制，X/Y/Z 标签由宿主层 Qt label 跟随相机矩阵定位；云图标量已由运行时 MSL shader 做 Jet 分段映射，`RenderViewport` 会用宿主层 Qt overlay 在 Metal 视口上显示色标。
+`partsPicked` 信号；没有三角面命中时会调用 `ScreenSpacePicking` 在 CPU 侧做屏幕空间线段命中，
+从而支持纯线/梁模型的 Node / Element / Part 点选。Node 模式会基于命中的单元和
+`vertexToNode` / `elemEdgeNodeIds` 选择屏幕最近节点。Ctrl/Shift 左键框选添加和 Ctrl/Shift
+右键点选/框选取消会按当前 PickMode 更新选择状态，三角面顶点和线/梁端点均参与框选。选中 Node 会绘制小型三轴标记，选中 Element 会绘制完整单元边，选中 Part 会绘制边界/开放/特征/视角轮廓边；左下角坐标轴线由 Metal line pipeline 绘制，X/Y/Z 标签由宿主层 Qt label 跟随相机矩阵定位；云图标量已由运行时 MSL shader 做 Jet 分段映射，`RenderViewport` 会用宿主层 Qt overlay 在 Metal 视口上显示色标。
 `setOverlayMesh()` / `setOverlayVisible()` 已可绘制变形显示使用的未变形线框，`setSliceLines()` / `clearSliceLines()` 已可绘制和清除基础切片交线，`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可绘制和清除半透明等值面，`setClipPlanePreview()` / `clearClipPlanePreview()` 已可绘制和清除裁剪/切片平面预览。
 
 `tests/test_macos_vulkan_surface.cpp` 已验证 macOS 工厂可创建真实 `VkSurfaceKHR`，并可用该
@@ -111,10 +113,12 @@ vertex/index buffer 和 edge vertex/index buffer、用 push constant MVP/基础�
 会按部件可见性过滤三角形/边线，并把部件颜色写入 mesh vertex buffer；主网格/普通边线几何
 上传时会先写入 staging buffer，再通过 `VulkanStagingUploadContext` 合并多个 copy command 并用单个 fence 同步到 device-local vertex/index/line buffer，把 per-vertex scalar 写入独立 storage buffer。
 当前还会创建离屏 pick render pass / framebuffer，用 `triangleToElement` 编码每个可见三角形的拾取颜色，
-并通过 1x1 staging buffer 读回点击像素；`VulkanViewport` 已接入 Node / Element / Part 模式点选、
-Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消、`selectionChanged` 信号、Part 模式的 `partsPicked` 信号和选中高亮线。
+并通过 1x1 staging buffer 读回点击像素；没有三角面命中时同样通过 `ScreenSpacePicking`
+对 `Mesh::edgeVertices` 做屏幕空间线段命中，保证纯线/梁模型也能被点选。`VulkanViewport`
+已接入 Node / Element / Part 模式点选、Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消、
+`selectionChanged` 信号、Part 模式的 `partsPicked` 信号和选中高亮线。
 `RenderViewport` 已新增 macOS `VulkanViewport` 分支，可在主界面切换到 Vulkan 主网格视口；
-`setVertexScalars()` 已可把 per-vertex scalar 上传为 Vulkan storage buffer，并通过 descriptor set 绑定到 mesh pipeline；vertex shader 用 `gl_VertexIndex` 读取 scalar，fragment shader 通过 push constant 中的 min/max/bands 做 Jet 分段映射。Metal 路径会把 scalar 写入主 mesh vertex buffer，由 MSL shader 做同样的 Jet 分段映射，后续切换云图 field 时只更新 Metal shared vertex buffer 中的 scalar 字段与 contour 参数。`RenderViewport` 会用宿主层 Qt overlay 在 Vulkan 和 Metal 视口上显示 `setColorBar*()` 色标；Vulkan 已有独立 overlay line buffer、slice line buffer、iso surface buffer 和 clip preview buffer，可用于变形显示中的未变形半透明线框、基础切片交线绘制、半透明等值面叠加和裁剪/切片平面预览。
+`setVertexScalars()` 已可把 per-vertex scalar 上传为 Vulkan storage buffer，并通过 descriptor set 绑定到 mesh pipeline；vertex shader 用 `gl_VertexIndex` 读取 scalar，fragment shader 通过 push constant 中的 min/max/bands 做 Jet 分段映射。Metal 路径会把 scalar 写入主 mesh vertex buffer，由 MSL shader 做同样的 Jet 分段映射，后续切换云图 field 时只更新 Metal shared vertex buffer 中的 scalar 字段与 contour 参数。OpenGL、Vulkan 和 Metal 路径均已通过 `setEdgeScalars()` 把线/梁 edge scalar 接入普通边线渲染；Vulkan/Metal line vertex 使用 position + scalar 布局，辅助线段 scalar 固定为 0 并关闭 contour。`RenderViewport` 会用宿主层 Qt overlay 在 Vulkan 和 Metal 视口上显示 `setColorBar*()` 色标；Vulkan 已有独立 overlay line buffer、slice line buffer、iso surface buffer 和 clip preview buffer，可用于变形显示中的未变形半透明线框、基础切片交线绘制、半透明等值面叠加和裁剪/切片平面预览。
 现有完整功能运行路径仍默认使用 OpenGL。
 
 ## Vulkan 当前能力表
@@ -127,7 +131,7 @@ Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消、`selectio
 | Node / Element / Part 框选添加 | 完整 | 已完成，复用 CPU 投影和拾取颜色映射思路 |
 | 点选/框选取消 | 完整 | 已完成，Ctrl/Shift + 右键路径 |
 | 选中高亮 | 完整 | 已完成，Element 完整单元边、Part 边界/开放/特征/视角轮廓边、Node 三轴标记 |
-| shader 端云图 | 完整 | Vulkan 已完成 scalar SSBO + descriptor set；Metal 已完成 vertex scalar 字段 + MSL Jet 映射，切换 field 不重传 mesh geometry |
+| shader 端云图 | 面云图和线/梁 edge scalar 完整 | Vulkan 已完成 mesh scalar SSBO + line vertex scalar；Metal 已完成 mesh vertex scalar + line vertex scalar，切换 field 不重传 mesh geometry，edge scalar 更新重传普通边线 |
 | 渐变背景 | 完整 | 已完成，独立 Vulkan fullscreen triangle pipeline |
 | 色标 overlay | 完整 | 已完成，由 `RenderViewport` 的 Qt overlay 承载 |
 | 角落坐标轴 | 完整 | 已完成，复用 Vulkan line pipeline 绘制左下角 XYZ 轴线，并用 Qt overlay 显示 X/Y/Z 标签 |

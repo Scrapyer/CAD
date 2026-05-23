@@ -56,6 +56,19 @@ enum class PickMode {
 };
 
 /**
+ * @enum ViewportInteractionMode
+ * @brief 当前视口鼠标左键工具
+ *
+ * Pick 模式下左键按当前 PickMode 点选/框选；其他模式下左键用于视图导航。
+ */
+enum class ViewportInteractionMode {
+    Pick,       // 拾取：左键点选/框选，按当前 PickMode 选节点/单元/部件
+    Rotate,     // 旋转：左键拖拽旋转视图
+    Pan,        // 平移：左键拖拽平移视图
+    Zoom        // 缩放：左键上下拖拽缩放视图
+};
+
+/**
  * @struct FEPickResult
  * @brief 单次拾取的结果
  *

@@ -407,7 +407,7 @@ public:
 FEModel (节点+单元)
   ↓
 单元按维度分类
-  ├── 1D (BAR2/BAR3): 暂跳过
+  ├── 1D (BAR2/BAR3): 生成边线 + edgeToElement/edgeNodeIds
   ├── 2D (TRI3/QUAD4/...): tessellate2D() 直接三角化
   └── 3D (TET4/HEX8/...): 提取外表面 → tessellateFace()
 ```
@@ -677,10 +677,17 @@ glReadPixels 读取点击处像素
 重建选中高亮边线 → 重绘
 ```
 
-Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 将可见三角形按
-`triangleToElement` 写入颜色附件，随后把点击位置的 1 个像素复制到 staging buffer，
-同步读回并解码为单元 ID。该路径已经接入 `VulkanViewport` 的 Node / Element / Part 模式点选、框选添加和点选/框选取消；
-选中线段、部件轮廓边和节点标记已由 Vulkan 线管线绘制。
+OpenGL、Vulkan 和 Metal 的点选均采用“优先三角面、回退边线”的两段逻辑：
+
+1. 有三角面命中时，离屏 pick pass 将可见三角形按 `triangleToElement` 写入颜色附件，
+   点击位置读回 1 个像素并解码为单元 ID。
+2. 没有三角面命中时，使用 `ScreenSpacePicking` 在 CPU 侧把 `Mesh::edgeVertices`
+   投影到屏幕空间，按鼠标到线段的距离命中线/梁单元。
+3. Node 模式在命中单元后继续查找屏幕最近节点；面单元使用 `vertexToNode`，
+   线/梁单元使用 `elemEdgeNodeIds`。
+
+因此纯 BAR/BEAM 这类没有三角面的模型也能参与 Node / Element / Part 点选、框选添加和点选/框选取消；
+选中线段、部件轮廓边和节点标记由各后端的线管线绘制。
 
 ### Vulkan 传统管线能力
 
@@ -688,10 +695,10 @@ Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 
 |------|----------|
 | 主网格/普通边线 | 已完成 |
 | 部件颜色/显隐 | 已完成，上传阶段过滤可见三角形/边线 |
-| Node / Element / Part 点选 | 已完成，离屏 color picking + CPU 映射 |
-| Node / Element / Part 框选添加/取消 | 已完成，Ctrl/Shift 左键添加、Ctrl/Shift 右键取消 |
+| Node / Element / Part 点选 | 已完成，三角面走离屏 color picking，线/梁走 `ScreenSpacePicking` 屏幕空间回退 |
+| Node / Element / Part 框选添加/取消 | 已完成，Ctrl/Shift 左键添加、Ctrl/Shift 右键取消，三角面顶点和线/梁端点均参与框选 |
 | 选中高亮 | 已完成，Element 完整单元边、Part 边界/开放/特征/视角轮廓边、Node 三轴标记 |
-| shader 端云图 | Vulkan 已完成 scalar SSBO + descriptor set；Metal 已完成 vertex scalar 字段 + MSL Jet 映射，切换 field 不重传 mesh geometry |
+| shader 端云图 | OpenGL/Vulkan/Metal 均已完成面云图和线/梁 edge scalar；Vulkan 使用 mesh scalar SSBO + line vertex scalar，Metal 使用 mesh vertex scalar + line vertex scalar |
 | 渐变背景 | 已完成，独立 fullscreen triangle pipeline |
 | 角落坐标轴 | 已完成，复用 line pipeline 绘制左下角 XYZ 轴线，并用 Qt overlay 显示 X/Y/Z 标签 |
 | 色标、overlay、切片、等值面、裁剪/切片平面预览 | 已完成基础显示链路 |
@@ -703,9 +710,9 @@ Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 
 
 | 模式 | 编码方式 | 结果 |
 |------|----------|------|
-| Node | 渲染顶点 ID → 颜色 | 选中最近节点 |
-| Element | 单元 ID → 颜色 | 选中整个单元 |
-| Part | 同 Element，额外选中整个部件 | 选中部件所有单元 |
+| Node | 三角面命中后查 `vertexToNode`；线/梁命中后查 `elemEdgeNodeIds` | 选中最近节点 |
+| Element | 三角面离屏颜色编码；线/梁屏幕空间线段命中 | 选中整个单元 |
+| Part | 命中单元后经 `triangleToPart` / `edgeToPart` 反查部件 | 选中部件所有单元 |
 
 ### 选中高亮
 
@@ -722,7 +729,7 @@ Vulkan 传统管线当前复用同一颜色 ID 思路：离屏 pick render pass 
 
 - 左键拖拽：框选添加（`QRubberBand` 显示框选矩形）
 - Ctrl/Shift + 右键拖拽：框选取消
-- 框选时批量读取 FBO 矩形区域内的颜色 ID
+- 框选时遍历可见三角面顶点和可见线/梁端点，按当前 PickMode 更新节点、单元或部件选择
 
 ### 延迟拾取机制
 
@@ -965,8 +972,8 @@ ResultPanel::applyResult(field, title) 信号
   ▼
 MainWindow 接收信号
   │
-  ├── 将 FEScalarField 转为 per-vertex 标量数组
-  │   （通过 vertexToNode 映射表：渲染顶点 → 节点 → 标量值）
+  ├── 将 FEScalarField 转为 per-vertex / per-edge-vertex 标量数组
+  │   （通过 vertexToNode / edgeNodeIds / edgeToElement 映射表反查结果值）
   │
   ├── GLWidget::setVertexScalars(scalars, min, max, bands)
   │   └── 上传标量到 meshResource_ 的标量缓冲（GPU 端做量化+色谱映射）

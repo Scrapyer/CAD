@@ -57,6 +57,7 @@ public:
     void setTriangleToFaceMap(const std::vector<int>& map);
     void setVertexToNodeMap(const std::vector<int>& map);
     void setPickMode(PickMode mode);
+    void setInteractionMode(ViewportInteractionMode mode);
     void setShowLabels(bool show);
     void selectByIds(PickMode mode, const std::vector<int>& ids);
 
@@ -73,6 +74,7 @@ public:
                              const glm::vec3& normal);
     void clearClipPlanePreview();
     void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
+    void setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
     void setTriangleToPartMap(const std::vector<int>& map);
     void setEdgeToPartMap(const std::vector<int>& map);
     const std::vector<glm::vec3>& partColors() const;
@@ -118,6 +120,7 @@ private:
     RenderBackendKind requestedBackendKind_ = RenderBackendKind::OpenGL;
     RenderBackendKind activeBackendKind_ = RenderBackendKind::OpenGL;
     PickMode currentPickMode_ = PickMode::Node;
+    ViewportInteractionMode interactionMode_ = ViewportInteractionMode::Pick;
     Mesh currentMesh_;
     bool hasCurrentMesh_ = false;
     glm::vec3 modelCenter_{0.0f, 0.0f, 0.0f};
@@ -155,6 +158,7 @@ private:
     glm::vec3 clipPreviewNormal_{0.0f, 0.0f, 1.0f};
     std::vector<float> vertexColors_;
     std::vector<float> vertexScalars_;
+    std::vector<float> edgeScalars_;
     float scalarMin_ = 0.0f;
     float scalarMax_ = 1.0f;
     int numBands_ = 10;

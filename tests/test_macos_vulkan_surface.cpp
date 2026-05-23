@@ -63,6 +63,37 @@ Mesh makeGridMesh(int divisions)
     return mesh;
 }
 
+Mesh makeLineOnlyMesh()
+{
+    Mesh mesh;
+    mesh.edgeVertices = {
+        -0.6f, -0.2f, 0.0f,
+         0.0f,  0.3f, 0.0f,
+         0.6f, -0.2f, 0.0f
+    };
+    mesh.edgeIndices = {0, 1, 1, 2};
+    return mesh;
+}
+
+VulkanMeshUploadOptions makeLineOnlyOptions(const Mesh& mesh)
+{
+    VulkanMeshUploadOptions options;
+    options.edgeToPart = {0, 1};
+    options.partColors = {
+        QVector3D(0.61f, 0.86f, 0.63f),
+        QVector3D(0.94f, 0.56f, 0.66f)
+    };
+    options.useVertexColor = true;
+    options.edgeScalars.resize(mesh.edgeVertices.size() / 3);
+    for (size_t i = 0; i < options.edgeScalars.size(); ++i) {
+        options.edgeScalars[i] = static_cast<float>(i);
+    }
+    options.scalarMin = 0.0f;
+    options.scalarMax = static_cast<float>(options.edgeScalars.size() - 1);
+    options.numBands = 6;
+    return options;
+}
+
 VulkanMeshUploadOptions makeGridOptions(const Mesh& mesh, bool hideOddParts)
 {
     VulkanMeshUploadOptions options;
@@ -92,6 +123,10 @@ VulkanMeshUploadOptions makeGridOptions(const Mesh& mesh, bool hideOddParts)
     options.vertexScalars.resize(mesh.vertices.size() / 6);
     for (size_t i = 0; i < options.vertexScalars.size(); ++i) {
         options.vertexScalars[i] = static_cast<float>(i % 97);
+    }
+    options.edgeScalars.resize(mesh.edgeVertices.size() / 3);
+    for (size_t i = 0; i < options.edgeScalars.size(); ++i) {
+        options.edgeScalars[i] = static_cast<float>(i % 97);
     }
     options.scalarMin = 0.0f;
     options.scalarMax = 96.0f;
@@ -219,6 +254,10 @@ int main(int argc, char** argv)
     uploadOptions.vertexScalars.resize(cube.vertices.size() / 6);
     for (size_t i = 0; i < uploadOptions.vertexScalars.size(); ++i) {
         uploadOptions.vertexScalars[i] = static_cast<float>(i);
+    }
+    uploadOptions.edgeScalars.resize(cube.edgeVertices.size() / 3);
+    for (size_t i = 0; i < uploadOptions.edgeScalars.size(); ++i) {
+        uploadOptions.edgeScalars[i] = static_cast<float>(i);
     }
     uploadOptions.scalarMin = 0.0f;
     uploadOptions.scalarMax = static_cast<float>(uploadOptions.vertexScalars.size() - 1);
@@ -457,6 +496,37 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "renderMeshFrame(combo cleared) failed: %s\n",
                      backend.lastError().toUtf8().constData());
         return 39;
+    }
+    Mesh lineOnly = makeLineOnlyMesh();
+    VulkanMeshUploadOptions lineOnlyOptions = makeLineOnlyOptions(lineOnly);
+    if (!uploadMeshWithRetry(backend, lineOnly, lineOnlyOptions, "uploadMesh(line-only)")) {
+        return 62;
+    }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::Wireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(line-only wireframe) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 63;
+    }
+    lineOnlyOptions.partVisibility[1] = false;
+    if (!uploadMeshWithRetry(backend, lineOnly, lineOnlyOptions, "uploadMesh(line-only hidden part)")) {
+        return 64;
+    }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::SolidWireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(line-only hidden part) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 65;
     }
     Mesh grid = makeGridMesh(40);
     for (int iteration = 0; iteration < 4; ++iteration) {

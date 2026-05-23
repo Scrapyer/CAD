@@ -34,8 +34,9 @@
   - [4.4 RHI 公共类型与设置](#44-rhi-公共类型与设置)
 - [5. 交互层 API](#5-交互层-api)
   - [5.1 PickMode — 拾取模式](#51-pickmode--拾取模式)
-  - [5.2 FEPickResult — 拾取结果](#52-fpickresult--拾取结果)
-  - [5.3 FESelection — 选中状态](#53-feselection--选中状态)
+  - [5.2 ViewportInteractionMode — 视口交互工具](#52-viewportinteractionmode--视口交互工具)
+  - [5.3 FEPickResult — 拾取结果](#53-fpickresult--拾取结果)
+  - [5.4 FESelection — 选中状态](#54-feselection--选中状态)
 - [6. 变形与动画 API](#6-变形与动画-api)
   - [6.1 FEDeformation — 变形显示工具类](#61-fedeformation--变形显示工具类)
   - [6.2 FEAnimationController — 帧动画控制器](#62-feanimationcontroller--帧动画控制器)
@@ -745,6 +746,8 @@ struct Mesh {
     // ── 边线数据 ──
     std::vector<float>        edgeVertices; // 边线顶点（仅位置，GL_LINES 用）
     std::vector<unsigned int> edgeIndices;  // 边线索引（每 2 个一组）
+    std::vector<int>          edgeToElement; // 边线 → FEM 单元 ID
+    std::vector<std::pair<int,int>> edgeNodeIds; // 边线两端 FEM 节点 ID
 
     // ── 单元完整边线（用于选中高亮）──
     std::vector<float>              elemEdgeVertices;   // 边顶点坐标
@@ -774,6 +777,8 @@ struct Mesh {
 | `addTriangle(a, b, c)` | 追加一个三角形索引 |
 | `addFlatTriangle(a, b, c)` | 追加三角形并自动计算面法线（flat shading） |
 | `addFlatQuad(a, b, c, d)` | 追加四边形，拆分为 2 个三角形 |
+
+普通边线的 `edgeToElement`、`edgeNodeIds` 与 `edgeIndices` 按边一一对应：`edgeToElement.size() == edgeNodeIds.size() == edgeIndices.size() / 2`。它们用于没有三角面的线/梁单元显隐、拾取过滤、节点/单元结果映射和部件归属反查；裁剪生成的新交点节点 ID 记为 `-1`。`elemEdgeToElement` / `elemEdgeNodeIds` 则用于选中高亮时绘制单元完整边线。
 
 ---
 
@@ -912,7 +917,7 @@ static Mesh toWireframeMesh(const FEModel& model);
 
 | 单元维度 | 处理方式 |
 |----------|----------|
-| 1D (BAR2/BAR3) | 暂跳过（后续可生成管状几何） |
+| 1D (BAR2/BAR3) | 生成边线数据，并填充 `Mesh::edgeToElement` / `FERenderData::edgeToPart` |
 | 2D (TRI3/QUAD4...) | 直接三角化 |
 | 3D (TET4/HEX8...) | 提取外表面 → 三角化 |
 
@@ -1023,6 +1028,7 @@ explicit GLWidget(QWidget* parent = nullptr);
 | `void setModelDisplayMode(ModelDisplayMode mode)` | 切换模型显示方式：实体、线框、实体+线框或点显示 |
 | `void setViewportGridVisible(bool visible)` | 显示/隐藏视口背景辅助网格；网格线距会随相机缩放自适应分级 |
 | `void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands)` | 上传 per-vertex 标量值，由 GPU 着色器做量化 + 颜色映射 |
+| `void setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands)` | 上传边线 per-vertex 标量值，用于线/梁单元云图；OpenGL、Vulkan 和 Metal 路径均接入线段着色 |
 
 #### 相机与视图
 
@@ -1087,6 +1093,7 @@ explicit GLWidget(QWidget* parent = nullptr);
 
 ```cpp
 void setPickMode(PickMode mode);  // Node / Element / Part — 切换时自动清除之前的选中状态
+void setInteractionMode(ViewportInteractionMode mode);  // Pick / Rotate / Pan / Zoom — 控制左键工具
 ```
 
 #### 按 ID 选中
@@ -1143,11 +1150,13 @@ signals:
 
 | 操作 | 行为 |
 |------|------|
-| 左键拖拽 | 旋转（轨道相机） |
+| `ViewportInteractionMode::Pick` + 左键单击/拖拽 | 按当前 `PickMode` 点选/框选节点、单元或部件 |
+| `ViewportInteractionMode::Rotate` + 左键拖拽 | 旋转（轨道相机） |
+| `ViewportInteractionMode::Pan` + 左键拖拽 | 平移 |
+| `ViewportInteractionMode::Zoom` + 左键上下拖拽 | 缩放 |
 | 中键拖拽 / 右键拖拽 | 平移 |
 | 右键单击且未拖动 | 发射 `contextMenuRequested`，由应用层显示上下文菜单 |
 | 滚轮 | 缩放 |
-| 左键单击 | 点选（根据 PickMode 选中节点/单元/部件） |
 | Ctrl + 左键单击 | 追加/取消选中（多选） |
 | Ctrl/Shift + 左键拖拽 | 框选添加 |
 | Ctrl/Shift + 右键单击/拖拽 | 点选/框选取消 |
@@ -1158,13 +1167,14 @@ signals:
 
 **头文件**：`RenderViewport.h`
 
-`RenderViewport` 是主界面使用的渲染视口宿主层，负责按全局 RHI 设置分发到具体视口实现。OpenGL 路径承载现有 `GLWidget`；Metal 路径在 macOS 上承载 `QWindow + CAMetalLayer` 宿主视口，当前已可通过 `MetalRenderBackend` 创建 `MTLDevice` / command queue，上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，并用运行时 MSL pipeline 结合 depth attachment 绘制渐变背景、主网格三角面、普通边线、点显示、云图标量映射、左下角坐标轴、选中高亮线、未变形叠加线框、切片交线、半透明等值面和裁剪/切片平面预览；Metal 上传阶段会按 `setTriangleToElementMap()`、`setVertexToNodeMap()`、`setTriangleToPartMap()`、`setEdgeToPartMap()` 和 `setPartVisibility()` 过滤三角形/边线并写入基础部件颜色和 per-vertex scalar，Element 离屏拾取 pass 会把可见三角形的 element id 编码到 RGBA8 pick texture，再通过 blit readback 支持 Element / Part 单点拾取、`selectionChanged` 和 `partsPicked` 信号；Node 模式会在命中单元后用 `vertexToNode` 选取屏幕最近节点，Ctrl/Shift 左键框选添加和 Ctrl/Shift 右键点选/框选取消会按当前 PickMode 更新选择状态，选中 Node 会绘制小型三轴标记，选中 Element 会绘制完整单元边，选中 Part 会绘制边界/开放/特征/视角轮廓边。Metal 视口支持左下角 X/Y/Z 坐标轴标签、选中 ID 标签、左键旋转、中键/右键平移和滚轮缩放。Vulkan 路径在 macOS 上承载 `QWindow + VkSurfaceKHR` 宿主视口，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，通过 `fitToModel()` 同步相机适配，通过 `setObjectColor()` 同步基础对象色，通过 `setTriangleToPartMap()`、`setEdgeToPartMap()` 和 `setPartVisibility()` 支持基础部件颜色与显隐，支持基础轨道相机交互，并绘制渐变背景、主表面、普通边线、左下角坐标轴、X/Y/Z 标签和选中 ID 标签。Vulkan 视口会在窗口 resize 后重建 swapchain，也会在 acquire/present 返回 out-of-date 或 suboptimal 时标记下一帧重建。当前 Vulkan 路径已有离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 单点点选、Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消会更新 Vulkan 视口选择状态并转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；Vulkan 的 `setVertexScalars()` 会把 per-vertex scalar 上传为 storage buffer 并通过 descriptor set 绑定到 mesh pipeline，由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射；Metal 的 `setVertexScalars()` 会更新 shared vertex buffer 中的 scalar 字段，由 MSL shader 做同样的 Jet 分段映射；mesh 已上传后再次调用 `setVertexScalars()` 只更新 scalar 数据和 contour 参数，不重传 mesh geometry。主网格、普通边线、等值面和裁剪/切片平面预览三角面几何已通过 staging buffer 上传到 device-local vertex/index buffer，staging copy 使用单次 fence 等待。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 和 Metal 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可在 Vulkan 和 Metal 路径绘制变形显示使用的未变形线框，`setSliceLines()` / `clearSliceLines()` 已可在 Vulkan 和 Metal 路径绘制和清除基础切片交线，`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可在 Vulkan 和 Metal 路径绘制和清除半透明等值面叠加；`setClipPlanePreview()` / `clearClipPlanePreview()` 已可在 Vulkan 和 Metal 路径绘制和清除裁剪/切片平面预览。
+`RenderViewport` 是主界面使用的渲染视口宿主层，负责按全局 RHI 设置分发到具体视口实现。OpenGL 路径承载现有 `GLWidget`，可通过 `setVertexScalars()` 渲染面云图，并通过 `setEdgeScalars()` 渲染线/梁边线云图；Metal 路径在 macOS 上承载 `QWindow + CAMetalLayer` 宿主视口，当前已可通过 `MetalRenderBackend` 创建 `MTLDevice` / command queue，上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，并用运行时 MSL pipeline 结合 depth attachment 绘制渐变背景、主网格三角面、普通边线、点显示、云图标量映射、线/梁边线云图、左下角坐标轴、选中高亮线、未变形叠加线框、切片交线、半透明等值面和裁剪/切片平面预览；Metal 上传阶段会按 `setTriangleToElementMap()`、`setVertexToNodeMap()`、`setTriangleToPartMap()`、`setEdgeToPartMap()` 和 `setPartVisibility()` 过滤三角形/边线并写入基础部件颜色、per-vertex scalar 和 edge scalar，Element 离屏拾取 pass 会把可见三角形的 element id 编码到 RGBA8 pick texture，再通过 blit readback 支持 Element / Part 单点拾取、`selectionChanged` 和 `partsPicked` 信号；Node 模式会在命中单元后用 `vertexToNode` 选取屏幕最近节点，Ctrl/Shift 左键框选添加和 Ctrl/Shift 右键点选/框选取消会按当前 PickMode 更新选择状态，选中 Node 会绘制小型三轴标记，选中 Element 会绘制完整单元边，选中 Part 会绘制边界/开放/特征/视角轮廓边。Metal 视口支持左下角 X/Y/Z 坐标轴标签、选中 ID 标签、左键旋转、中键/右键平移和滚轮缩放。Vulkan 路径在 macOS 上承载 `QWindow + VkSurfaceKHR` 宿主视口，可上传 `Mesh.vertices / Mesh.indices` 和 `Mesh.edgeVertices / Mesh.edgeIndices`，通过 `fitToModel()` 同步相机适配，通过 `setObjectColor()` 同步基础对象色，通过 `setTriangleToPartMap()`、`setEdgeToPartMap()` 和 `setPartVisibility()` 支持基础部件颜色与显隐，支持基础轨道相机交互，并绘制渐变背景、主表面、普通边线、线/梁边线云图、左下角坐标轴、X/Y/Z 标签和选中 ID 标签。Vulkan 视口会在窗口 resize 后重建 swapchain，也会在 acquire/present 返回 out-of-date 或 suboptimal 时标记下一帧重建。当前 Vulkan 路径已有离屏 pick render pass，可按 `triangleToElement` 编码可见三角形颜色，并通过 staging buffer 读回点击像素；Node / Element / Part 单点点选、Ctrl/Shift 左键框选添加、Ctrl/Shift 右键点选/框选取消会更新 Vulkan 视口选择状态并转发 `selectionChanged`，Part 模式还会转发 `partsPicked`。Vulkan 会为选中单元绘制完整单元边，为选中部件绘制边界/开放/特征/视角轮廓边，为选中节点绘制小型三轴标记；Vulkan 的 `setVertexScalars()` 会把 per-vertex scalar 上传为 storage buffer 并通过 descriptor set 绑定到 mesh pipeline，由 shader 通过 `gl_VertexIndex` 和 push constant 中的 min/max/bands 做 Jet 分段映射；Metal 的 `setVertexScalars()` 会更新 shared vertex buffer 中的 scalar 字段，由 MSL shader 做同样的 Jet 分段映射；`setEdgeScalars()` 会在 Vulkan/Metal 的 line pipeline 中启用 edge scalar Jet 分段映射。mesh 已上传后再次调用 `setVertexScalars()` 只更新 scalar 数据和 contour 参数，不重传 mesh geometry；`setEdgeScalars()` 会重传普通边线顶点以更新 line vertex scalar。主网格、普通边线、等值面和裁剪/切片平面预览三角面几何已通过 staging buffer 上传到 device-local vertex/index buffer，staging copy 使用单次 fence 等待。`setColorBar*()` 接口会通过宿主层 Qt overlay 在 Vulkan 和 Metal 视口上显示色标；`setOverlayMesh()` / `setOverlayVisible()` 已可在 Vulkan 和 Metal 路径绘制变形显示使用的未变形线框，`setSliceLines()` / `clearSliceLines()` 已可在 Vulkan 和 Metal 路径绘制和清除基础切片交线，`setIsoSurfaceMesh()` / `clearIsoSurface()` 已可在 Vulkan 和 Metal 路径绘制和清除半透明等值面叠加；`setClipPlanePreview()` / `clearClipPlanePreview()` 已可在 Vulkan 和 Metal 路径绘制和清除裁剪/切片平面预览。
 
 常用接口与 `GLWidget` 保持一致，包括：
 
 ```cpp
 void setMesh(const Mesh& mesh);
 void setPickMode(PickMode mode);
+void setInteractionMode(ViewportInteractionMode mode);
 void setModelDisplayMode(ModelDisplayMode mode);
 void setViewportGridVisible(bool visible);
 void setStandardView(StandardView view);
@@ -1172,6 +1182,8 @@ void setPreferredRenderBackend(RenderBackendKind kind);
 RenderBackendKind requestedRenderBackendKind() const;
 RenderBackendKind activeRenderBackendKind() const;
 QString renderDiagnostics() const;
+void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
+void setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
 ```
 
 Vulkan 路径当前实现 `PickMode::Node` / `PickMode::Element` / `PickMode::Part` 的单点拾取、框选添加和点选/框选取消。Metal 路径当前提供基础主网格三角面、普通边线、点显示绘制、云图标量映射、部件颜色/显隐、Node / Element / Part 点选/框选、选中高亮、未变形叠加线框、切片交线、等值面、裁剪/切片平面预览和轨道相机交互。`RenderViewport` 启动时读取全局 RHI 配置并激活对应视口；运行时调用 `setPreferredRenderBackend()` 只写入下次启动的首选 RHI，不再立即销毁/重建当前视口。
@@ -1247,7 +1259,22 @@ enum class PickMode {
 };
 ```
 
-### 5.2 FEPickResult — 拾取结果
+### 5.2 ViewportInteractionMode — 视口交互工具
+
+**头文件**：`FEPickResult.h`
+
+```cpp
+enum class ViewportInteractionMode {
+    Pick,    // 左键按当前 PickMode 点选/框选
+    Rotate,  // 左键拖拽旋转视图
+    Pan,     // 左键拖拽平移视图
+    Zoom     // 左键上下拖拽缩放视图
+};
+```
+
+`PickMode` 决定“拾取什么对象”，`ViewportInteractionMode` 决定“鼠标左键当前做什么”。例如先调用 `setPickMode(PickMode::Element)`，再调用 `setInteractionMode(ViewportInteractionMode::Pick)`，左键就会按单元模式拾取。
+
+### 5.3 FEPickResult — 拾取结果
 
 **头文件**：`FEPickResult.h`
 
@@ -1265,7 +1292,7 @@ struct FEPickResult {
 };
 ```
 
-### 5.3 FESelection — 选中状态
+### 5.4 FESelection — 选中状态
 
 **头文件**：`FEPickResult.h`
 
@@ -1693,6 +1720,8 @@ viewer.setColorBarIdLabel("Node ID");
 viewer.setColorBarExtremes(mapped.minId, mapped.minValue, mapped.maxId, mapped.maxValue);
 ```
 
+当前 `FEResultMapper::mapScalarToVertices()` 会把 1D 线/梁单元纳入结果映射：面网格标量写入 `mapped.scalars`，普通边线标量写入 `mapped.edgeScalars`，纯线模型没有三角面顶点时 `mapped.scalars` 可以为空但 `edgeScalars`、`minValue/maxValue/minId/maxId` 仍可用于色标和查询。OpenGL、Vulkan 和 Metal 路径均通过 `setEdgeScalars()` 让线/梁按结果值着色。
+
 ### 9.3 部件可见性控制
 
 ```cpp
@@ -1910,7 +1939,7 @@ glWidget->setIsoSurfaceMesh(iso);
 | `RenderSettings.h` | `source/rhi/RenderSettings.h` | `RenderSettings` | 全局首选 RHI 持久化设置 |
 | `GLWidget.h` | `source/render/GLWidget.h` | `GLWidget` | OpenGL 渲染窗口 |
 | `RenderViewport.h` | `source/app/window/RenderViewport.h` | `RenderViewport` | 渲染视口宿主层 |
-| `FEPickResult.h` | `source/render/FEPickResult.h` | `PickMode`, `FEPickResult`, `FESelection` | 拾取与选中 |
+| `FEPickResult.h` | `source/render/FEPickResult.h` | `PickMode`, `ViewportInteractionMode`, `FEPickResult`, `FESelection` | 拾取、视口交互工具与选中 |
 | `ferender_export.h` | 构建目录生成 | `FERENDER_EXPORT` 宏 | DLL 导出宏（自动生成） |
 
 ---

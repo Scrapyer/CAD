@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <utility>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -26,6 +27,8 @@ struct FERENDER_EXPORT Mesh {
     std::vector<unsigned int> indices;   // 索引数据（每 3 个索引一个三角形）
     std::vector<float> edgeVertices;     // 边线顶点数据（仅位置，用于 GL_LINES）
     std::vector<unsigned int> edgeIndices; // 边线索引数据（每 2 个索引一条线段）
+    std::vector<int> edgeToElement;      // 边线 → FEM 单元 ID（大小 = edgeIndices.size() / 2）
+    std::vector<std::pair<int,int>> edgeNodeIds; // 边线两端 FEM 节点 ID（裁剪交点为 -1）
 
     // ── 单元完整边线（用于选中高亮，包含内部边）──
     std::vector<float> elemEdgeVertices;   // 每条边 2 顶点 × 3 float

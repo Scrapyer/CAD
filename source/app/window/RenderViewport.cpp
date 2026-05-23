@@ -45,12 +45,16 @@ RenderViewport::~RenderViewport() = default;
 void RenderViewport::setMesh(const Mesh& mesh)
 {
     currentMesh_ = mesh;
-    hasCurrentMesh_ = !mesh.vertices.empty() && !mesh.indices.empty();
+    hasCurrentMesh_ = !mesh.vertices.empty() || !mesh.edgeVertices.empty();
     triangleToElement_.clear();
     vertexToNode_.clear();
     triangleToPart_.clear();
     edgeToPart_.clear();
     partVisibility_.clear();
+    vertexColors_.clear();
+    vertexScalars_.clear();
+    edgeScalars_.clear();
+    useVertexColor_ = false;
     glWidget_->setMesh(mesh);
 #if defined(FERENDER_HAS_METAL_RHI)
     if (metalViewport_) {
@@ -67,6 +71,7 @@ void RenderViewport::setVertexColors(const std::vector<float>& colors)
 {
     vertexColors_ = colors;
     vertexScalars_.clear();
+    edgeScalars_.clear();
     useVertexColor_ = true;
     glWidget_->setVertexColors(colors);
 #if defined(FERENDER_HAS_METAL_RHI)
@@ -261,6 +266,23 @@ void RenderViewport::setPickMode(PickMode mode)
     }
 #endif
 }
+
+void RenderViewport::setInteractionMode(ViewportInteractionMode mode)
+{
+    interactionMode_ = mode;
+    glWidget_->setInteractionMode(mode);
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setInteractionMode(mode);
+    }
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setInteractionMode(mode);
+    }
+#endif
+}
+
 void RenderViewport::setShowLabels(bool show)
 {
     showLabels_ = show;
@@ -455,6 +477,28 @@ void RenderViewport::setVertexScalars(const std::vector<float>& scalars,
 #if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
     if (vulkanViewport_) {
         vulkanViewport_->setVertexScalars(scalars, minVal, maxVal, numBands);
+    }
+#endif
+}
+void RenderViewport::setEdgeScalars(const std::vector<float>& scalars,
+                                    float minVal,
+                                    float maxVal,
+                                    int numBands)
+{
+    edgeScalars_ = scalars;
+    scalarMin_ = minVal;
+    scalarMax_ = maxVal;
+    numBands_ = numBands;
+    useVertexColor_ = true;
+    glWidget_->setEdgeScalars(scalars, minVal, maxVal, numBands);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setEdgeScalars(scalars, minVal, maxVal, numBands);
+    }
+#endif
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setEdgeScalars(scalars, minVal, maxVal, numBands);
     }
 #endif
 }
@@ -783,7 +827,11 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         } else if (useVertexColor_ && !vertexColors_.empty()) {
             metalViewport_->setVertexColors(vertexColors_);
         }
+        if (useVertexColor_ && !edgeScalars_.empty()) {
+            metalViewport_->setEdgeScalars(edgeScalars_, scalarMin_, scalarMax_, numBands_);
+        }
         metalViewport_->setPickMode(currentPickMode_);
+        metalViewport_->setInteractionMode(interactionMode_);
         metalViewport_->setShowLabels(showLabels_);
         if (!triangleToElement_.empty()) {
             metalViewport_->setTriangleToElementMap(triangleToElement_);
@@ -837,6 +885,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
         vulkanViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
         vulkanViewport_->setViewportGridVisible(viewportGridVisible_);
         vulkanViewport_->setPickMode(currentPickMode_);
+        vulkanViewport_->setInteractionMode(interactionMode_);
         vulkanViewport_->setShowLabels(showLabels_);
         vulkanViewport_->setObjectColor(objectColor_);
         vulkanViewport_->setModelDisplayMode(displayMode_);
@@ -865,6 +914,9 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
             vulkanViewport_->setVertexScalars(vertexScalars_, scalarMin_, scalarMax_, numBands_);
         } else if (useVertexColor_ && !vertexColors_.empty()) {
             vulkanViewport_->setVertexColors(vertexColors_);
+        }
+        if (useVertexColor_ && !edgeScalars_.empty()) {
+            vulkanViewport_->setEdgeScalars(edgeScalars_, scalarMin_, scalarMax_, numBands_);
         }
         if (!triangleToElement_.empty()) {
             vulkanViewport_->setTriangleToElementMap(triangleToElement_);

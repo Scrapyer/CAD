@@ -64,7 +64,7 @@ bool uploadMetalMeshBuffers(void* device,
     }
 
     resetMetalMeshUploadTargets(targets);
-    if (uploadData.vertices.empty() || uploadData.indices.empty()) {
+    if (uploadData.vertices.empty() && uploadData.edgeVertices.empty()) {
         return true;
     }
 
@@ -73,24 +73,25 @@ bool uploadMetalMeshBuffers(void* device,
     *targets.edgeVertexCount = uploadData.edgeVertexCount;
     *targets.edgeIndexCount = static_cast<int>(uploadData.edgeIndices.size());
 
-    std::vector<MetalPrivateBufferUpload> uploads = {
-        {targets.meshVertexBuffer,
-         uploadData.vertices.data(),
-         uploadData.vertices.size() * sizeof(MetalMeshVertex),
-         QStringLiteral("mesh vertex")},
-        {targets.meshIndexBuffer,
-         uploadData.indices.data(),
-         uploadData.indices.size() * sizeof(unsigned int),
-         QStringLiteral("mesh index")},
-        {targets.pointVertexBuffer,
-         uploadData.pointPositions.data(),
-         uploadData.pointPositions.size() * sizeof(float),
-         QStringLiteral("mesh point")}
-    };
+    std::vector<MetalPrivateBufferUpload> uploads;
+    if (!uploadData.vertices.empty() && !uploadData.indices.empty()) {
+        uploads.push_back({targets.meshVertexBuffer,
+                           uploadData.vertices.data(),
+                           uploadData.vertices.size() * sizeof(MetalMeshVertex),
+                           QStringLiteral("mesh vertex")});
+        uploads.push_back({targets.meshIndexBuffer,
+                           uploadData.indices.data(),
+                           uploadData.indices.size() * sizeof(unsigned int),
+                           QStringLiteral("mesh index")});
+        uploads.push_back({targets.pointVertexBuffer,
+                           uploadData.pointVertices.data(),
+                           uploadData.pointVertices.size() * sizeof(MetalLineVertex),
+                           QStringLiteral("mesh point")});
+    }
     if (*targets.edgeVertexCount > 0 && *targets.edgeIndexCount > 0) {
         uploads.push_back({targets.edgeVertexBuffer,
-                           mesh.edgeVertices.data(),
-                           mesh.edgeVertices.size() * sizeof(float),
+                           uploadData.edgeVertices.data(),
+                           uploadData.edgeVertices.size() * sizeof(MetalLineVertex),
                            QStringLiteral("edge vertex")});
         uploads.push_back({targets.edgeIndexBuffer,
                            uploadData.edgeIndices.data(),

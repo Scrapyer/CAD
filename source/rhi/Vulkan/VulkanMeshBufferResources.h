@@ -52,6 +52,10 @@ public:
     uint32_t meshScalarCount = 0;
     VulkanDescriptorResource meshScalarDescriptor;
 
+    bool edgeUseVertexScalars = false;
+    float edgeScalarMin = 0.0f;
+    float edgeScalarMax = 1.0f;
+    int edgeNumBands = 10;
     VulkanBufferResource edgeVertexResource;
     VulkanBufferResource edgeIndexResource;
     uint32_t edgeIndexCount = 0;

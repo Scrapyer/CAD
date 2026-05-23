@@ -44,6 +44,7 @@ MetalMeshFrameUniformSet buildMetalMeshFrameUniformSet(const QMatrix4x4& mvp,
                                                        float scalarMax,
                                                        int numBands,
                                                        bool useVertexScalars,
+                                                       bool useEdgeScalars,
                                                        const QMatrix4x4& axesMvp)
 {
     MetalMeshFrameUniformSet frameUniforms;
@@ -54,19 +55,27 @@ MetalMeshFrameUniformSet buildMetalMeshFrameUniformSet(const QMatrix4x4& mvp,
                                                scalarMax,
                                                numBands,
                                                useVertexScalars);
-    frameUniforms.line = frameUniforms.mesh;
+    frameUniforms.line = makeMetalMeshUniforms(mvp,
+                                               objectColor,
+                                               1.0f,
+                                               scalarMin,
+                                               scalarMax,
+                                               numBands,
+                                               useEdgeScalars);
     setMetalUniformColor(frameUniforms.line, 0.08f, 0.10f, 0.12f, 1.0f);
-    frameUniforms.overlay = frameUniforms.mesh;
+    frameUniforms.points = makeMetalMeshUniforms(mvp, objectColor, 1.0f);
+    setMetalUniformColor(frameUniforms.points, 0.58f, 0.78f, 0.74f, 1.0f);
+    frameUniforms.overlay = makeMetalMeshUniforms(mvp, objectColor, 1.0f);
     setMetalUniformColor(frameUniforms.overlay, 0.82f, 0.86f, 0.90f, 1.0f);
-    frameUniforms.slice = frameUniforms.mesh;
+    frameUniforms.slice = makeMetalMeshUniforms(mvp, objectColor, 1.0f);
     setMetalUniformColor(frameUniforms.slice, 0.15f, 0.78f, 0.95f, 1.0f);
     frameUniforms.isoSurface = frameUniforms.mesh;
     setMetalUniformColor(frameUniforms.isoSurface, 0.2f, 0.8f, 0.4f, 0.75f);
     frameUniforms.clipPreview = frameUniforms.mesh;
     setMetalUniformColor(frameUniforms.clipPreview, 0.35f, 0.55f, 1.0f, 0.28f);
-    frameUniforms.clipPreviewLine = frameUniforms.mesh;
+    frameUniforms.clipPreviewLine = makeMetalMeshUniforms(mvp, objectColor, 1.0f);
     setMetalUniformColor(frameUniforms.clipPreviewLine, 0.68f, 0.78f, 1.0f, 1.0f);
-    frameUniforms.selection = frameUniforms.mesh;
+    frameUniforms.selection = makeMetalMeshUniforms(mvp, objectColor, 1.0f);
     setMetalUniformColor(frameUniforms.selection, 1.0f, 0.76f, 0.18f, 1.0f);
     frameUniforms.axes =
         makeMetalMeshUniforms(axesMvp, QVector3D(0.0f, 0.0f, 0.0f), 1.0f);
@@ -111,7 +120,7 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
                                       resources.linePipelineState,
                                       resources.pointVertexBuffer,
                                       resources.meshVertexCount,
-                                      uniforms.line);
+                                      uniforms.points);
     framePass.isoSurface = makeIndexedDraw(flags.isoSurface,
                                            resources.isoSurfacePipelineState,
                                            resources.isoSurfaceVertexBuffer,

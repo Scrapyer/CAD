@@ -83,6 +83,18 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
 
     uploadData.edgeVertexCount = static_cast<int>(mesh.edgeVertices.size() / 3);
     if (!mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0) {
+        uploadData.edgeVertices.resize(static_cast<size_t>(uploadData.edgeVertexCount));
+        const bool useEdgeScalars =
+            options.useVertexColor &&
+            options.edgeScalars.size() == static_cast<size_t>(uploadData.edgeVertexCount);
+        for (int i = 0; i < uploadData.edgeVertexCount; ++i) {
+            MetalLineVertex vertex{};
+            vertex.position[0] = mesh.edgeVertices[static_cast<size_t>(i) * 3 + 0];
+            vertex.position[1] = mesh.edgeVertices[static_cast<size_t>(i) * 3 + 1];
+            vertex.position[2] = mesh.edgeVertices[static_cast<size_t>(i) * 3 + 2];
+            vertex.scalar = useEdgeScalars ? options.edgeScalars[static_cast<size_t>(i)] : 0.0f;
+            uploadData.edgeVertices[static_cast<size_t>(i)] = vertex;
+        }
         const size_t edgeCount = mesh.edgeIndices.size() / 2;
         uploadData.edgeIndices.reserve(mesh.edgeIndices.size());
         for (size_t edge = 0; edge < edgeCount; ++edge) {
@@ -97,11 +109,14 @@ MetalMeshUploadData buildMetalMeshUploadData(const Mesh& mesh,
         }
     }
 
-    uploadData.pointPositions.reserve(uploadData.vertices.size() * 3);
+    uploadData.pointVertices.reserve(uploadData.vertices.size());
     for (const MetalMeshVertex& vertex : uploadData.vertices) {
-        uploadData.pointPositions.push_back(vertex.position[0]);
-        uploadData.pointPositions.push_back(vertex.position[1]);
-        uploadData.pointPositions.push_back(vertex.position[2]);
+        MetalLineVertex point{};
+        point.position[0] = vertex.position[0];
+        point.position[1] = vertex.position[1];
+        point.position[2] = vertex.position[2];
+        point.scalar = 0.0f;
+        uploadData.pointVertices.push_back(point);
     }
 
     return uploadData;

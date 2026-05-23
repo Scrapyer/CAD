@@ -141,6 +141,13 @@ struct FERenderData {
     void clear() {
         mesh.vertices.clear();
         mesh.indices.clear();
+        mesh.edgeVertices.clear();
+        mesh.edgeIndices.clear();
+        mesh.edgeToElement.clear();
+        mesh.edgeNodeIds.clear();
+        mesh.elemEdgeVertices.clear();
+        mesh.elemEdgeToElement.clear();
+        mesh.elemEdgeNodeIds.clear();
         triangleToElement.clear();
         triangleToFace.clear();
         vertexToNode.clear();

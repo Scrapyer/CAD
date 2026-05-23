@@ -18,6 +18,7 @@ struct MetalMeshUploadOptions {
     bool useVertexColor = false;
     std::vector<float> vertexColors;
     std::vector<float> vertexScalars;
+    std::vector<float> edgeScalars;
     float scalarMin = 0.0f;
     float scalarMax = 1.0f;
     int numBands = 10;
@@ -26,7 +27,8 @@ struct MetalMeshUploadOptions {
 struct MetalMeshUploadData {
     std::vector<MetalMeshVertex> vertices;
     std::vector<unsigned int> indices;
-    std::vector<float> pointPositions;
+    std::vector<MetalLineVertex> pointVertices;
+    std::vector<MetalLineVertex> edgeVertices;
     std::vector<unsigned int> edgeIndices;
     std::vector<unsigned int> scalarSourceIndices;
     int edgeVertexCount = 0;

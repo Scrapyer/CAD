@@ -29,7 +29,7 @@
  *   1. 收集所有 3D 单元的面，做外表面提取（去除内部共享面）
  *   2. 对外表面的每个面进行三角化
  *   3. 对所有 2D 单元直接三角化
- *   4. 1D 单元暂时跳过
+ *   4. 1D 单元生成边线数据
  *   5. 每步都同步更新映射表
  */
 FERenderData FEMeshConverter::toRenderData(const FEModel& model, const ProgressCallback& progress) {
@@ -291,6 +291,8 @@ FERenderData FEMeshConverter::toRenderData(const FEModel& model, const std::vect
             result.mesh.edgeVertices.push_back(pb->z);
             result.mesh.edgeIndices.push_back(idx);
             result.mesh.edgeIndices.push_back(idx + 1);
+            result.mesh.edgeToElement.push_back(elemId);
+            result.mesh.edgeNodeIds.push_back({a, b});
             edgeElemIds.push_back(elemId);
         }
     }

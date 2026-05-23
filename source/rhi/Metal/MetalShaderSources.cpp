@@ -153,15 +153,18 @@ using namespace metal;
 
 struct VertexIn {
     float3 position [[attribute(0)]];
+    float scalar [[attribute(1)]];
 };
 
 struct Uniforms {
     float4x4 mvp;
     float4 color;
+    float4 contour;
 };
 
 struct VertexOut {
     float4 position [[position]];
+    float scalar;
 };
 
 vertex VertexOut vertex_main(VertexIn in [[stage_in]],
@@ -169,13 +172,52 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]],
 {
     VertexOut out;
     out.position = uniforms.mvp * float4(in.position, 1.0);
+    out.scalar = in.scalar;
     return out;
+}
+
+float3 jetColor(float t)
+{
+    t = clamp(t, 0.0, 1.0);
+    float r = 0.0;
+    float g = 0.0;
+    float b = 0.0;
+    if (t < 0.125) {
+        b = 0.5 + t / 0.125 * 0.5;
+    } else if (t < 0.375) {
+        g = (t - 0.125) / 0.25;
+        b = 1.0;
+    } else if (t < 0.625) {
+        r = (t - 0.375) / 0.25;
+        g = 1.0;
+        b = 1.0 - (t - 0.375) / 0.25;
+    } else if (t < 0.875) {
+        r = 1.0;
+        g = 1.0 - (t - 0.625) / 0.25;
+    } else {
+        r = 1.0 - (t - 0.875) / 0.125 * 0.5;
+    }
+    return float3(r, g, b);
 }
 
 fragment float4 fragment_main(VertexOut in [[stage_in]],
                               constant Uniforms& uniforms [[buffer(1)]])
 {
-    return uniforms.color;
+    float3 baseColor = uniforms.color.xyz;
+    if (uniforms.contour.w > 0.5) {
+        float range = uniforms.contour.y - uniforms.contour.x;
+        float t = range > 1.0e-10
+            ? clamp((in.scalar - uniforms.contour.x) / range, 0.0, 1.0)
+            : 0.5;
+        int numBands = max(1, int(uniforms.contour.z + 0.5));
+        int band = int(t * float(numBands));
+        if (band >= numBands) {
+            band = numBands - 1;
+        }
+        float qt = (float(band) + 0.5) / float(numBands);
+        baseColor = jetColor(qt);
+    }
+    return float4(baseColor, uniforms.color.a);
 }
 )";
 

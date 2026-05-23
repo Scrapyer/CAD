@@ -210,7 +210,8 @@ GLuint OpenGLMeshResource::vertexBufferId() const
 OpenGLEdgeResource::OpenGLEdgeResource()
     : vao(std::make_unique<QOpenGLVertexArrayObject>()),
       vertexBuffer(std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::VertexBuffer)),
-      indexBuffer(std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::IndexBuffer))
+      indexBuffer(std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::IndexBuffer)),
+      scalarBuffer(std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::VertexBuffer))
 {
 }
 
@@ -558,6 +559,7 @@ void OpenGLRenderBackend::createEdgeResource(OpenGLEdgeResource& edge) const
     if (edge.vao) createVertexArray(*edge.vao);
     if (edge.vertexBuffer) createBuffer(*edge.vertexBuffer);
     if (edge.indexBuffer) createBuffer(*edge.indexBuffer);
+    if (edge.scalarBuffer) createBuffer(*edge.scalarBuffer);
 }
 
 void OpenGLRenderBackend::createLineResource(OpenGLLineResource& line) const
@@ -656,6 +658,20 @@ void OpenGLRenderBackend::uploadMeshScalarBuffer(OpenGLMeshResource& mesh,
     if (!mesh.vao || !mesh.scalarBuffer) return;
     uploadFloatAttributeBuffer(*mesh.vao,
                                *mesh.scalarBuffer,
+                               3,
+                               1,
+                               data,
+                               byteSize,
+                               static_cast<int>(sizeof(float)));
+}
+
+void OpenGLRenderBackend::uploadEdgeScalarBuffer(OpenGLEdgeResource& edge,
+                                                 const float* data,
+                                                 int byteSize) const
+{
+    if (!edge.vao || !edge.scalarBuffer) return;
+    uploadFloatAttributeBuffer(*edge.vao,
+                               *edge.scalarBuffer,
                                3,
                                1,
                                data,

@@ -30,6 +30,11 @@ struct VulkanMeshVertex {
     float pickColor[3];
 };
 
+struct VulkanLineVertex {
+    float position[3];
+    float scalar;
+};
+
 struct Vec3 {
     float x;
     float y;
@@ -60,6 +65,22 @@ Vec3 normalize(const Vec3& v)
         return {0.0f, 0.0f, 1.0f};
     }
     return scale(v, 1.0f / std::sqrt(len2));
+}
+
+std::vector<VulkanLineVertex> makeLineVertices(const std::vector<float>& positions)
+{
+    std::vector<VulkanLineVertex> vertices;
+    if (positions.size() % 3 != 0) {
+        return vertices;
+    }
+    vertices.resize(positions.size() / 3);
+    for (size_t i = 0; i < vertices.size(); ++i) {
+        vertices[i].position[0] = positions[i * 3 + 0];
+        vertices[i].position[1] = positions[i * 3 + 1];
+        vertices[i].position[2] = positions[i * 3 + 2];
+        vertices[i].scalar = 0.0f;
+    }
+    return vertices;
 }
 
 std::vector<float> buildAxesLineVertices()
@@ -461,14 +482,26 @@ bool VulkanClearFrameRenderer::uploadMesh(
     vkDeviceWaitIdle(device.device());
     destroyMeshBuffers(device);
 
-    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.vertices.size() % 6 != 0) {
+    const bool hasSurfaceMesh =
+        !mesh.vertices.empty() && !mesh.indices.empty() && mesh.vertices.size() % 6 == 0;
+    const bool hasEdgeMesh =
+        !mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0;
+    if (!hasSurfaceMesh && !hasEdgeMesh) {
         return true;
     }
 
-    meshResources_.meshUseVertexScalars = options.useVertexColor && !options.vertexScalars.empty();
+    meshResources_.meshUseVertexScalars =
+        hasSurfaceMesh && options.useVertexColor && !options.vertexScalars.empty();
     meshResources_.meshScalarMin = options.scalarMin;
     meshResources_.meshScalarMax = options.scalarMax;
     meshResources_.meshNumBands = std::max(1, options.numBands);
+    meshResources_.edgeUseVertexScalars =
+        hasEdgeMesh &&
+        options.useVertexColor &&
+        options.edgeScalars.size() == mesh.edgeVertices.size() / 3;
+    meshResources_.edgeScalarMin = options.scalarMin;
+    meshResources_.edgeScalarMax = options.scalarMax;
+    meshResources_.edgeNumBands = std::max(1, options.numBands);
 
     const size_t sourceVertexCount = mesh.vertices.size() / 6;
     const size_t triangleCount = mesh.indices.size() / 3;
@@ -476,84 +509,84 @@ bool VulkanClearFrameRenderer::uploadMesh(
     std::vector<uint32_t> indices;
     std::vector<float> expandedScalars;
     meshResources_.meshScalarSourceIndices.clear();
-    vertices.reserve(triangleCount * 3);
-    indices.reserve(triangleCount * 3);
-    expandedScalars.reserve(triangleCount * 3);
-    meshResources_.meshScalarSourceIndices.reserve(triangleCount * 3);
+    if (hasSurfaceMesh) {
+        vertices.reserve(triangleCount * 3);
+        indices.reserve(triangleCount * 3);
+        expandedScalars.reserve(triangleCount * 3);
+        meshResources_.meshScalarSourceIndices.reserve(triangleCount * 3);
 
-    for (size_t tri = 0; tri < triangleCount; ++tri) {
-        const int part = tri < options.triangleToPart.size()
-            ? options.triangleToPart[tri]
-            : -1;
-        if (!isPartVisible(options, part)) {
-            continue;
-        }
-
-        const int elementId = tri < options.triangleToElement.size()
-            ? options.triangleToElement[tri]
-            : static_cast<int>(tri);
-        const QVector3D pickColor = idToPickColor(elementId);
-        for (size_t corner = 0; corner < 3; ++corner) {
-            const uint32_t sourceIndex = mesh.indices[tri * 3 + corner];
-            if (sourceIndex >= sourceVertexCount) {
+        for (size_t tri = 0; tri < triangleCount; ++tri) {
+            const int part = tri < options.triangleToPart.size()
+                ? options.triangleToPart[tri]
+                : -1;
+            if (!isPartVisible(options, part)) {
                 continue;
             }
-            const size_t base = static_cast<size_t>(sourceIndex) * 6;
-            VulkanMeshVertex vertex{};
-            vertex.position[0] = mesh.vertices[base + 0];
-            vertex.position[1] = mesh.vertices[base + 1];
-            vertex.position[2] = mesh.vertices[base + 2];
-            vertex.normal[0] = mesh.vertices[base + 3];
-            vertex.normal[1] = mesh.vertices[base + 4];
-            vertex.normal[2] = mesh.vertices[base + 5];
-            const QVector3D color = vertexColor(options, sourceIndex, part);
-            vertex.color[0] = color.x();
-            vertex.color[1] = color.y();
-            vertex.color[2] = color.z();
-            vertex.pickColor[0] = pickColor.x();
-            vertex.pickColor[1] = pickColor.y();
-            vertex.pickColor[2] = pickColor.z();
-            indices.push_back(static_cast<uint32_t>(vertices.size()));
-            vertices.push_back(vertex);
-            expandedScalars.push_back(sourceIndex < options.vertexScalars.size()
-                ? options.vertexScalars[sourceIndex]
-                : 0.0f);
-            meshResources_.meshScalarSourceIndices.push_back(sourceIndex);
-        }
-    }
 
-    if (vertices.empty() || indices.empty()) {
-        return true;
+            const int elementId = tri < options.triangleToElement.size()
+                ? options.triangleToElement[tri]
+                : static_cast<int>(tri);
+            const QVector3D pickColor = idToPickColor(elementId);
+            for (size_t corner = 0; corner < 3; ++corner) {
+                const uint32_t sourceIndex = mesh.indices[tri * 3 + corner];
+                if (sourceIndex >= sourceVertexCount) {
+                    continue;
+                }
+                const size_t base = static_cast<size_t>(sourceIndex) * 6;
+                VulkanMeshVertex vertex{};
+                vertex.position[0] = mesh.vertices[base + 0];
+                vertex.position[1] = mesh.vertices[base + 1];
+                vertex.position[2] = mesh.vertices[base + 2];
+                vertex.normal[0] = mesh.vertices[base + 3];
+                vertex.normal[1] = mesh.vertices[base + 4];
+                vertex.normal[2] = mesh.vertices[base + 5];
+                const QVector3D color = vertexColor(options, sourceIndex, part);
+                vertex.color[0] = color.x();
+                vertex.color[1] = color.y();
+                vertex.color[2] = color.z();
+                vertex.pickColor[0] = pickColor.x();
+                vertex.pickColor[1] = pickColor.y();
+                vertex.pickColor[2] = pickColor.z();
+                indices.push_back(static_cast<uint32_t>(vertices.size()));
+                vertices.push_back(vertex);
+                expandedScalars.push_back(sourceIndex < options.vertexScalars.size()
+                    ? options.vertexScalars[sourceIndex]
+                    : 0.0f);
+                meshResources_.meshScalarSourceIndices.push_back(sourceIndex);
+            }
+        }
     }
 
     VulkanStagingUploadContext uploadContext;
-    const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(vertices.size() * sizeof(VulkanMeshVertex));
-    if (!uploadContext.uploadBuffer(device,
-                                    meshResources_.meshVertexResource,
-                                    vertices.data(),
-                                    vertexSize,
-                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                    "mesh vertex",
-                                    lastError_)) {
-        uploadContext.discard(device);
-        destroyMeshBuffers(device);
-        return false;
+    if (!vertices.empty() && !indices.empty()) {
+        const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(vertices.size() * sizeof(VulkanMeshVertex));
+        if (!uploadContext.uploadBuffer(device,
+                                        meshResources_.meshVertexResource,
+                                        vertices.data(),
+                                        vertexSize,
+                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                        "mesh vertex",
+                                        lastError_)) {
+            uploadContext.discard(device);
+            destroyMeshBuffers(device);
+            return false;
+        }
+
+        const VkDeviceSize indexSize = static_cast<VkDeviceSize>(indices.size() * sizeof(uint32_t));
+        if (!uploadContext.uploadBuffer(device,
+                                        meshResources_.meshIndexResource,
+                                        indices.data(),
+                                        indexSize,
+                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                        "mesh index",
+                                        lastError_)) {
+            uploadContext.discard(device);
+            destroyMeshBuffers(device);
+            return false;
+        }
     }
 
-    const VkDeviceSize indexSize = static_cast<VkDeviceSize>(indices.size() * sizeof(uint32_t));
-    if (!uploadContext.uploadBuffer(device,
-                                    meshResources_.meshIndexResource,
-                                    indices.data(),
-                                    indexSize,
-                                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                    "mesh index",
-                                    lastError_)) {
-        uploadContext.discard(device);
-        destroyMeshBuffers(device);
-        return false;
-    }
-
-    if (!mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0) {
+    if (hasEdgeMesh) {
         if (mesh.edgeIndices.size() > kMaxInteractiveEdgeIndices) {
             // 超大模型的全量边线会带来第二遍海量 draw，默认只保留表面和选中高亮线。
             meshResources_.edgeVertexResource.destroy(device);
@@ -578,11 +611,17 @@ bool VulkanClearFrameRenderer::uploadMesh(
                 meshResources_.edgeIndexResource.destroy(device);
                 meshResources_.edgeIndexCount = 0;
             } else {
+                std::vector<VulkanLineVertex> edgeVertices = makeLineVertices(mesh.edgeVertices);
+                if (meshResources_.edgeUseVertexScalars) {
+                    for (size_t i = 0; i < edgeVertices.size(); ++i) {
+                        edgeVertices[i].scalar = options.edgeScalars[i];
+                    }
+                }
                 const VkDeviceSize edgeVertexSize =
-                    static_cast<VkDeviceSize>(mesh.edgeVertices.size() * sizeof(float));
+                    static_cast<VkDeviceSize>(edgeVertices.size() * sizeof(VulkanLineVertex));
                 if (!uploadContext.uploadBuffer(device,
                                                 meshResources_.edgeVertexResource,
-                                                mesh.edgeVertices.data(),
+                                                edgeVertices.data(),
                                                 edgeVertexSize,
                                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                                                 "edge vertex",
@@ -617,27 +656,29 @@ bool VulkanClearFrameRenderer::uploadMesh(
     meshResources_.meshIndexCount = static_cast<uint32_t>(indices.size());
     meshResources_.meshScalarCount = static_cast<uint32_t>(expandedScalars.size());
 
-    const VkDeviceSize scalarSize = static_cast<VkDeviceSize>(
-        std::max<size_t>(expandedScalars.size(), 1) * sizeof(float));
-    const void* scalarData = expandedScalars.empty()
-        ? static_cast<const void*>(nullptr)
-        : static_cast<const void*>(expandedScalars.data());
-    float zeroScalar = 0.0f;
-    if (expandedScalars.empty()) {
-        scalarData = &zeroScalar;
-    }
-    if (!meshResources_.meshScalarResource.uploadHostVisible(device,
-                                               scalarData,
-                                               scalarSize,
-                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                               "mesh scalar storage",
-                                               lastError_)) {
-        destroyMeshBuffers(device);
-        return false;
-    }
-    if (!createMeshScalarDescriptor(device)) {
-        destroyMeshBuffers(device);
-        return false;
+    if (!vertices.empty() && !indices.empty()) {
+        const VkDeviceSize scalarSize = static_cast<VkDeviceSize>(
+            std::max<size_t>(expandedScalars.size(), 1) * sizeof(float));
+        const void* scalarData = expandedScalars.empty()
+            ? static_cast<const void*>(nullptr)
+            : static_cast<const void*>(expandedScalars.data());
+        float zeroScalar = 0.0f;
+        if (expandedScalars.empty()) {
+            scalarData = &zeroScalar;
+        }
+        if (!meshResources_.meshScalarResource.uploadHostVisible(device,
+                                                   scalarData,
+                                                   scalarSize,
+                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                                   "mesh scalar storage",
+                                                   lastError_)) {
+            destroyMeshBuffers(device);
+            return false;
+        }
+        if (!createMeshScalarDescriptor(device)) {
+            destroyMeshBuffers(device);
+            return false;
+        }
     }
 
     return true;
@@ -1070,7 +1111,7 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
     const uint32_t margin = 8;
     const uint32_t availableWidth = extent.width > margin * 2 ? extent.width - margin * 2 : 0;
     const uint32_t availableHeight = extent.height > margin * 2 ? extent.height - margin * 2 : 0;
-    const uint32_t axesSize = std::min<uint32_t>(120, std::min(availableWidth, availableHeight));
+    const uint32_t axesSize = std::min<uint32_t>(152, std::min(availableWidth, availableHeight));
     if (axesSize == 0) {
         return;
     }
@@ -1145,12 +1186,16 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &axesVertexBuffer, offsets);
 
     for (uint32_t axis = 0; axis < 3; ++axis) {
-        std::array<float, 20> pushConstants{};
+        std::array<float, 24> pushConstants{};
         std::memcpy(pushConstants.data(), axesMvp.constData(), 16 * sizeof(float));
         pushConstants[16] = axisColors[axis][0];
         pushConstants[17] = axisColors[axis][1];
         pushConstants[18] = axisColors[axis][2];
         pushConstants[19] = axisColors[axis][3];
+        pushConstants[20] = 0.0f;
+        pushConstants[21] = 1.0f;
+        pushConstants[22] = 1.0f;
+        pushConstants[23] = 0.0f;
         vkCmdPushConstants(commandBuffer,
                            pipelines_.line.layout(),
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -2062,21 +2107,25 @@ bool VulkanClearFrameRenderer::createLineGraphicsPipeline(const VulkanDevice& de
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = 3 * sizeof(float);
+    binding.stride = sizeof(VulkanLineVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attribute{};
-    attribute.binding = 0;
-    attribute.location = 0;
-    attribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    attribute.offset = 0;
+    std::array<VkVertexInputAttributeDescription, 2> attributes{};
+    attributes[0].binding = 0;
+    attributes[0].location = 0;
+    attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[0].offset = offsetof(VulkanLineVertex, position);
+    attributes[1].binding = 0;
+    attributes[1].location = 1;
+    attributes[1].format = VK_FORMAT_R32_SFLOAT;
+    attributes[1].offset = offsetof(VulkanLineVertex, scalar);
 
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInput.vertexBindingDescriptionCount = 1;
     vertexInput.pVertexBindingDescriptions = &binding;
-    vertexInput.vertexAttributeDescriptionCount = 1;
-    vertexInput.pVertexAttributeDescriptions = &attribute;
+    vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size());
+    vertexInput.pVertexAttributeDescriptions = attributes.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -2134,7 +2183,7 @@ bool VulkanClearFrameRenderer::createLineGraphicsPipeline(const VulkanDevice& de
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = 20 * sizeof(float);
+    pushConstantRange.size = 24 * sizeof(float);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -2208,18 +2257,22 @@ bool VulkanClearFrameRenderer::createPointGraphicsPipeline(const VulkanDevice& d
     binding.stride = sizeof(VulkanMeshVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attribute{};
-    attribute.binding = 0;
-    attribute.location = 0;
-    attribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    attribute.offset = offsetof(VulkanMeshVertex, position);
+    std::array<VkVertexInputAttributeDescription, 2> attributes{};
+    attributes[0].binding = 0;
+    attributes[0].location = 0;
+    attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributes[0].offset = offsetof(VulkanMeshVertex, position);
+    attributes[1].binding = 0;
+    attributes[1].location = 1;
+    attributes[1].format = VK_FORMAT_R32_SFLOAT;
+    attributes[1].offset = offsetof(VulkanMeshVertex, color);
 
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInput.vertexBindingDescriptionCount = 1;
     vertexInput.pVertexBindingDescriptions = &binding;
-    vertexInput.vertexAttributeDescriptionCount = 1;
-    vertexInput.pVertexAttributeDescriptions = &attribute;
+    vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size());
+    vertexInput.pVertexAttributeDescriptions = attributes.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -2271,7 +2324,7 @@ bool VulkanClearFrameRenderer::createPointGraphicsPipeline(const VulkanDevice& d
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = 20 * sizeof(float);
+    pushConstantRange.size = 24 * sizeof(float);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -2503,16 +2556,16 @@ bool VulkanClearFrameRenderer::createAxesIndicatorResource(const VulkanDevice& d
     axesSolidVertexResource_.destroy(device);
     axesSolidVertexCount_ = 0;
 
-    const std::vector<float> axesVertices = buildAxesLineVertices();
+    const std::vector<VulkanLineVertex> axesVertices = makeLineVertices(buildAxesLineVertices());
     if (!axesLineVertexResource_.uploadHostVisible(device,
                                                    axesVertices.data(),
-                                                   static_cast<VkDeviceSize>(axesVertices.size() * sizeof(float)),
+                                                   static_cast<VkDeviceSize>(axesVertices.size() * sizeof(VulkanLineVertex)),
                                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                                                    "axes indicator line vertex",
                                                    lastError_)) {
         return false;
     }
-    axesLineVertexCount_ = static_cast<uint32_t>(axesVertices.size() / 3);
+    axesLineVertexCount_ = static_cast<uint32_t>(axesVertices.size());
 
     const std::vector<VulkanMeshVertex> axesSolidVertices = buildAxesSolidVertices();
     if (!axesSolidVertexResource_.uploadHostVisible(device,
@@ -2546,11 +2599,13 @@ bool VulkanClearFrameRenderer::uploadLineVerticesDeviceLocal(
         return false;
     }
 
+    std::vector<VulkanLineVertex> vertices = makeLineVertices(lineVertices);
     VulkanStagingUploadContext uploadContext;
-    const VkDeviceSize vertexSize = static_cast<VkDeviceSize>(lineVertices.size() * sizeof(float));
+    const VkDeviceSize vertexSize =
+        static_cast<VkDeviceSize>(vertices.size() * sizeof(VulkanLineVertex));
     if (!uploadContext.uploadBuffer(device,
                                     resource,
-                                    lineVertices.data(),
+                                    vertices.data(),
                                     vertexSize,
                                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                                     debugName,
@@ -2563,7 +2618,7 @@ bool VulkanClearFrameRenderer::uploadLineVerticesDeviceLocal(
         resource.destroy(device);
         return false;
     }
-    vertexCount = static_cast<uint32_t>(lineVertices.size() / 3);
+    vertexCount = static_cast<uint32_t>(vertices.size());
     return true;
 }
 
@@ -2775,6 +2830,10 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     meshFrameResources.edgeVertexResource = &meshResources_.edgeVertexResource;
     meshFrameResources.edgeIndexResource = &meshResources_.edgeIndexResource;
     meshFrameResources.edgeIndexCount = meshResources_.edgeIndexCount;
+    meshFrameResources.edgeUseVertexScalars = meshResources_.edgeUseVertexScalars;
+    meshFrameResources.edgeScalarMin = meshResources_.edgeScalarMin;
+    meshFrameResources.edgeScalarMax = meshResources_.edgeScalarMax;
+    meshFrameResources.edgeNumBands = meshResources_.edgeNumBands;
     meshFrameResources.sliceLineVertexResource = &sliceLineVertexResource_;
     meshFrameResources.sliceLineVertexCount = sliceLineVertexCount_;
     meshFrameResources.selectionLineVertexResource = &selectionLineVertexResource_;

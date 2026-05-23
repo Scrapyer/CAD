@@ -108,6 +108,7 @@ struct OpenGLEdgeResource {
     std::unique_ptr<QOpenGLVertexArrayObject> vao;
     std::unique_ptr<QOpenGLBuffer> vertexBuffer;
     std::unique_ptr<QOpenGLBuffer> indexBuffer;
+    std::unique_ptr<QOpenGLBuffer> scalarBuffer;
 };
 
 struct OpenGLLineResource {
@@ -301,6 +302,11 @@ public:
 
     /** @brief 上传主网格标量属性。 */
     void uploadMeshScalarBuffer(OpenGLMeshResource& mesh,
+                                const float* data,
+                                int byteSize) const;
+
+    /** @brief 上传边线标量属性。 */
+    void uploadEdgeScalarBuffer(OpenGLEdgeResource& edge,
                                 const float* data,
                                 int byteSize) const;
 

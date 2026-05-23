@@ -51,6 +51,10 @@ public:
         const VulkanBufferResource* edgeVertexResource = nullptr;
         const VulkanBufferResource* edgeIndexResource = nullptr;
         uint32_t edgeIndexCount = 0;
+        bool edgeUseVertexScalars = false;
+        float edgeScalarMin = 0.0f;
+        float edgeScalarMax = 1.0f;
+        int edgeNumBands = 10;
         const VulkanBufferResource* sliceLineVertexResource = nullptr;
         uint32_t sliceLineVertexCount = 0;
         const VulkanBufferResource* selectionLineVertexResource = nullptr;

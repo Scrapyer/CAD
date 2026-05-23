@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MetalBufferResource.h"
+#include "MetalShaderTypes.h"
 
 #include <QString>
 

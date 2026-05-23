@@ -48,6 +48,7 @@ public:
     void setVertexColors(const std::vector<float>& colors);
     void setUseVertexColor(bool use);
     void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
+    void setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands);
     void setOverlayMesh(const Mesh& mesh);
     void setOverlayVisible(bool visible);
     void setSliceLines(const std::vector<float>& lineVertices);
@@ -64,6 +65,7 @@ public:
     void setTriangleToPartMap(const std::vector<int>& map);
     void setEdgeToPartMap(const std::vector<int>& map);
     void setPickMode(PickMode mode);
+    void setInteractionMode(ViewportInteractionMode mode);
     void setShowLabels(bool show);
     void selectByIds(PickMode mode, const std::vector<int>& ids);
     void setPartVisibility(int partIndex, bool visible);
@@ -105,6 +107,7 @@ private:
     bool pickAtPosition(const QPointF& position, bool appendSelection);
     bool deselectAtPosition(const QPointF& position);
     bool selectInRect(const QRect& rect, bool removeSelection);
+    int edgeElementAtPosition(const QPointF& position, const glm::mat4& mvp, float thresholdPx) const;
     QMatrix4x4 currentMvp() const;
     glm::mat4 currentAxesGlmMvp() const;
     QMatrix4x4 currentAxesMvp() const;
@@ -119,7 +122,10 @@ private:
     bool isPartFullySelected(int partIndex) const;
     std::vector<int> pickedPartIndices() const;
     std::vector<int> currentSelectionIds() const;
+    bool isPartVisible(int partIndex) const;
+    bool isTriangleVisibleForSelection(size_t triangleIndex) const;
     bool isElementVisibleForSelection(int elementId) const;
+    bool isNodeVisibleForSelection(int nodeId) const;
     void updateRubberBand(const QPoint& currentPos);
     void updateAxesLabels();
     void updateIdLabels();
@@ -141,6 +147,7 @@ private:
     bool hasMesh_ = false;
     bool rotating_ = false;
     bool panning_ = false;
+    bool zooming_ = false;
     bool leftPressForPick_ = false;
     bool rightPressForDeselect_ = false;
     bool mouseMovedSincePress_ = false;
@@ -156,6 +163,7 @@ private:
     bool useVertexColor_ = false;
     std::vector<float> vertexColors_;
     std::vector<float> vertexScalars_;
+    std::vector<float> edgeScalars_;
     float scalarMin_ = 0.0f;
     float scalarMax_ = 1.0f;
     int numBands_ = 10;
@@ -170,6 +178,7 @@ private:
     std::unordered_map<int, bool> partVisibility_;
     Camera cam_;
     PickMode pickMode_ = PickMode::Element;
+    ViewportInteractionMode interactionMode_ = ViewportInteractionMode::Pick;
     bool showLabels_ = false;
     FESelection selection_;
     Mesh overlayMesh_;

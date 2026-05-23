@@ -27,6 +27,7 @@ struct VulkanMeshUploadOptions {
     bool useVertexColor = false;
     std::vector<float> vertexColors;
     std::vector<float> vertexScalars;
+    std::vector<float> edgeScalars;
     float scalarMin = 0.0f;
     float scalarMax = 1.0f;
     int numBands = 10;

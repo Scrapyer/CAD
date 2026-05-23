@@ -714,6 +714,14 @@ if(BUILD_TESTING)
         COMMAND test_probe
     )
 
+    add_executable(test_screen_space_picking
+        tests/test_screen_space_picking.cpp
+    )
+    target_link_libraries(test_screen_space_picking PRIVATE FERender)
+    add_test(NAME screen_space_picking
+        COMMAND test_screen_space_picking
+    )
+
     add_executable(test_post_filter
         tests/test_post_filter.cpp
     )
@@ -882,6 +890,40 @@ if(BUILD_TESTING)
     target_link_libraries(test_result_panel PRIVATE FERender Qt6::Core Qt6::Gui Qt6::Widgets)
     add_test(NAME result_panel
         COMMAND test_result_panel
+    )
+
+    qt6_wrap_cpp(TEST_PARTS_PANEL_MOC_SRCS ${SOURCE_DIR}/app/ui/PartsPanel.h)
+    add_executable(test_parts_panel
+        tests/test_parts_panel.cpp
+        ${SOURCE_DIR}/app/ui/PartsPanel.cpp
+        ${TEST_PARTS_PANEL_MOC_SRCS}
+    )
+    set_target_properties(test_parts_panel PROPERTIES AUTOMOC OFF)
+    target_include_directories(test_parts_panel PRIVATE
+        ${SOURCE_DIR}/app
+        ${SOURCE_DIR}/app/ui
+        ${RENDER_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_parts_panel PRIVATE FERender Qt6::Core Qt6::Gui Qt6::Widgets)
+    add_test(NAME parts_panel
+        COMMAND test_parts_panel
+    )
+
+    qt6_wrap_cpp(TEST_VIEWPORT_CONTEXT_MENU_MOC_SRCS ${SOURCE_DIR}/app/ui/ViewportContextMenu.h)
+    add_executable(test_viewport_context_menu
+        tests/test_viewport_context_menu.cpp
+        ${SOURCE_DIR}/app/ui/ViewportContextMenu.cpp
+        ${TEST_VIEWPORT_CONTEXT_MENU_MOC_SRCS}
+    )
+    set_target_properties(test_viewport_context_menu PROPERTIES AUTOMOC OFF)
+    target_include_directories(test_viewport_context_menu PRIVATE
+        ${SOURCE_DIR}/app
+        ${SOURCE_DIR}/app/ui
+        ${RENDER_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_viewport_context_menu PRIVATE FERender Qt6::Core Qt6::Gui Qt6::Widgets)
+    add_test(NAME viewport_context_menu
+        COMMAND test_viewport_context_menu
     )
 
     add_test(NAME ferender_public_headers

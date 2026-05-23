@@ -27,6 +27,7 @@
 #include "FERenderData.h"
 #include "FEModel.h"
 #include "FEField.h"
+#include "FEPickResult.h"
 #include "ImportPathState.h"
 #include "PostState.h"
 #include "RenderBackend.h"
@@ -59,11 +60,24 @@ private:
     void saveBackgroundSettings() const;
     void applyViewportBackground();
     void showBackgroundSettingsDialog();
+    void showModelInfoDialog();
     void updateRhiActionText();
     void setModelStructureVisible(bool visible);
     void syncSidebarActions();
     void updateProjectTreeSummary();
     void updateStatusSummaries();
+    void updatePickModeSummary(PickMode mode);
+    std::vector<int> selectedPartIndicesForVisibility() const;
+    bool areVisibilityPartsVisible(const std::vector<int>& partIndices) const;
+    bool anyVisibilityPartsVisible(const std::vector<int>& partIndices) const;
+    bool anyVisibilityPartsHidden(const std::vector<int>& partIndices) const;
+    bool hasHiddenModelParts() const;
+    void syncPartVisibilityToViewport();
+    void rememberVisibilitySelection(const std::vector<int>& partIndices, bool highlightVisibleParts);
+    void hideSelectedModelParts();
+    void showSelectedModelParts();
+    void isolateSelectedModelParts();
+    void showAllModelParts();
 
     void clearCurrentLayout();
     bool browseModelFile();
@@ -110,6 +124,7 @@ private:
     QLabel*        statusLabel_    = nullptr;
     QProgressBar*  statusProgress_ = nullptr;
     QLabel*        progressText_   = nullptr;
+    QLabel*        pickModeSummaryLabel_ = nullptr;
     QLabel*        fpsSummaryLabel_      = nullptr;
     QLabel*        frameTimeSummaryLabel_ = nullptr;
     QLabel*        vertexSummaryLabel_   = nullptr;
@@ -124,6 +139,9 @@ private:
     QWidget*       modelNavigatorPanel_ = nullptr;
     QTreeWidget*   projectTree_         = nullptr;
     int            loadedResultFrameCount_ = 0;
+    PickMode       lastSelectionMode_ = PickMode::Node;
+    std::vector<int> lastSelectionIds_;
+    std::vector<int> lastSelectedPartIndices_;
 
     // 后处理显示状态
     DeformState     deform_;

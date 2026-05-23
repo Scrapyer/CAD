@@ -125,6 +125,45 @@ static unsigned int appendClipVertex(FERenderData& result, const ClipVertex& v) 
     return newIndex;
 }
 
+struct ClippedSegment {
+    glm::vec3 a{0.0f};
+    glm::vec3 b{0.0f};
+    int nodeA = -1;
+    int nodeB = -1;
+};
+
+static bool clipLineSegmentByPlane(const glm::vec3& p0,
+                                   const glm::vec3& p1,
+                                   int node0,
+                                   int node1,
+                                   const FEPlane& plane,
+                                   bool keepPositiveSide,
+                                   ClippedSegment& out) {
+    float d0 = glm::dot(p0 - plane.origin, plane.normal);
+    float d1 = glm::dot(p1 - plane.origin, plane.normal);
+    bool keep0 = keepDistance(d0, keepPositiveSide);
+    bool keep1 = keepDistance(d1, keepPositiveSide);
+
+    if (keep0 && keep1) {
+        out = {p0, p1, node0, node1};
+    } else if (!keep0 && !keep1) {
+        return false;
+    } else {
+        float denom = d0 - d1;
+        if (std::abs(denom) <= kPlaneEps)
+            return false;
+        float t = d0 / denom;
+        glm::vec3 cut = p0 + t * (p1 - p0);
+        if (keep0) {
+            out = {p0, cut, node0, -1};
+        } else {
+            out = {cut, p1, -1, node1};
+        }
+    }
+
+    return !samePoint(out.a, out.b);
+}
+
 // 对输入网格的 FE 单元/面边线按平面做线段裁剪：
 // - 两端均在保留侧 → 整段保留
 // - 一端在外侧 → 在平面交点截断，保留内侧那一段
@@ -132,7 +171,8 @@ static unsigned int appendClipVertex(FERenderData& result, const ClipVertex& v) 
 // 这样保留的是真正的 FE 元素边界（与原始网格线框一致），
 // 而不是把所有内部三角剖分对角线都画出来。
 static void clipEdgesByPlane(const FERenderData& input, FERenderData& result,
-                             const FEPlane& plane, bool keepPositiveSide) {
+                             const FEPlane& plane, bool keepPositiveSide,
+                             std::unordered_set<int>* keptElements = nullptr) {
     int edgeCount = static_cast<int>(input.mesh.edgeIndices.size() / 2);
     for (int ei = 0; ei < edgeCount; ++ei) {
         unsigned int oldV0 = input.mesh.edgeIndices[ei * 2];
@@ -143,42 +183,80 @@ static void clipEdgesByPlane(const FERenderData& input, FERenderData& result,
         glm::vec3 p1(input.mesh.edgeVertices[oldV1 * 3],
                      input.mesh.edgeVertices[oldV1 * 3 + 1],
                      input.mesh.edgeVertices[oldV1 * 3 + 2]);
-
-        float d0 = glm::dot(p0 - plane.origin, plane.normal);
-        float d1 = glm::dot(p1 - plane.origin, plane.normal);
-        bool keep0 = keepDistance(d0, keepPositiveSide);
-        bool keep1 = keepDistance(d1, keepPositiveSide);
-
-        glm::vec3 a, b;
-        if (keep0 && keep1) {
-            a = p0; b = p1;
-        } else if (!keep0 && !keep1) {
-            continue;
-        } else {
-            float denom = d0 - d1;
-            if (std::abs(denom) <= kPlaneEps) continue;
-            float t = d0 / denom;
-            glm::vec3 cut = p0 + t * (p1 - p0);
-            if (keep0) { a = p0; b = cut; }
-            else       { a = cut; b = p1; }
+        int node0 = -1;
+        int node1 = -1;
+        if (ei < static_cast<int>(input.mesh.edgeNodeIds.size())) {
+            node0 = input.mesh.edgeNodeIds[ei].first;
+            node1 = input.mesh.edgeNodeIds[ei].second;
         }
 
-        if (samePoint(a, b)) continue;
+        ClippedSegment clipped;
+        if (!clipLineSegmentByPlane(p0, p1, node0, node1, plane, keepPositiveSide, clipped))
+            continue;
 
         unsigned int newIdx = static_cast<unsigned int>(result.mesh.edgeVertices.size() / 3);
-        result.mesh.edgeVertices.push_back(a.x);
-        result.mesh.edgeVertices.push_back(a.y);
-        result.mesh.edgeVertices.push_back(a.z);
-        result.mesh.edgeVertices.push_back(b.x);
-        result.mesh.edgeVertices.push_back(b.y);
-        result.mesh.edgeVertices.push_back(b.z);
+        result.mesh.edgeVertices.push_back(clipped.a.x);
+        result.mesh.edgeVertices.push_back(clipped.a.y);
+        result.mesh.edgeVertices.push_back(clipped.a.z);
+        result.mesh.edgeVertices.push_back(clipped.b.x);
+        result.mesh.edgeVertices.push_back(clipped.b.y);
+        result.mesh.edgeVertices.push_back(clipped.b.z);
         result.mesh.edgeIndices.push_back(newIdx);
         result.mesh.edgeIndices.push_back(newIdx + 1);
+        result.mesh.edgeToElement.push_back(
+            ei < static_cast<int>(input.mesh.edgeToElement.size())
+                ? input.mesh.edgeToElement[ei]
+                : -1);
+        result.mesh.edgeNodeIds.push_back({clipped.nodeA, clipped.nodeB});
+        if (keptElements && ei < static_cast<int>(input.mesh.edgeToElement.size())) {
+            int elemId = input.mesh.edgeToElement[ei];
+            if (elemId >= 0)
+                keptElements->insert(elemId);
+        }
 
         if (ei < static_cast<int>(input.edgeToPart.size()))
             result.edgeToPart.push_back(input.edgeToPart[ei]);
         else
             result.edgeToPart.push_back(-1);
+    }
+}
+
+static void clipElemEdgesByPlane(const FERenderData& input,
+                                 FERenderData& result,
+                                 const FEPlane& plane,
+                                 bool keepPositiveSide,
+                                 const std::unordered_set<int>& keptElements) {
+    int elemEdgeCount = static_cast<int>(input.mesh.elemEdgeToElement.size());
+    for (int ei = 0; ei < elemEdgeCount; ++ei) {
+        int elemId = input.mesh.elemEdgeToElement[ei];
+        if (keptElements.find(elemId) == keptElements.end())
+            continue;
+        int base = ei * 6;
+        glm::vec3 p0(input.mesh.elemEdgeVertices[base],
+                     input.mesh.elemEdgeVertices[base + 1],
+                     input.mesh.elemEdgeVertices[base + 2]);
+        glm::vec3 p1(input.mesh.elemEdgeVertices[base + 3],
+                     input.mesh.elemEdgeVertices[base + 4],
+                     input.mesh.elemEdgeVertices[base + 5]);
+        int node0 = -1;
+        int node1 = -1;
+        if (ei < static_cast<int>(input.mesh.elemEdgeNodeIds.size())) {
+            node0 = input.mesh.elemEdgeNodeIds[ei].first;
+            node1 = input.mesh.elemEdgeNodeIds[ei].second;
+        }
+
+        ClippedSegment clipped;
+        if (!clipLineSegmentByPlane(p0, p1, node0, node1, plane, keepPositiveSide, clipped))
+            continue;
+
+        result.mesh.elemEdgeVertices.push_back(clipped.a.x);
+        result.mesh.elemEdgeVertices.push_back(clipped.a.y);
+        result.mesh.elemEdgeVertices.push_back(clipped.a.z);
+        result.mesh.elemEdgeVertices.push_back(clipped.b.x);
+        result.mesh.elemEdgeVertices.push_back(clipped.b.y);
+        result.mesh.elemEdgeVertices.push_back(clipped.b.z);
+        result.mesh.elemEdgeToElement.push_back(elemId);
+        result.mesh.elemEdgeNodeIds.push_back({clipped.nodeA, clipped.nodeB});
     }
 }
 
@@ -237,13 +315,70 @@ static void filterEdgesByKeptVertices(const FERenderData& input, FERenderData& r
             result.edgeToPart.push_back(input.edgeToPart[ei]);
         else
             result.edgeToPart.push_back(-1);
+        result.mesh.edgeToElement.push_back(
+            ei < static_cast<int>(input.mesh.edgeToElement.size())
+                ? input.mesh.edgeToElement[ei]
+                : -1);
+        if (ei < static_cast<int>(input.mesh.edgeNodeIds.size()))
+            result.mesh.edgeNodeIds.push_back(input.mesh.edgeNodeIds[ei]);
+        else
+            result.mesh.edgeNodeIds.push_back({-1, -1});
     }
 }
 
 // 过滤单元完整边线（用于选中高亮）：只保留属于保留单元的边
-static void filterElemEdges(const FERenderData& input, FERenderData& result) {
-    std::unordered_set<int> keptElements(result.triangleToElement.begin(),
-                                          result.triangleToElement.end());
+static void appendEdgeSegment(const FERenderData& input, FERenderData& result, int edgeIndex) {
+    unsigned int newIdx = static_cast<unsigned int>(result.mesh.edgeVertices.size() / 3);
+    for (int k = 0; k < 2; ++k) {
+        unsigned int oldV = input.mesh.edgeIndices[edgeIndex * 2 + k];
+        int base = oldV * 3;
+        for (int j = 0; j < 3; ++j)
+            result.mesh.edgeVertices.push_back(input.mesh.edgeVertices[base + j]);
+        result.mesh.edgeIndices.push_back(newIdx + static_cast<unsigned int>(k));
+    }
+
+    if (edgeIndex < static_cast<int>(input.edgeToPart.size()))
+        result.edgeToPart.push_back(input.edgeToPart[edgeIndex]);
+    else
+        result.edgeToPart.push_back(-1);
+
+    result.mesh.edgeToElement.push_back(
+        edgeIndex < static_cast<int>(input.mesh.edgeToElement.size())
+            ? input.mesh.edgeToElement[edgeIndex]
+            : -1);
+    if (edgeIndex < static_cast<int>(input.mesh.edgeNodeIds.size()))
+        result.mesh.edgeNodeIds.push_back(input.mesh.edgeNodeIds[edgeIndex]);
+    else
+        result.mesh.edgeNodeIds.push_back({-1, -1});
+}
+
+static bool elementValueInRange(const FEScalarField& field, int elemId,
+                                float minValue, float maxValue) {
+    auto it = field.values.find(elemId);
+    return it != field.values.end() && it->second >= minValue && it->second <= maxValue;
+}
+
+static void filterEdgesByElementValue(const FERenderData& input,
+                                      FERenderData& result,
+                                      const FEScalarField& field,
+                                      float minValue,
+                                      float maxValue,
+                                      std::unordered_set<int>& keptElements) {
+    int edgeCount = static_cast<int>(input.mesh.edgeIndices.size() / 2);
+    for (int ei = 0; ei < edgeCount; ++ei) {
+        if (ei >= static_cast<int>(input.mesh.edgeToElement.size()))
+            continue;
+        int elemId = input.mesh.edgeToElement[ei];
+        if (!elementValueInRange(field, elemId, minValue, maxValue))
+            continue;
+
+        appendEdgeSegment(input, result, ei);
+        keptElements.insert(elemId);
+    }
+}
+
+static void filterElemEdges(const FERenderData& input, FERenderData& result,
+                            const std::unordered_set<int>& keptElements) {
     int elemEdgeCount = static_cast<int>(input.mesh.elemEdgeToElement.size());
     for (int ei = 0; ei < elemEdgeCount; ++ei) {
         int elemId = input.mesh.elemEdgeToElement[ei];
@@ -263,10 +398,11 @@ FERenderData FEPostFilter::thresholdByElementValue(const FERenderData& input,
                                                     float maxValue) {
     FERenderData result;
     int triCount = input.triangleCount();
-    if (triCount == 0) return result;
+    if (triCount == 0 && input.mesh.edgeIndices.empty()) return result;
 
     // 旧渲染顶点索引 → 新渲染顶点索引
     std::unordered_map<unsigned int, unsigned int> vertexRemap;
+    std::unordered_set<int> keptElements;
     int vertexStride = 6;  // 位置(3) + 法线(3)
 
     for (int ti = 0; ti < triCount; ++ti) {
@@ -276,6 +412,7 @@ FERenderData FEPostFilter::thresholdByElementValue(const FERenderData& input,
 
         float val = it->second;
         if (val < minValue || val > maxValue) continue;
+        keptElements.insert(elemId);
 
         // 保留此三角形
         unsigned int oldIdx[3];
@@ -319,8 +456,12 @@ FERenderData FEPostFilter::thresholdByElementValue(const FERenderData& input,
             result.triangleToPart.push_back(-1);
     }
 
-    filterEdgesByKeptVertices(input, result, vertexRemap);
-    filterElemEdges(input, result);
+    if (!input.mesh.edgeToElement.empty()) {
+        filterEdgesByElementValue(input, result, field, minValue, maxValue, keptElements);
+    } else {
+        filterEdgesByKeptVertices(input, result, vertexRemap);
+    }
+    filterElemEdges(input, result, keptElements);
 
     return result;
 }
@@ -330,9 +471,10 @@ FERenderData FEPostFilter::clipByPlane(const FERenderData& input,
                                         bool keepPositiveSide) {
     FERenderData result;
     int triCount = input.triangleCount();
-    if (triCount == 0) return result;
+    if (triCount == 0 && input.mesh.edgeIndices.empty()) return result;
 
     int vertexStride = 6;
+    std::unordered_set<int> keptElements;
 
     for (int ti = 0; ti < triCount; ++ti) {
         ClipVertex tri[3];
@@ -377,11 +519,13 @@ FERenderData FEPostFilter::clipByPlane(const FERenderData& input,
             result.triangleToElement.push_back(elemId);
             result.triangleToFace.push_back(faceId);
             result.triangleToPart.push_back(partId);
+            if (elemId >= 0)
+                keptElements.insert(elemId);
         }
     }
 
-    clipEdgesByPlane(input, result, plane, keepPositiveSide);
-    filterElemEdges(input, result);
+    clipEdgesByPlane(input, result, plane, keepPositiveSide, &keptElements);
+    clipElemEdgesByPlane(input, result, plane, keepPositiveSide, keptElements);
 
     return result;
 }
