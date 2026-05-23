@@ -24,6 +24,7 @@ struct MetalMeshFramePassInputs {
     void* depthStencilState = nullptr;
     void* overlayDepthStencilState = nullptr;
     QSize drawableSize;
+    float axesDevicePixelRatio = 1.0f;
     MetalBackgroundUniforms backgroundUniforms{};
     size_t backgroundUniformOffset = 0;
     MetalMeshFramePassDraw surface;

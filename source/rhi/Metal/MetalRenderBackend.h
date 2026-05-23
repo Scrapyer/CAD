@@ -53,7 +53,8 @@ public:
                          float green,
                          float blue,
                          float alpha = 1.0f,
-                         const QMatrix4x4& axesMvp = QMatrix4x4());
+                         const QMatrix4x4& axesMvp = QMatrix4x4(),
+                         float axesDevicePixelRatio = 1.0f);
     bool renderMeshFrame(const QMatrix4x4& mvp,
                          const QVector3D& objectColor,
                          ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe,
@@ -61,7 +62,8 @@ public:
                          float green = 0.05f,
                          float blue = 0.07f,
                          float alpha = 1.0f,
-                         const QMatrix4x4& axesMvp = QMatrix4x4());
+                         const QMatrix4x4& axesMvp = QMatrix4x4(),
+                         float axesDevicePixelRatio = 1.0f);
     bool pickElementAt(const QMatrix4x4& mvp, int x, int y, int& elementId);
     void destroyLayer();
     void destroy();

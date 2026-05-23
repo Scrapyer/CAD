@@ -20,7 +20,6 @@
 
 namespace {
 constexpr size_t kMaxInteractiveEdgeIndices = 8000000;
-constexpr uint32_t kAxesVerticesPerAxis = 26;
 constexpr float kPi = 3.14159265358979323846f;
 
 struct VulkanMeshVertex {
@@ -79,58 +78,6 @@ std::vector<VulkanLineVertex> makeLineVertices(const std::vector<float>& positio
         vertices[i].position[1] = positions[i * 3 + 1];
         vertices[i].position[2] = positions[i * 3 + 2];
         vertices[i].scalar = 0.0f;
-    }
-    return vertices;
-}
-
-std::vector<float> buildAxesLineVertices()
-{
-    std::vector<float> vertices;
-    vertices.reserve(static_cast<size_t>(kAxesVerticesPerAxis * 3 * 3));
-    auto appendLine = [&vertices](const Vec3& a, const Vec3& b) {
-        vertices.insert(vertices.end(), {a.x, a.y, a.z, b.x, b.y, b.z});
-    };
-
-    const std::array<Vec3, 3> dirs = {{
-        {1.0f, 0.0f, 0.0f},
-        {0.0f, 1.0f, 0.0f},
-        {0.0f, 0.0f, 1.0f}
-    }};
-    const std::array<Vec3, 3> ups = {{
-        {0.0f, 1.0f, 0.0f},
-        {0.0f, 0.0f, 1.0f},
-        {1.0f, 0.0f, 0.0f}
-    }};
-
-    constexpr float shaftLength = 0.78f;
-    constexpr float tipLength = 1.0f;
-    constexpr float shaftRadius = 0.025f;
-    constexpr float arrowRadius = 0.12f;
-    for (size_t axis = 0; axis < dirs.size(); ++axis) {
-        const Vec3 dir = dirs[axis];
-        const Vec3 right = cross(dir, ups[axis]);
-        const Vec3 up = cross(right, dir);
-        const Vec3 origin{0.0f, 0.0f, 0.0f};
-        const Vec3 shaftEnd = scale(dir, shaftLength);
-        const Vec3 tip = scale(dir, tipLength);
-        const std::array<Vec3, 4> base = {{
-            add(shaftEnd, scale(right, arrowRadius)),
-            add(shaftEnd, scale(up, arrowRadius)),
-            add(shaftEnd, scale(right, -arrowRadius)),
-            add(shaftEnd, scale(up, -arrowRadius))
-        }};
-
-        appendLine(origin, shaftEnd);
-        appendLine(scale(right, shaftRadius), add(shaftEnd, scale(right, shaftRadius)));
-        appendLine(scale(up, shaftRadius), add(shaftEnd, scale(up, shaftRadius)));
-        appendLine(scale(right, -shaftRadius), add(shaftEnd, scale(right, -shaftRadius)));
-        appendLine(scale(up, -shaftRadius), add(shaftEnd, scale(up, -shaftRadius)));
-        for (const Vec3& p : base) {
-            appendLine(tip, p);
-        }
-        for (size_t i = 0; i < base.size(); ++i) {
-            appendLine(base[i], base[(i + 1) % base.size()]);
-        }
     }
     return vertices;
 }
@@ -357,7 +304,8 @@ bool VulkanClearFrameRenderer::renderClearFrame(
     const VulkanDevice& device,
     const VulkanSwapchain& swapchain,
     const VkClearColorValue& clearColor,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    float axesDevicePixelRatio)
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
@@ -387,7 +335,8 @@ bool VulkanClearFrameRenderer::renderClearFrame(
                              swapchain.extent(),
                              clearColor,
                              false,
-                             axesMvp)) {
+                             axesMvp,
+                             axesDevicePixelRatio)) {
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -420,7 +369,8 @@ bool VulkanClearFrameRenderer::renderTriangleFrame(
     const VulkanDevice& device,
     const VulkanSwapchain& swapchain,
     const VkClearColorValue& clearColor,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    float axesDevicePixelRatio)
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
@@ -449,7 +399,8 @@ bool VulkanClearFrameRenderer::renderTriangleFrame(
                              swapchain.extent(),
                              clearColor,
                              true,
-                             axesMvp)) {
+                             axesMvp,
+                             axesDevicePixelRatio)) {
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -987,7 +938,8 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
     const VkClearColorValue& clearColor,
     const QMatrix4x4& mvp,
     const QMatrix4x4& axesMvp,
-    ModelDisplayMode displayMode)
+    ModelDisplayMode displayMode,
+    float axesDevicePixelRatio)
 {
     lastError_.clear();
     swapchainOutOfDate_ = false;
@@ -996,7 +948,7 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
         return false;
     }
     if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
-        return renderClearFrame(device, swapchain, clearColor, axesMvp);
+        return renderClearFrame(device, swapchain, clearColor, axesMvp, axesDevicePixelRatio);
     }
 
     VkDevice vkDevice = device.device();
@@ -1020,7 +972,8 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
                                  clearColor,
                                  mvp,
                                  axesMvp,
-                                 displayMode)) {
+                                 displayMode,
+                                 axesDevicePixelRatio)) {
         return false;
     }
     vkResetFences(vkDevice, 1, &inFlightFence_);
@@ -1114,7 +1067,8 @@ bool VulkanClearFrameRenderer::presentSwapchainImage(
 void VulkanClearFrameRenderer::recordAxesIndicator(
     VkCommandBuffer commandBuffer,
     VkExtent2D extent,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    float axesDevicePixelRatio)
 {
     if ((pipelines_.line.pipeline() == VK_NULL_HANDLE && pipelines_.isoSurface.pipeline() == VK_NULL_HANDLE) ||
         extent.width == 0 ||
@@ -1122,10 +1076,13 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
         return;
     }
 
-    const uint32_t margin = 8;
+    const float scale = std::max(1.0f, axesDevicePixelRatio);
+    const uint32_t margin = static_cast<uint32_t>(8.0f * scale + 0.5f);
     const uint32_t availableWidth = extent.width > margin * 2 ? extent.width - margin * 2 : 0;
     const uint32_t availableHeight = extent.height > margin * 2 ? extent.height - margin * 2 : 0;
-    const uint32_t axesSize = std::min<uint32_t>(152, std::min(availableWidth, availableHeight));
+    const uint32_t requestedAxesSize = static_cast<uint32_t>(152.0f * scale + 0.5f);
+    const uint32_t axesSize = std::min<uint32_t>(requestedAxesSize,
+                                                std::min(availableWidth, availableHeight));
     if (axesSize == 0) {
         return;
     }
@@ -1179,45 +1136,6 @@ void VulkanClearFrameRenderer::recordAxesIndicator(
         vkCmdDraw(commandBuffer, axesSolidVertexCount_, 1, 0, 0);
     }
 
-    if (pipelines_.line.pipeline() == VK_NULL_HANDLE ||
-        !axesLineVertexResource_.isValid() ||
-        axesLineVertexCount_ < 6) {
-        return;
-    }
-
-    const std::array<std::array<float, 4>, 3> axisColors = {{
-        {{0.95f, 0.30f, 0.30f, 1.0f}},
-        {{0.35f, 0.90f, 0.35f, 1.0f}},
-        {{0.35f, 0.55f, 1.00f, 1.0f}}
-    }};
-
-    const uint32_t axisVertexCount = axesLineVertexCount_ / 3;
-    if (axisVertexCount < 2) {
-        return;
-    }
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.line.pipeline());
-    VkBuffer axesVertexBuffer = axesLineVertexResource_.buffer();
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &axesVertexBuffer, offsets);
-
-    for (uint32_t axis = 0; axis < 3; ++axis) {
-        std::array<float, 24> pushConstants{};
-        std::memcpy(pushConstants.data(), axesMvp.constData(), 16 * sizeof(float));
-        pushConstants[16] = axisColors[axis][0];
-        pushConstants[17] = axisColors[axis][1];
-        pushConstants[18] = axisColors[axis][2];
-        pushConstants[19] = axisColors[axis][3];
-        pushConstants[20] = 0.0f;
-        pushConstants[21] = 1.0f;
-        pushConstants[22] = 1.0f;
-        pushConstants[23] = 0.0f;
-        vkCmdPushConstants(commandBuffer,
-                           pipelines_.line.layout(),
-                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0,
-                           static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
-                           pushConstants.data());
-        vkCmdDraw(commandBuffer, axisVertexCount, 1, axis * axisVertexCount, 0);
-    }
 }
 
 void VulkanClearFrameRenderer::recordBackground(VkCommandBuffer commandBuffer, VkExtent2D extent)
@@ -2570,17 +2488,6 @@ bool VulkanClearFrameRenderer::createAxesIndicatorResource(const VulkanDevice& d
     axesSolidVertexResource_.destroy(device);
     axesSolidVertexCount_ = 0;
 
-    const std::vector<VulkanLineVertex> axesVertices = makeLineVertices(buildAxesLineVertices());
-    if (!axesLineVertexResource_.uploadHostVisible(device,
-                                                   axesVertices.data(),
-                                                   static_cast<VkDeviceSize>(axesVertices.size() * sizeof(VulkanLineVertex)),
-                                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                                   "axes indicator line vertex",
-                                                   lastError_)) {
-        return false;
-    }
-    axesLineVertexCount_ = static_cast<uint32_t>(axesVertices.size());
-
     const std::vector<VulkanMeshVertex> axesSolidVertices = buildAxesSolidVertices();
     if (!axesSolidVertexResource_.uploadHostVisible(device,
                                                     axesSolidVertices.data(),
@@ -2724,7 +2631,8 @@ bool VulkanClearFrameRenderer::recordCommandBuffer(
     VkExtent2D extent,
     const VkClearColorValue& clearColor,
     bool drawTriangle,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    float axesDevicePixelRatio)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2769,7 +2677,7 @@ bool VulkanClearFrameRenderer::recordCommandBuffer(
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.triangle.pipeline());
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     }
-    recordAxesIndicator(commandBuffer, extent, axesMvp);
+    recordAxesIndicator(commandBuffer, extent, axesMvp, axesDevicePixelRatio);
     vkCmdEndRenderPass(commandBuffer);
 
     result = vkEndCommandBuffer(commandBuffer);
@@ -2789,7 +2697,8 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     const VkClearColorValue& clearColor,
     const QMatrix4x4& mvp,
     const QMatrix4x4& axesMvp,
-    ModelDisplayMode displayMode)
+    ModelDisplayMode displayMode,
+    float axesDevicePixelRatio)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2854,7 +2763,7 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     meshFrameResources.selectionLineVertexCount = selectionLineVertexCount_;
     VulkanMeshFramePass::record(commandBuffer, extent, mvp, meshFrameResources);
 
-    recordAxesIndicator(commandBuffer, extent, axesMvp);
+    recordAxesIndicator(commandBuffer, extent, axesMvp, axesDevicePixelRatio);
 
     vkCmdEndRenderPass(commandBuffer);
 

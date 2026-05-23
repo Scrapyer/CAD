@@ -73,19 +73,22 @@ public:
                          float green,
                          float blue,
                          float alpha = 1.0f,
-                         const QMatrix4x4& axesMvp = QMatrix4x4());
+                         const QMatrix4x4& axesMvp = QMatrix4x4(),
+                         float axesDevicePixelRatio = 1.0f);
     bool renderTriangleFrame(float red = 0.04f,
                              float green = 0.05f,
                              float blue = 0.07f,
                              float alpha = 1.0f,
-                             const QMatrix4x4& axesMvp = QMatrix4x4());
+                             const QMatrix4x4& axesMvp = QMatrix4x4(),
+                             float axesDevicePixelRatio = 1.0f);
     bool renderMeshFrame(const QMatrix4x4& mvp = QMatrix4x4(),
                          float red = 0.04f,
                          float green = 0.05f,
                          float blue = 0.07f,
                          float alpha = 1.0f,
                          const QMatrix4x4& axesMvp = QMatrix4x4(),
-                         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
+                         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe,
+                         float axesDevicePixelRatio = 1.0f);
     bool renderPickFrame(const QMatrix4x4& mvp, uint32_t width, uint32_t height);
     bool pickElementAt(const QMatrix4x4& mvp,
                        uint32_t width,

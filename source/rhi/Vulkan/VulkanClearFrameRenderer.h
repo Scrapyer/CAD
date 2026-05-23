@@ -46,11 +46,13 @@ public:
     bool renderClearFrame(const VulkanDevice& device,
                          const VulkanSwapchain& swapchain,
                          const VkClearColorValue& clearColor,
-                         const QMatrix4x4& axesMvp = QMatrix4x4());
+                         const QMatrix4x4& axesMvp = QMatrix4x4(),
+                         float axesDevicePixelRatio = 1.0f);
     bool renderTriangleFrame(const VulkanDevice& device,
                              const VulkanSwapchain& swapchain,
                              const VkClearColorValue& clearColor,
-                             const QMatrix4x4& axesMvp = QMatrix4x4());
+                             const QMatrix4x4& axesMvp = QMatrix4x4(),
+                             float axesDevicePixelRatio = 1.0f);
     bool uploadMesh(const VulkanDevice& device, const Mesh& mesh, const VulkanMeshUploadOptions& options);
     bool uploadVertexScalars(const VulkanDevice& device,
                              const std::vector<float>& scalars,
@@ -71,7 +73,8 @@ public:
                          const VkClearColorValue& clearColor,
                          const QMatrix4x4& mvp,
                          const QMatrix4x4& axesMvp = QMatrix4x4(),
-                         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
+                         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe,
+                         float axesDevicePixelRatio = 1.0f);
     bool renderPickFrame(const VulkanDevice& device,
                          const QMatrix4x4& mvp,
                          uint32_t width,
@@ -118,14 +121,16 @@ private:
                              VkExtent2D extent,
                              const VkClearColorValue& clearColor,
                              bool drawTriangle,
-                             const QMatrix4x4& axesMvp = QMatrix4x4());
+                             const QMatrix4x4& axesMvp = QMatrix4x4(),
+                             float axesDevicePixelRatio = 1.0f);
     bool recordMeshCommandBuffer(VkCommandBuffer commandBuffer,
                                  VkFramebuffer framebuffer,
                                  VkExtent2D extent,
                                  const VkClearColorValue& clearColor,
                                  const QMatrix4x4& mvp,
                                  const QMatrix4x4& axesMvp = QMatrix4x4(),
-                                 ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
+                                 ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe,
+                                 float axesDevicePixelRatio = 1.0f);
     bool acquireSwapchainImage(const VulkanDevice& device,
                                const VulkanSwapchain& swapchain,
                                uint32_t& imageIndex);
@@ -134,7 +139,8 @@ private:
                                uint32_t imageIndex);
     void recordAxesIndicator(VkCommandBuffer commandBuffer,
                              VkExtent2D extent,
-                             const QMatrix4x4& axesMvp);
+                             const QMatrix4x4& axesMvp,
+                             float axesDevicePixelRatio);
     void recordBackground(VkCommandBuffer commandBuffer, VkExtent2D extent);
     int colorToId(unsigned char r, unsigned char g, unsigned char b) const;
 

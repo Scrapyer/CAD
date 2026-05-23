@@ -61,18 +61,21 @@ void drawMetalVertices(id<MTLRenderCommandEncoder> encoder,
 
 void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePassInputs& inputs)
 {
-    if (!inputs.axes.enabled) {
+    if (!inputs.axes.enabled && !inputs.axesSolid.enabled) {
         return;
     }
 
-    const NSUInteger margin = 8;
+    const double scale = std::max(1.0f, inputs.axesDevicePixelRatio);
+    const NSUInteger margin = static_cast<NSUInteger>(8.0 * scale + 0.5);
     const NSUInteger availableWidth = inputs.drawableSize.width() > static_cast<int>(margin * 2)
         ? static_cast<NSUInteger>(inputs.drawableSize.width()) - margin * 2
         : 0;
     const NSUInteger availableHeight = inputs.drawableSize.height() > static_cast<int>(margin * 2)
         ? static_cast<NSUInteger>(inputs.drawableSize.height()) - margin * 2
         : 0;
-    const NSUInteger axesSize = std::min<NSUInteger>(152, std::min(availableWidth, availableHeight));
+    const NSUInteger requestedAxesSize = static_cast<NSUInteger>(152.0 * scale + 0.5);
+    const NSUInteger axesSize = std::min<NSUInteger>(requestedAxesSize,
+                                                     std::min(availableWidth, availableHeight));
     if (axesSize == 0) {
         return;
     }
@@ -109,6 +112,13 @@ void drawMetalAxes(id<MTLRenderCommandEncoder> encoder, const MetalMeshFramePass
     [encoder setViewport:axesViewport];
     [encoder setScissorRect:axesScissor];
     drawMetalVertices(encoder, inputs, inputs.axesSolid, MTLPrimitiveTypeTriangle);
+    if (!inputs.axes.enabled) {
+        [encoder setViewport:previousViewport];
+        [encoder setScissorRect:previousScissor];
+        [encoder setDepthStencilState:static_cast<id<MTLDepthStencilState>>(inputs.depthStencilState)];
+        return;
+    }
+
     [encoder setRenderPipelineState:static_cast<id<MTLRenderPipelineState>>(inputs.axes.pipelineState)];
     [encoder setVertexBuffer:static_cast<id<MTLBuffer>>(inputs.axes.vertexBuffer) offset:0 atIndex:0];
 

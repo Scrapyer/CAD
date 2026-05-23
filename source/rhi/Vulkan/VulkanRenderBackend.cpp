@@ -251,7 +251,8 @@ bool VulkanRenderBackend::renderClearFrame(float red,
                                           float green,
                                           float blue,
                                           float alpha,
-                                          const QMatrix4x4& axesMvp)
+                                          const QMatrix4x4& axesMvp,
+                                          float axesDevicePixelRatio)
 {
     lastError_.clear();
     if (!hasSwapchain()) {
@@ -265,7 +266,7 @@ bool VulkanRenderBackend::renderClearFrame(float red,
     clearColor.float32[2] = blue;
     clearColor.float32[3] = alpha;
 
-    if (!clearFrameRenderer_->renderClearFrame(*device_, *swapchain_, clearColor, axesMvp)) {
+    if (!clearFrameRenderer_->renderClearFrame(*device_, *swapchain_, clearColor, axesMvp, axesDevicePixelRatio)) {
         lastError_ = clearFrameRenderer_->lastError();
         return false;
     }
@@ -277,7 +278,8 @@ bool VulkanRenderBackend::renderTriangleFrame(
     float green,
     float blue,
     float alpha,
-    const QMatrix4x4& axesMvp)
+    const QMatrix4x4& axesMvp,
+    float axesDevicePixelRatio)
 {
     lastError_.clear();
     if (!hasSwapchain()) {
@@ -291,7 +293,7 @@ bool VulkanRenderBackend::renderTriangleFrame(
     clearColor.float32[2] = blue;
     clearColor.float32[3] = alpha;
 
-    if (!clearFrameRenderer_->renderTriangleFrame(*device_, *swapchain_, clearColor, axesMvp)) {
+    if (!clearFrameRenderer_->renderTriangleFrame(*device_, *swapchain_, clearColor, axesMvp, axesDevicePixelRatio)) {
         lastError_ = clearFrameRenderer_->lastError();
         return false;
     }
@@ -305,7 +307,8 @@ bool VulkanRenderBackend::renderMeshFrame(
     float blue,
     float alpha,
     const QMatrix4x4& axesMvp,
-    ModelDisplayMode displayMode)
+    ModelDisplayMode displayMode,
+    float axesDevicePixelRatio)
 {
     lastError_.clear();
     if (!hasSwapchain()) {
@@ -319,7 +322,7 @@ bool VulkanRenderBackend::renderMeshFrame(
     clearColor.float32[2] = blue;
     clearColor.float32[3] = alpha;
 
-    if (!clearFrameRenderer_->renderMeshFrame(*device_, *swapchain_, clearColor, mvp, axesMvp, displayMode)) {
+    if (!clearFrameRenderer_->renderMeshFrame(*device_, *swapchain_, clearColor, mvp, axesMvp, displayMode, axesDevicePixelRatio)) {
         lastError_ = clearFrameRenderer_->lastError();
         return false;
     }

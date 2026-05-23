@@ -245,12 +245,14 @@ void MetalViewport::renderFrame()
                                    clearGreen_,
                                    clearBlue_,
                                    clearAlpha_,
-                                   currentAxesMvp())
+                                   currentAxesMvp(),
+                                   static_cast<float>(std::max<qreal>(devicePixelRatioF(), 1.0)))
         : backend_.renderClearFrame(clearRed_,
                                     clearGreen_,
                                     clearBlue_,
                                     clearAlpha_,
-                                    currentAxesMvp());
+                                    currentAxesMvp(),
+                                    static_cast<float>(std::max<qreal>(devicePixelRatioF(), 1.0)));
     if (!rendered) {
         lastError_ = backend_.lastError();
         return;
@@ -1426,7 +1428,7 @@ bool MetalViewport::standardViewFromAxesClick(const QPointF& position, StandardV
     float bestDist2 = 1.0e30f;
     const float lineThreshold2 = 13.0f * 13.0f;
     for (size_t i = 0; i < axisDirs.size(); ++i) {
-        const QPointF end = project(axisDirs[i] * 1.12f);
+        const QPointF end = project(axisDirs[i] * 1.15f);
         const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
                                end.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
                                kAxesLabelSize + kAxesClickPadding * 2.0f,
@@ -1932,9 +1934,9 @@ void MetalViewport::updateAxesLabels()
     const int axesLeft = kAxesMargin;
     const int axesTop = size.height() - axesSize - kAxesMargin;
     const std::array<glm::vec3, 3> labelPositions = {
-        glm::vec3(1.12f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.12f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 1.12f)
+        glm::vec3(1.15f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.15f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.15f)
     };
 
     for (size_t i = 0; i < axesLabels_.size(); ++i) {
