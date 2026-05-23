@@ -588,6 +588,7 @@ qt6_wrap_cpp(VIEWER_MOC_SRCS
     ${SOURCE_DIR}/app/ui/FEModelPanel.h
     ${SOURCE_DIR}/app/ui/PartsPanel.h
     ${SOURCE_DIR}/app/ui/ResultPanel.h
+    ${SOURCE_DIR}/app/ui/ViewportContextMenu.h
     ${SOURCE_DIR}/app/ui/ControlPanel.h
     ${SOURCE_DIR}/app/ui/MonitorPanel.h
 )
@@ -600,6 +601,7 @@ add_executable(${PROJECT_NAME}
     ${SOURCE_DIR}/app/ui/FEModelPanel.cpp
     ${SOURCE_DIR}/app/ui/PartsPanel.cpp
     ${SOURCE_DIR}/app/ui/ResultPanel.cpp
+    ${SOURCE_DIR}/app/ui/ViewportContextMenu.cpp
     ${SOURCE_DIR}/app/ui/ControlPanel.cpp
     ${SOURCE_DIR}/app/ui/MonitorPanel.cpp
     ${VIEWER_MOC_SRCS}

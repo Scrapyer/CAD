@@ -6,7 +6,6 @@
  *   - Tecplot 式菜单栏 + 紧凑快捷工具栏
  *   - 左侧停靠：项目树 / 部件列表
  *   - 中央渲染视口 + 底部工作流标签页
- *   - 右侧停靠：选择详情 / 显示控制
  *   - 状态栏
  */
 
@@ -14,8 +13,8 @@
 
 #include <QMainWindow>
 #include <QActionGroup>
+#include <QColor>
 #include <QLabel>
-#include <QPushButton>
 #include <QProgressBar>
 #include <QToolBar>
 #include <QMenu>
@@ -37,6 +36,7 @@ class FEModelPanel;
 class PartsPanel;
 class ResultPanel;
 class FEAnimationController;
+class ViewportContextMenu;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -52,17 +52,22 @@ private:
     void setupToolBar();
     void setupStatusBar();
     QWidget* createModelNavigatorPanel();
-    QWidget* createInspectorPanel();
-    QWidget* createDisplayControlPanel();
     QDialog* createPostDialog(const QString& title, ResultPanel* panel);
     void showPostDialog(QDialog* dialog);
     void applyTheme(const Theme& theme);
+    void loadBackgroundSettings();
+    void saveBackgroundSettings() const;
+    void applyViewportBackground();
+    void showBackgroundSettingsDialog();
     void updateRhiActionText();
+    void setModelStructureVisible(bool visible);
     void syncSidebarActions();
     void updateProjectTreeSummary();
     void updateStatusSummaries();
 
-    void browseModelFile();
+    void clearCurrentLayout();
+    bool browseModelFile();
+    bool browseUnifiedImportFile();
     void browseImportFile();
     void browseResultFile();
     void applyFiles();
@@ -94,6 +99,7 @@ private:
     QDialog*               contourDialog_    = nullptr;
     QDialog*               deformationDialog_ = nullptr;
     QDialog*               thresholdDialog_   = nullptr;
+    ViewportContextMenu*   viewportContextMenu_ = nullptr;
 
     // 工具栏拾取模式动作组
     QActionGroup*  pickGroup_        = nullptr;
@@ -108,16 +114,14 @@ private:
     QLabel*        frameTimeSummaryLabel_ = nullptr;
     QLabel*        vertexSummaryLabel_   = nullptr;
     QLabel*        triangleSummaryLabel_ = nullptr;
+    QLabel*        modelSizeSummaryLabel_ = nullptr;
 
     // 最近的导入路径
     ImportPathState importPaths_;
 
     // 侧边栏停靠
     QDockWidget*   partsDock_      = nullptr;   // 左侧：模型结构
-    QDockWidget*   modelInfoDock_  = nullptr;   // 右侧：属性/控制
     QWidget*       modelNavigatorPanel_ = nullptr;
-    QWidget*       inspectorPanel_      = nullptr;
-    QWidget*       displayControlPanel_ = nullptr;
     QTreeWidget*   projectTree_         = nullptr;
     int            loadedResultFrameCount_ = 0;
 
@@ -127,6 +131,8 @@ private:
     ContourState    contour_;
 
     // 主题相关
+    enum class BackgroundMode { Solid = 0, Gradient = 1 };
+
     Theme          currentTheme_;
     QToolBar*      toolbar_        = nullptr;   // Tecplot 式快捷工具栏
     QToolBar*      postToolBar_    = nullptr;
@@ -136,6 +142,9 @@ private:
     QMenu*         rhiMenu_        = nullptr;
     QAction*       sidebarsAction_ = nullptr;
     QAction*       leftPanelAction_ = nullptr;
-    QAction*       rightPanelAction_ = nullptr;
     int            themeIndex_     = 0;
+    BackgroundMode backgroundMode_ = BackgroundMode::Gradient;
+    QColor         backgroundSolidColor_{210, 217, 230};
+    QColor         backgroundGradientTopColor_{150, 166, 190};
+    QColor         backgroundGradientBottomColor_{210, 217, 230};
 };

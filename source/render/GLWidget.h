@@ -179,6 +179,8 @@ signals:
     void selectionChanged(PickMode mode, int count, const std::vector<int>& ids);
     /** @brief 部件拾取后发射选中的部件索引列表（用于同步模型树选中状态） */
     void partsPicked(const std::vector<int>& partIndices);
+    /** @brief 请求显示视口右键菜单。 */
+    void contextMenuRequested(const QPoint& globalPos);
 
 protected:
     void initializeGL() override;
@@ -199,6 +201,8 @@ private:
     void drawAxesIndicator();
     void drawAxesLabels(QPainter& painter);  // 坐标轴标签（需外部提供 QPainter）
     void drawIdLabels(QPainter& painter, const glm::mat4& mvp);  // 选中项 ID 标签
+    glm::mat4 axesIndicatorMvp() const;
+    bool standardViewFromAxesClick(const QPoint& pos, StandardView* view) const;
     void uploadColors();      // 将部件颜色上传到主网格颜色缓冲
     void rebuildEdgeIbo();    // 根据部件可见性重建边线 IBO
 

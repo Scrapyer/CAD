@@ -6,6 +6,7 @@
 #include "ferender_export.h"
 
 #include <QSize>
+#include <QPoint>
 #include <QString>
 #include <QWidget>
 #include <QColor>
@@ -98,6 +99,7 @@ signals:
     void renderInitialized();
     void selectionChanged(PickMode mode, int count, const std::vector<int>& ids);
     void partsPicked(const std::vector<int>& partIndices);
+    void contextMenuRequested(const QPoint& globalPos);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

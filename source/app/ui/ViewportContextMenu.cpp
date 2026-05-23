@@ -1,0 +1,172 @@
+#include "ViewportContextMenu.h"
+
+#include <QAction>
+#include <QActionGroup>
+#include <QApplication>
+#include <QEvent>
+#include <QMenu>
+#include <QMouseEvent>
+#include <QString>
+#include <QTimer>
+#include <QToolButton>
+#include <QWidget>
+
+#include <vector>
+
+namespace {
+struct StandardViewSpec {
+    QString text;
+    StandardView view;
+};
+
+struct DisplayModeSpec {
+    QString text;
+    ModelDisplayMode mode;
+};
+
+const std::vector<StandardViewSpec>& standardViews()
+{
+    static const std::vector<StandardViewSpec> views = {
+        {QStringLiteral("前视图"), StandardView::Front},
+        {QStringLiteral("后视图"), StandardView::Back},
+        {QStringLiteral("左视图"), StandardView::Left},
+        {QStringLiteral("右视图"), StandardView::Right},
+        {QStringLiteral("俯视图"), StandardView::Top},
+        {QStringLiteral("仰视图"), StandardView::Bottom}
+    };
+    return views;
+}
+
+const std::vector<DisplayModeSpec>& displayModes()
+{
+    static const std::vector<DisplayModeSpec> modes = {
+        {QStringLiteral("实体"), ModelDisplayMode::Solid},
+        {QStringLiteral("线框"), ModelDisplayMode::Wireframe},
+        {QStringLiteral("实体 + 线框"), ModelDisplayMode::SolidWireframe},
+        {QStringLiteral("点"), ModelDisplayMode::Points}
+    };
+    return modes;
+}
+
+QToolButton* toolButtonFromWidget(QWidget* widget)
+{
+    for (QWidget* current = widget; current; current = current->parentWidget()) {
+        if (auto* button = qobject_cast<QToolButton*>(current)) {
+            return button;
+        }
+        if (current->isWindow()) {
+            break;
+        }
+    }
+    return nullptr;
+}
+} // namespace
+
+ViewportContextMenu::ViewportContextMenu(QObject* parent)
+    : QObject(parent)
+{
+}
+
+void ViewportContextMenu::setDisplayMode(ModelDisplayMode mode)
+{
+    displayMode_ = mode;
+}
+
+void ViewportContextMenu::popup(QWidget* parent, const QPoint& globalPos)
+{
+    if (!parent) {
+        return;
+    }
+
+    if (activeMenu_) {
+        activeMenu_->close();
+    }
+
+    auto* menu = new QMenu(parent);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    activeMenu_ = menu;
+    activeParent_ = parent;
+    qApp->installEventFilter(this);
+
+    connect(menu, &QObject::destroyed, this, [this, menu]() {
+        if (activeMenu_ == menu) {
+            activeMenu_ = nullptr;
+            activeParent_ = nullptr;
+            qApp->removeEventFilter(this);
+        }
+    });
+
+    QAction* fitAction = menu->addAction(QStringLiteral("适配窗口"));
+    connect(fitAction, &QAction::triggered, this, &ViewportContextMenu::fitRequested);
+
+    auto* viewMenu = menu->addMenu(QStringLiteral("标准视图"));
+    for (const auto& spec : standardViews()) {
+        QAction* action = viewMenu->addAction(spec.text);
+        connect(action, &QAction::triggered, this, [this, view = spec.view]() {
+            emit standardViewRequested(view);
+        });
+    }
+
+    auto* displayMenu = menu->addMenu(QStringLiteral("显示模式"));
+    auto* displayGroup = new QActionGroup(menu);
+    displayGroup->setExclusive(true);
+    for (const auto& spec : displayModes()) {
+        QAction* action = displayMenu->addAction(spec.text);
+        action->setCheckable(true);
+        action->setChecked(spec.mode == displayMode_);
+        action->setData(static_cast<int>(spec.mode));
+        displayGroup->addAction(action);
+    }
+    connect(displayGroup, &QActionGroup::triggered, this, [this](QAction* action) {
+        const auto mode = static_cast<ModelDisplayMode>(action->data().toInt());
+        displayMode_ = mode;
+        emit displayModeRequested(mode);
+    });
+
+    menu->addSeparator();
+    QAction* backgroundAction = menu->addAction(QStringLiteral("背景色设置..."));
+    connect(backgroundAction, &QAction::triggered,
+            this, &ViewportContextMenu::backgroundSettingsRequested);
+
+    menu->popup(globalPos);
+}
+
+bool ViewportContextMenu::eventFilter(QObject* watched, QEvent* event)
+{
+    if (activeMenu_ && activeMenu_->isVisible() && event->type() == QEvent::MouseButtonPress) {
+        auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        const QPoint globalPos = mouseEvent->globalPosition().toPoint();
+        const bool insideMenu = activeMenu_->rect().contains(activeMenu_->mapFromGlobal(globalPos));
+
+        if (!insideMenu && mouseEvent->button() == Qt::LeftButton) {
+            if (auto* button = toolButtonFromWidget(QApplication::widgetAt(globalPos))) {
+                if (button->isEnabled()) {
+                    QPointer<QToolButton> target = button;
+                    activeMenu_->close();
+                    QTimer::singleShot(0, this, [target]() {
+                        if (target) {
+                            target->click();
+                        }
+                    });
+                    return true;
+                }
+            }
+        }
+
+        if (mouseEvent->button() == Qt::RightButton && !insideMenu && activeParent_) {
+            const bool insideViewport =
+                activeParent_->rect().contains(activeParent_->mapFromGlobal(globalPos));
+            if (insideViewport) {
+                QPointer<QWidget> parent = activeParent_;
+                activeMenu_->close();
+                QTimer::singleShot(0, this, [this, parent, globalPos]() {
+                    if (parent) {
+                        popup(parent, globalPos);
+                    }
+                });
+                return true;
+            }
+        }
+    }
+    return QObject::eventFilter(watched, event);
+}

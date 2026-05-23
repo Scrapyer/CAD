@@ -5,6 +5,7 @@
 #include <QEvent>
 #include <QFont>
 #include <QMouseEvent>
+#include <QRectF>
 #include <QResizeEvent>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -30,6 +31,7 @@ constexpr int kAxesLabelSize = 24;
 constexpr int kAxesMargin = 8;
 constexpr int kAxesViewportSize = 120;
 constexpr int kMaxIdLabels = 160;
+constexpr float kAxesClickPadding = 7.0f;
 
 glm::mat4 depthZeroToOneRemap()
 {
@@ -67,6 +69,23 @@ void applyStandardViewToCamera(Camera& camera, StandardView view)
         camera.pitch = -89.0f;
         break;
     }
+}
+
+float distanceSquaredToSegment(const QPointF& p, const QPointF& a, const QPointF& b)
+{
+    const QPointF ab = b - a;
+    const QPointF ap = p - a;
+    const float len2 = static_cast<float>(ab.x() * ab.x() + ab.y() * ab.y());
+    if (len2 <= 1.0e-6f) {
+        const QPointF d = p - a;
+        return static_cast<float>(d.x() * d.x() + d.y() * d.y());
+    }
+
+    float t = static_cast<float>((ap.x() * ab.x() + ap.y() * ab.y()) / len2);
+    t = std::clamp(t, 0.0f, 1.0f);
+    const QPointF closest(a.x() + ab.x() * t, a.y() + ab.y() * t);
+    const QPointF d = p - closest;
+    return static_cast<float>(d.x() * d.x() + d.y() * d.y());
 }
 
 Mesh makeClipPlanePreviewMesh(const glm::vec3& bbMin,
@@ -751,13 +770,28 @@ bool VulkanViewport::handleMouseEvent(QEvent* event)
     switch (event->type()) {
     case QEvent::MouseButtonPress: {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        const bool selectionGesture = (mouseEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) != 0;
+        if (!selectionGesture && mouseEvent->button() == Qt::LeftButton) {
+            StandardView view = StandardView::Front;
+            if (standardViewFromAxesClick(mouseEvent->position(), &view)) {
+                setStandardView(view);
+                rotating_ = false;
+                panning_ = false;
+                leftPressForPick_ = false;
+                rightPressForDeselect_ = false;
+                boxSelecting_ = false;
+                boxDeselecting_ = false;
+                mouseMovedSincePress_ = false;
+                return true;
+            }
+        }
+
         lastMousePos_ = mouseEvent->position();
         pressMousePos_ = mouseEvent->position();
         boxOrigin_ = mouseEvent->position().toPoint();
         mouseMovedSincePress_ = false;
         leftPressForPick_ = mouseEvent->button() == Qt::LeftButton;
         rightPressForDeselect_ = mouseEvent->button() == Qt::RightButton;
-        const bool selectionGesture = (mouseEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) != 0;
         boxSelecting_ = leftPressForPick_ && selectionGesture;
         boxDeselecting_ = rightPressForDeselect_ && selectionGesture;
         if (boxSelecting_ || boxDeselecting_) {
@@ -805,6 +839,17 @@ bool VulkanViewport::handleMouseEvent(QEvent* event)
         panning_ = false;
         leftPressForPick_ = false;
         rightPressForDeselect_ = false;
+        const bool contextMenuClick =
+            mouseEvent->button() == Qt::RightButton &&
+            !mouseMovedSincePress_ &&
+            (mouseEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) == 0 &&
+            !boxSelecting_ &&
+            !boxDeselecting_;
+        if (contextMenuClick) {
+            QWidget* anchor = windowContainer_ ? windowContainer_ : this;
+            emit contextMenuRequested(anchor->mapToGlobal(mouseEvent->position().toPoint()));
+            return true;
+        }
         if (boxSelecting_ || boxDeselecting_) {
             const bool removeSelection = boxDeselecting_;
             boxSelecting_ = false;
@@ -1529,6 +1574,75 @@ QMatrix4x4 VulkanViewport::currentAxesMvp() const
 {
     const glm::mat4 axesMvp = currentAxesGlmMvp();
     return QMatrix4x4(glm::value_ptr(glm::transpose(axesMvp)));
+}
+
+bool VulkanViewport::standardViewFromAxesClick(const QPointF& position, StandardView* view) const
+{
+    if (!view) {
+        return false;
+    }
+
+    const QSize size = windowContainer_ ? windowContainer_->size() : this->size();
+    const int availableWidth = std::max(0, size.width() - kAxesMargin * 2);
+    const int availableHeight = std::max(0, size.height() - kAxesMargin * 2);
+    const int axesSize = std::min(kAxesViewportSize, std::min(availableWidth, availableHeight));
+    if (axesSize <= 0) {
+        return false;
+    }
+
+    const glm::mat4 axesMvp = currentAxesGlmMvp();
+    const int axesLeft = kAxesMargin;
+    const int axesTop = size.height() - axesSize - kAxesMargin;
+    auto project = [&](glm::vec3 pt) -> QPointF {
+        const glm::vec4 clip = axesMvp * glm::vec4(pt, 1.0f);
+        if (std::abs(clip.w) <= 1.0e-6f) {
+            return QPointF(-10000.0, -10000.0);
+        }
+        const float ndcX = clip.x / clip.w;
+        const float ndcY = clip.y / clip.w;
+        const int x = axesLeft + static_cast<int>((ndcX * 0.5f + 0.5f) * axesSize);
+        const int y = axesTop + static_cast<int>((ndcY * 0.5f + 0.5f) * axesSize);
+        return QPointF(x, y);
+    };
+
+    const QPointF origin = project(glm::vec3(0.0f));
+    const std::array<glm::vec3, 3> axisDirs = {
+        glm::vec3(1.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f)
+    };
+    const std::array<StandardView, 3> axisViews = {
+        StandardView::Right,
+        StandardView::Top,
+        StandardView::Front
+    };
+
+    int bestAxis = -1;
+    float bestDist2 = 1.0e30f;
+    const float lineThreshold2 = 10.0f * 10.0f;
+    for (size_t i = 0; i < axisDirs.size(); ++i) {
+        const QPointF end = project(axisDirs[i] * 1.12f);
+        const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                               end.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                               kAxesLabelSize + kAxesClickPadding * 2.0f,
+                               kAxesLabelSize + kAxesClickPadding * 2.0f);
+        if (labelRect.contains(position)) {
+            *view = axisViews[i];
+            return true;
+        }
+
+        const float dist2 = distanceSquaredToSegment(position, origin, end);
+        if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
+            bestAxis = static_cast<int>(i);
+            bestDist2 = dist2;
+        }
+    }
+
+    if (bestAxis >= 0) {
+        *view = axisViews[static_cast<size_t>(bestAxis)];
+        return true;
+    }
+    return false;
 }
 
 void VulkanViewport::updateAxesLabels()

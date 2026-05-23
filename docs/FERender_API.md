@@ -1133,6 +1133,9 @@ signals:
 
     // 部件拾取（用于同步 UI 模型树的选中状态）
     void partsPicked(const std::vector<int>& partIndices);
+
+    // 普通右键单击且未拖动时请求应用层显示视口上下文菜单
+    void contextMenuRequested(const QPoint& globalPos);
 ```
 
 #### 鼠标交互行为
@@ -1141,6 +1144,7 @@ signals:
 |------|------|
 | 左键拖拽 | 旋转（轨道相机） |
 | 中键拖拽 / 右键拖拽 | 平移 |
+| 右键单击且未拖动 | 发射 `contextMenuRequested`，由应用层显示上下文菜单 |
 | 滚轮 | 缩放 |
 | 左键单击 | 点选（根据 PickMode 选中节点/单元/部件） |
 | Ctrl + 左键单击 | 追加/取消选中（多选） |
@@ -1179,6 +1183,7 @@ Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readb
 void renderInitialized();
 void selectionChanged(PickMode mode, int count, const std::vector<int>& ids);
 void partsPicked(const std::vector<int>& partIndices);
+void contextMenuRequested(const QPoint& globalPos);
 ```
 
 ---

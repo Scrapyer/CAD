@@ -33,6 +33,8 @@ RenderViewport::RenderViewport(QWidget* parent)
             this, &RenderViewport::selectionChanged);
     connect(glWidget_, &GLWidget::partsPicked,
             this, &RenderViewport::partsPicked);
+    connect(glWidget_, &GLWidget::contextMenuRequested,
+            this, &RenderViewport::contextMenuRequested);
 
     requestedBackendKind_ = RenderSettings::preferredBackend();
     activateBackend(requestedBackendKind_);
@@ -728,6 +730,8 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
                     this, &RenderViewport::selectionChanged);
             connect(metalViewport_, &MetalViewport::partsPicked,
                     this, &RenderViewport::partsPicked);
+            connect(metalViewport_, &MetalViewport::contextMenuRequested,
+                    this, &RenderViewport::contextMenuRequested);
         }
         if (hasCurrentMesh_) {
             metalViewport_->setMesh(currentMesh_);
@@ -806,6 +810,8 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
                     this, &RenderViewport::selectionChanged);
             connect(vulkanViewport_, &VulkanViewport::partsPicked,
                     this, &RenderViewport::partsPicked);
+            connect(vulkanViewport_, &VulkanViewport::contextMenuRequested,
+                    this, &RenderViewport::contextMenuRequested);
         }
         if (hasCurrentMesh_) {
             vulkanViewport_->setMesh(currentMesh_);

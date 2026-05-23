@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QMatrix4x4>
+#include <QPoint>
 #include <QPointF>
 #include <QRubberBand>
 #include <QRect>
@@ -82,6 +83,7 @@ signals:
     void initialized();
     void selectionChanged(PickMode mode, int count, const std::vector<int>& ids);
     void partsPicked(const std::vector<int>& partIndices);
+    void contextMenuRequested(const QPoint& globalPos);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -106,6 +108,7 @@ private:
     glm::mat4 currentAxesGlmMvp() const;
     QMatrix4x4 currentAxesMvp() const;
     glm::mat4 currentGlmMvp() const;
+    bool standardViewFromAxesClick(const QPointF& position, StandardView* view) const;
     void rebuildPartLookup();
     void appendPartOutlineHighlight(std::vector<float>& lineVertices) const;
     bool rebuildSelectionHighlight();

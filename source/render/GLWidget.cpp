@@ -33,6 +33,11 @@ static const glm::vec3 kPartPalette[] = {
 static const int kPartPaletteSize = static_cast<int>(sizeof(kPartPalette) / sizeof(kPartPalette[0]));
 
 namespace {
+constexpr int kAxesLabelSize = 24;
+constexpr int kAxesMargin = 8;
+constexpr int kAxesViewportSize = 120;
+constexpr float kAxesClickPadding = 7.0f;
+
 template <typename T>
 void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
     if (targetSize < 0) {
@@ -43,6 +48,23 @@ void alignSize(std::vector<T>& arr, int targetSize, const T& fillValue) {
     } else if (static_cast<int>(arr.size()) < targetSize) {
         arr.resize(static_cast<size_t>(targetSize), fillValue);
     }
+}
+
+float distanceSquaredToSegment(const QPointF& p, const QPointF& a, const QPointF& b)
+{
+    const QPointF ab = b - a;
+    const QPointF ap = p - a;
+    const float len2 = static_cast<float>(ab.x() * ab.x() + ab.y() * ab.y());
+    if (len2 <= 1.0e-6f) {
+        const QPointF d = p - a;
+        return static_cast<float>(d.x() * d.x() + d.y() * d.y());
+    }
+
+    float t = static_cast<float>((ap.x() * ab.x() + ap.y() * ab.y()) / len2);
+    t = std::clamp(t, 0.0f, 1.0f);
+    const QPointF closest(a.x() + ab.x() * t, a.y() + ab.y() * t);
+    const QPointF d = p - closest;
+    return static_cast<float>(d.x() * d.x() + d.y() * d.y());
 }
 
 void applyStandardViewToCamera(Camera& camera, StandardView view)
@@ -1166,6 +1188,15 @@ void GLWidget::mousePressEvent(QMouseEvent* e) {
 
     bool hasMod = (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier));
 
+    if (!hasMod && e->button() == Qt::LeftButton) {
+        StandardView view = StandardView::Front;
+        if (standardViewFromAxesClick(pos, &view)) {
+            setStandardView(view);
+            e->accept();
+            return;
+        }
+    }
+
     if (hasMod) {
         if (e->button() == Qt::LeftButton) {
             // Ctrl/Shift + 左键 → 框选/点选（添加选中）
@@ -1265,6 +1296,16 @@ void GLWidget::mouseReleaseEvent(QMouseEvent* e) {
             pendingDeselectPos_ = pos;
             update();
         }
+    }
+
+    if (e->button() == Qt::RightButton &&
+        !isDragging_ &&
+        !isBoxDeselecting_ &&
+        !(e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+        isDragging_ = false;
+        emit contextMenuRequested(mapToGlobal(pos));
+        e->accept();
+        return;
     }
 
     isDragging_ = false;
@@ -2017,19 +2058,24 @@ void GLWidget::updateSilhouetteFromCache() {
     }
 }
 
-void GLWidget::drawAxesIndicator() {
-    if (!axesGeometry_) return;
-
-    const int axesSize = 120;
-    const int margin = 8;
-    const int dpr = devicePixelRatio();
-
-    // 仅旋转的 view 矩阵（固定距离，跟随相机朝向）
+glm::mat4 GLWidget::axesIndicatorMvp() const
+{
     glm::mat3 rot = glm::mat3(cam_.viewMatrix());
     glm::vec3 axesEye = glm::vec3(rot[0][2], rot[1][2], rot[2][2]) * 2.5f;
     glm::mat4 axesView = glm::lookAt(axesEye, glm::vec3(0), glm::vec3(0, 1, 0));
     glm::mat4 axesProj = glm::ortho(-1.3f, 1.3f, -1.3f, 1.3f, 0.01f, 10.0f);
-    glm::mat4 axesMVP = axesProj * axesView;
+    return axesProj * axesView;
+}
+
+void GLWidget::drawAxesIndicator() {
+    if (!axesGeometry_) return;
+
+    const int axesSize = kAxesViewportSize;
+    const int margin = kAxesMargin;
+    const int dpr = devicePixelRatio();
+
+    // 仅旋转的 view 矩阵（固定距离，跟随相机朝向）
+    glm::mat4 axesMVP = axesIndicatorMvp();
 
     // ── 左下角小视口绘制 ──
     auto* glBackend = openGLBackend();
@@ -2071,8 +2117,8 @@ void GLWidget::drawAxesIndicator() {
 }
 
 void GLWidget::drawAxesLabels(QPainter& painter) {
-    const int axesSize = 120;
-    const int margin = 8;
+    const int axesSize = kAxesViewportSize;
+    const int margin = kAxesMargin;
 
     auto project = [&](glm::vec3 pt) -> QPointF {
         glm::vec4 clip = axesMVP_ * glm::vec4(pt, 1.0f);
@@ -2099,6 +2145,64 @@ void GLWidget::drawAxesLabels(QPainter& painter) {
         painter.drawText(QRectF(pos.x() - 12, pos.y() - 12, 24, 24),
                          Qt::AlignCenter, l.name);
     }
+}
+
+bool GLWidget::standardViewFromAxesClick(const QPoint& pos, StandardView* view) const
+{
+    if (!view || width() <= kAxesMargin * 2 || height() <= kAxesMargin * 2) {
+        return false;
+    }
+
+    const glm::mat4 axesMVP = axesIndicatorMvp();
+    auto project = [&](glm::vec3 pt) -> QPointF {
+        glm::vec4 clip = axesMVP * glm::vec4(pt, 1.0f);
+        if (std::abs(clip.w) <= 1.0e-6f) {
+            return QPointF(-10000.0, -10000.0);
+        }
+        const float sx = kAxesMargin + (clip.x / clip.w * 0.5f + 0.5f) * kAxesViewportSize;
+        const float sy = height() - kAxesMargin - (clip.y / clip.w * 0.5f + 0.5f) * kAxesViewportSize;
+        return QPointF(sx, sy);
+    };
+
+    const QPointF p(pos);
+    const QPointF origin = project(glm::vec3(0.0f));
+    const std::array<glm::vec3, 3> axisDirs = {
+        glm::vec3(1.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f)
+    };
+    const std::array<StandardView, 3> axisViews = {
+        StandardView::Right,
+        StandardView::Top,
+        StandardView::Front
+    };
+
+    int bestAxis = -1;
+    float bestDist2 = 1.0e30f;
+    const float lineThreshold2 = 10.0f * 10.0f;
+    for (size_t i = 0; i < axisDirs.size(); ++i) {
+        const QPointF end = project(axisDirs[i] * 1.15f);
+        const QRectF labelRect(end.x() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                               end.y() - kAxesLabelSize / 2.0f - kAxesClickPadding,
+                               kAxesLabelSize + kAxesClickPadding * 2.0f,
+                               kAxesLabelSize + kAxesClickPadding * 2.0f);
+        if (labelRect.contains(p)) {
+            *view = axisViews[i];
+            return true;
+        }
+
+        const float dist2 = distanceSquaredToSegment(p, origin, end);
+        if (dist2 <= lineThreshold2 && dist2 < bestDist2) {
+            bestAxis = static_cast<int>(i);
+            bestDist2 = dist2;
+        }
+    }
+
+    if (bestAxis >= 0) {
+        *view = axisViews[static_cast<size_t>(bestAxis)];
+        return true;
+    }
+    return false;
 }
 
 void GLWidget::setShowLabels(bool show) {

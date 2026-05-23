@@ -5,12 +5,10 @@
  * Tecplot 风格布局：
  *   ┌─────────────────────────────────────────────────────────┐
  *   │ Tecplot 式菜单栏 + 紧凑快捷工具栏                        │
- *   ├────────────┬──────────────────────────────┬─────────────┤
- *   │ 模型结构   │      RenderViewport           │ 属性/控制   │
- *   │ 项目树/部件│                              │ 选择/显示   │
- *   │            ├──────────────────────────────┤             │
- *   │            │  底部工作流 Tabs              │             │
- *   ├────────────┴──────────────────────────────┴─────────────┤
+ *   ├────────────┬────────────────────────────────────────────┤
+ *   │ 模型结构   │      RenderViewport                         │
+ *   │ 项目树/部件│                                            │
+ *   ├────────────┴────────────────────────────────────────────┤
  *   │ 状态栏                                                   │
  *   └─────────────────────────────────────────────────────────┘
  */
@@ -20,6 +18,7 @@
 #include "FEModelPanel.h"
 #include "PartsPanel.h"
 #include "ResultPanel.h"
+#include "ViewportContextMenu.h"
 #include "FEGroup.h"
 #include "FEPickResult.h"
 #include "FEMeshConverter.h"
@@ -37,17 +36,18 @@
 #include <set>
 #include <utility>
 #include <vector>
-#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QToolBar>
 #include <QAction>
 #include <QActionGroup>
-#include <QGroupBox>
+#include <QDialogButtonBox>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QLabel>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QTreeWidget>
 #include <QTimer>
 #include <QStyle>
@@ -61,6 +61,7 @@
 #include <QCloseEvent>
 #include <QStorageInfo>
 #include <QUrl>
+#include <QColorDialog>
 
 namespace {
 
@@ -68,6 +69,10 @@ constexpr const char* kThemeIndexKey = "appearance/themeIndex";
 constexpr const char* kConfigEnvVar = "FEMODELVIEWER_CONFIG_DIR";
 constexpr const char* kConfigDirName = "config";
 constexpr const char* kSettingsFileName = "settings.ini";
+constexpr const char* kBackgroundModeKey = "appearance/backgroundMode";
+constexpr const char* kBackgroundSolidKey = "appearance/backgroundSolid";
+constexpr const char* kBackgroundGradientTopKey = "appearance/backgroundGradientTop";
+constexpr const char* kBackgroundGradientBottomKey = "appearance/backgroundGradientBottom";
 
 QIcon toolbarIcon(const QString& name)
 {
@@ -146,6 +151,23 @@ void saveThemeIndex(int index)
     settings.sync();
 }
 
+QColor themeColor(float r, float g, float b)
+{
+    return QColor::fromRgbF(std::clamp(r, 0.0f, 1.0f),
+                            std::clamp(g, 0.0f, 1.0f),
+                            std::clamp(b, 0.0f, 1.0f));
+}
+
+void writeThemeBackgroundColor(Theme& theme, const QColor& topColor, const QColor& bottomColor)
+{
+    theme.bgTopR = static_cast<float>(topColor.redF());
+    theme.bgTopG = static_cast<float>(topColor.greenF());
+    theme.bgTopB = static_cast<float>(topColor.blueF());
+    theme.bgBotR = static_cast<float>(bottomColor.redF());
+    theme.bgBotG = static_cast<float>(bottomColor.greenF());
+    theme.bgBotB = static_cast<float>(bottomColor.blueF());
+}
+
 void configureFileDialog(QFileDialog& dialog)
 {
     dialog.setOption(QFileDialog::DontUseNativeDialog, true);
@@ -188,7 +210,7 @@ MainWindow::MainWindow() {
 
     // ── 创建面板 ──
     partsPanel_ = new PartsPanel;
-    feModelPanel_ = new FEModelPanel;
+    feModelPanel_ = new FEModelPanel(this);
     resultPanel_ = new ResultPanel;
     resultPanel_->setPanelMode(ResultPanel::PanelMode::Contour);
     deformationPanel_ = new ResultPanel;
@@ -205,9 +227,8 @@ MainWindow::MainWindow() {
         importPaths_.restore(modelPath, resultPath, autoFilled);
     }
 
-    // ── 左右侧组合面板 ──
+    // ── 左侧组合面板 ──
     modelNavigatorPanel_ = createModelNavigatorPanel();
-    inspectorPanel_ = createInspectorPanel();
 
     // ── 后处理小弹窗 ──
     contourDialog_ = createPostDialog("云图显示", resultPanel_);
@@ -223,12 +244,7 @@ MainWindow::MainWindow() {
     partsDock_->setFeatures(QDockWidget::DockWidgetMovable);
     addDockWidget(Qt::LeftDockWidgetArea, partsDock_);
 
-    // ── 右侧停靠：属性 / 控制 ──
-    modelInfoDock_ = new QDockWidget("属性 / 控制", this);
-    modelInfoDock_->setWidget(inspectorPanel_);
-    modelInfoDock_->setFeatures(QDockWidget::DockWidgetMovable);
-    addDockWidget(Qt::RightDockWidgetArea, modelInfoDock_);
-    resizeDocks({partsDock_, modelInfoDock_}, {240, 280}, Qt::Horizontal);
+    resizeDocks({partsDock_}, {240}, Qt::Horizontal);
 
     // ── 状态栏 ──
     setupStatusBar();
@@ -236,6 +252,61 @@ MainWindow::MainWindow() {
 
     // ── Tecplot 式菜单栏：主功能从菜单下拉进入 ──
     setupMenuBar();
+
+    viewportContextMenu_ = new ViewportContextMenu(this);
+    connect(renderViewport_, &RenderViewport::contextMenuRequested,
+            this, [this](const QPoint& globalPos) {
+        QTimer::singleShot(0, this, [this, globalPos]() {
+            if (viewportContextMenu_) {
+                viewportContextMenu_->popup(renderViewport_, globalPos);
+            }
+        });
+    });
+    connect(viewportContextMenu_, &ViewportContextMenu::fitRequested, this, [this]() {
+        const FEModel& model = activeModel();
+        if (!model.isEmpty()) {
+            renderViewport_->fitToModel(model.computeCenter(), model.computeSize());
+        } else {
+            renderViewport_->refresh();
+        }
+    });
+    connect(viewportContextMenu_, &ViewportContextMenu::standardViewRequested,
+            this, [this](StandardView view) {
+        if (renderViewport_) {
+            renderViewport_->setStandardView(view);
+        }
+        if (statusLabel_) {
+            QString text = QStringLiteral("标准视图");
+            for (const auto& spec : standardViewActionSpecs()) {
+                if (spec.view == view) {
+                    text = spec.status;
+                    break;
+                }
+            }
+            statusLabel_->setText(QStringLiteral("  已切换到%1").arg(text));
+        }
+    });
+    connect(viewportContextMenu_, &ViewportContextMenu::displayModeRequested,
+            this, [this](ModelDisplayMode mode) {
+        if (renderViewport_) {
+            renderViewport_->setModelDisplayMode(mode);
+        }
+        if (viewportContextMenu_) {
+            viewportContextMenu_->setDisplayMode(mode);
+        }
+        if (displayModeGroup_) {
+            for (QAction* action : displayModeGroup_->actions()) {
+                const bool block = action->blockSignals(true);
+                action->setChecked(action->data().toInt() == static_cast<int>(mode));
+                action->blockSignals(block);
+            }
+        }
+        if (statusLabel_) {
+            statusLabel_->setText(QStringLiteral("  显示模式：%1").arg(modelDisplayModeText(mode)));
+        }
+    });
+    connect(viewportContextMenu_, &ViewportContextMenu::backgroundSettingsRequested,
+            this, &MainWindow::showBackgroundSettingsDialog);
 
     // ── 信号/槽连接 ──
 
@@ -253,7 +324,6 @@ MainWindow::MainWindow() {
         renderViewport_->setOverlayVisible(false);
         renderViewport_->setUseVertexColor(false);
         renderViewport_->setColorBarVisible(false);
-        feModelPanel_->clearActiveScalarField();
         resultPanel_->clearResults();
         deformationPanel_->clearResults();
         thresholdPanel_->clearResults();
@@ -267,13 +337,15 @@ MainWindow::MainWindow() {
         if (size > 0) {
             renderViewport_->fitToModel(center, size);
         }
+        if (modelSizeSummaryLabel_) {
+            modelSizeSummaryLabel_->setText(size > 0
+                ? QString("尺寸 %1").arg(size, 0, 'f', 2)
+                : QStringLiteral("尺寸 --"));
+        }
         updateProjectTreeSummary();
         updateStatusSummaries();
         updateFilterPlaneBounds();
     });
-
-    connect(renderViewport_, &RenderViewport::selectionChanged,
-            feModelPanel_, &FEModelPanel::updateSelectionInfo);
 
     connect(feModelPanel_, &FEModelPanel::partsChanged,
             this, [this](const QString& modelName, const std::vector<FEPart>& parts,
@@ -325,14 +397,6 @@ MainWindow::MainWindow() {
     connect(renderViewport_, &RenderViewport::partsPicked,
             partsPanel_, &PartsPanel::selectParts);
 
-    // ID 标签显隐 → 渲染视口
-    connect(feModelPanel_, &FEModelPanel::labelVisibilityChanged,
-            renderViewport_, &RenderViewport::setShowLabels);
-
-    // ID 搜索 → 渲染视口选中高亮
-    connect(feModelPanel_, &FEModelPanel::searchRequested,
-            renderViewport_, &RenderViewport::selectByIds);
-
     // ── 结果面板连接 ──
 
     // resultsLoaded → 填充右侧面板
@@ -354,7 +418,6 @@ MainWindow::MainWindow() {
     connect(resultPanel_, &ResultPanel::applyResult,
             this, [this](const FEScalarField& field, const QString& title) {
         applyContour(field, title);
-        feModelPanel_->setActiveScalarField(field);
     });
 
     // 清除云图 → 恢复部件颜色
@@ -364,7 +427,6 @@ MainWindow::MainWindow() {
         renderViewport_->setUseVertexColor(false);
         renderViewport_->setColorBarVisible(false);
         renderViewport_->refresh();
-        feModelPanel_->clearActiveScalarField();
     });
 
     // ── 动画控制器 ──
@@ -450,10 +512,45 @@ MainWindow::MainWindow() {
     // ── 初始主题 ──
     themeIndex_ = loadThemeIndex();
     currentTheme_ = Theme::byIndex(themeIndex_);
+    loadBackgroundSettings();
     applyTheme(currentTheme_);
 }
 
-void MainWindow::browseModelFile() {
+void MainWindow::clearCurrentLayout()
+{
+    if (!renderViewport_ || !feModelPanel_ || !resultPanel_) return;
+    deform_.clear();
+    postEffect_.clear();
+    contour_.clear();
+    renderViewport_->clearSliceLines();
+    renderViewport_->clearIsoSurface();
+    renderViewport_->clearClipPlanePreview();
+    renderViewport_->setOverlayVisible(false);
+    renderViewport_->setUseVertexColor(false);
+    renderViewport_->setColorBarVisible(false);
+    resultPanel_->clearResults();
+    deformationPanel_->clearResults();
+    thresholdPanel_->clearResults();
+    if (animController_) animController_->setFrameCount(0);
+    loadedResultFrameCount_ = 0;
+    importPaths_ = ImportPathState{};
+    feModelPanel_->clearModel();
+    if (statusProgress_) statusProgress_->setVisible(false);
+    if (progressText_) progressText_->setVisible(false);
+    if (statusLabel_) {
+        statusLabel_->setVisible(true);
+        statusLabel_->setStyleSheet(
+            QString("color: %1; font-weight: bold;").arg(currentTheme_.green));
+    }
+    updateProjectTreeSummary();
+    updateStatusSummaries();
+    if (modelSizeSummaryLabel_) {
+        modelSizeSummaryLabel_->setText(QStringLiteral("尺寸 --"));
+    }
+    if (statusLabel_) statusLabel_->setText("  已新建空布局");
+}
+
+bool MainWindow::browseModelFile() {
     QSettings settings("FEModelViewer", "FEModelViewer");
     QString lastDir = settings.value("lastOpenDir", QString()).toString();
     if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
@@ -470,13 +567,15 @@ void MainWindow::browseModelFile() {
         "所有文件 (*)");
     dialog.setFileMode(QFileDialog::ExistingFile);
     configureFileDialog(dialog);
-    if (dialog.exec() != QDialog::Accepted) return;
+    if (dialog.exec() != QDialog::Accepted) return false;
     QString path = dialog.selectedFiles().first();
 
     if (!path.isEmpty()) {
         importPaths_.selectModelFile(path);
         settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
+        return true;
     }
+    return false;
 }
 
 void MainWindow::browseImportFile() {
@@ -502,6 +601,44 @@ void MainWindow::browseImportFile() {
         importPaths_.selectModelFile(path);
         settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
     }
+}
+
+bool MainWindow::browseUnifiedImportFile() {
+    QSettings settings("FEModelViewer", "FEModelViewer");
+    QString lastDir = settings.value("lastOpenDir", QString()).toString();
+    if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
+        lastDir = QDir::homePath() + "/Desktop";
+        if (!QDir(lastDir).exists()) lastDir = QDir::homePath();
+    }
+
+    QFileDialog dialog(this, "导入文件", lastDir,
+        "所有支持导入格式 (*.step *.stp *.iges *.igs *.stl *.op2 *.unv);;"
+        "CAD / Geometry (*.step *.stp *.iges *.igs *.stl);;"
+        "结果文件 (*.op2 *.unv);;"
+        "所有文件 (*)");
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    configureFileDialog(dialog);
+    if (dialog.exec() != QDialog::Accepted) return false;
+
+    const QString path = dialog.selectedFiles().first();
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == "op2" || suffix == "unv") {
+        importPaths_.selectResultFile(path);
+    } else if (suffix == "step" || suffix == "stp" ||
+               suffix == "iges" || suffix == "igs" ||
+               suffix == "stl") {
+        importPaths_.selectModelFile(path);
+    } else {
+        QMessageBox::information(this, "导入文件",
+            QString("暂不支持该格式的导入文件。\n\n文件: %1").arg(path));
+        return false;
+    }
+    settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
+    return true;
 }
 
 void MainWindow::browseResultFile() {
@@ -583,35 +720,6 @@ QWidget* MainWindow::createModelNavigatorPanel() {
     return panel;
 }
 
-QWidget* MainWindow::createInspectorPanel() {
-    auto* panel = new QWidget;
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-
-    displayControlPanel_ = createDisplayControlPanel();
-    layout->addWidget(feModelPanel_, 1);
-    layout->addWidget(displayControlPanel_, 0);
-    return panel;
-}
-
-QWidget* MainWindow::createDisplayControlPanel() {
-    auto* group = new QGroupBox("Display");
-    auto* layout = new QVBoxLayout(group);
-    layout->setContentsMargins(10, 16, 10, 10);
-    layout->setSpacing(6);
-
-    const QStringList actions = {"颜色", "透明度", "显隐"};
-    for (const QString& text : actions) {
-        auto* button = new QPushButton(text);
-        connect(button, &QPushButton::clicked, this, [this, text]() {
-            statusLabel_->setText(QString("  %1入口已预留").arg(text));
-        });
-        layout->addWidget(button);
-    }
-    return group;
-}
-
 QDialog* MainWindow::createPostDialog(const QString& title, ResultPanel* panel) {
     auto* dialog = new QDialog(this);
     dialog->setWindowTitle(title);
@@ -680,28 +788,7 @@ void MainWindow::setupMenuBar() {
     auto* fileMenu = menuBar()->addMenu("File");
     auto* newLayoutAction = fileMenu->addAction(style()->standardIcon(QStyle::SP_FileIcon), "New Layout");
     newLayoutAction->setShortcut(QKeySequence("Ctrl+N"));
-    connect(newLayoutAction, &QAction::triggered, this, [this]() {
-        if (!renderViewport_ || !feModelPanel_ || !resultPanel_) return;
-        deform_.clear();
-        postEffect_.clear();
-        contour_.clear();
-        renderViewport_->clearSliceLines();
-        renderViewport_->clearIsoSurface();
-        renderViewport_->clearClipPlanePreview();
-        renderViewport_->setOverlayVisible(false);
-        renderViewport_->setUseVertexColor(false);
-        renderViewport_->setColorBarVisible(false);
-        feModelPanel_->clearActiveScalarField();
-        resultPanel_->clearResults();
-        deformationPanel_->clearResults();
-        thresholdPanel_->clearResults();
-        if (animController_) animController_->setFrameCount(0);
-        loadedResultFrameCount_ = 0;
-        feModelPanel_->clearModel();
-        updateProjectTreeSummary();
-        updateStatusSummaries();
-        if (statusLabel_) statusLabel_->setText("  New layout");
-    });
+    connect(newLayoutAction, &QAction::triggered, this, &MainWindow::clearCurrentLayout);
 
     auto* openLayoutAction = fileMenu->addAction(style()->standardIcon(QStyle::SP_DialogOpenButton), "Open Layout...");
     openLayoutAction->setShortcut(QKeySequence("Ctrl+O"));
@@ -728,8 +815,9 @@ void MainWindow::setupMenuBar() {
     fileMenu->addSeparator();
     auto* openFileAction = fileMenu->addAction(toolbarIcon("open"), "Open file...");
     connect(openFileAction, &QAction::triggered, this, [this]() {
-        browseModelFile();
-        applyFiles();
+        if (browseModelFile()) {
+            applyFiles();
+        }
     });
 
     auto* importAction = fileMenu->addAction(toolbarIcon("import"), "Import...");
@@ -822,39 +910,13 @@ void MainWindow::setupMenuBar() {
     leftPanelAction_->setChecked(true);
     leftPanelAction_->setShortcut(QKeySequence("Ctrl+Shift+M"));
 
-    rightPanelAction_ = viewMenu->addAction("Property Panel");
-    rightPanelAction_->setCheckable(true);
-    rightPanelAction_->setChecked(true);
-
     if (sidebarsAction_) {
-        connect(sidebarsAction_, &QAction::toggled, this, [this](bool visible) {
-            if (partsDock_) partsDock_->setVisible(visible);
-            if (modelInfoDock_) modelInfoDock_->setVisible(visible);
-
-            if (leftPanelAction_) {
-                const bool blockLeft = leftPanelAction_->blockSignals(true);
-                leftPanelAction_->setChecked(visible);
-                leftPanelAction_->blockSignals(blockLeft);
-            }
-
-            if (rightPanelAction_) {
-                const bool blockRight = rightPanelAction_->blockSignals(true);
-                rightPanelAction_->setChecked(visible);
-                rightPanelAction_->blockSignals(blockRight);
-            }
-
-            syncSidebarActions();
-        });
+        connect(sidebarsAction_, &QAction::toggled,
+                this, &MainWindow::setModelStructureVisible);
     }
 
-    connect(leftPanelAction_, &QAction::toggled, this, [this](bool visible) {
-        if (partsDock_) partsDock_->setVisible(visible);
-        syncSidebarActions();
-    });
-    connect(rightPanelAction_, &QAction::toggled, this, [this](bool visible) {
-        if (modelInfoDock_) modelInfoDock_->setVisible(visible);
-        syncSidebarActions();
-    });
+    connect(leftPanelAction_, &QAction::toggled,
+            this, &MainWindow::setModelStructureVisible);
 
     auto* plotMenu = menuBar()->addMenu("Plot");
     const QStringList plotActions = {"Contour", "Deformation", "Slice", "Iso Surface", "Threshold"};
@@ -904,8 +966,9 @@ void MainWindow::setupMenuBar() {
     auto* dataMenu = menuBar()->addMenu("Data");
     auto* loadModelAction = dataMenu->addAction("Load Model Data...");
     connect(loadModelAction, &QAction::triggered, this, [this]() {
-        browseModelFile();
-        applyFiles();
+        if (browseModelFile()) {
+            applyFiles();
+        }
     });
     auto* loadResultAction = dataMenu->addAction("Load Result Data...");
     connect(loadResultAction, &QAction::triggered, this, [this]() {
@@ -919,6 +982,9 @@ void MainWindow::setupMenuBar() {
     auto* optionsMenu = menuBar()->addMenu("Options");
     if (themeMenu_) optionsMenu->addMenu(themeMenu_);
     if (rhiMenu_) optionsMenu->addMenu(rhiMenu_);
+    auto* backgroundAction = optionsMenu->addAction("Background...");
+    connect(backgroundAction, &QAction::triggered,
+            this, &MainWindow::showBackgroundSettingsDialog);
 
     auto* scriptingMenu = menuBar()->addMenu("Scripting");
     auto* macroAction = scriptingMenu->addAction("Record Macro...");
@@ -954,18 +1020,25 @@ void MainWindow::setupToolBar() {
     sidebarsAction_->setCheckable(true);
     sidebarsAction_->setChecked(true);
     sidebarsAction_->setShortcut(QKeySequence("Ctrl+Shift+B"));
-    sidebarsAction_->setToolTip("显示/隐藏左右边栏");
+    sidebarsAction_->setToolTip("显示/隐藏模型结构栏");
+    sidebarsAction_->setStatusTip("显示/隐藏模型结构栏");
+    connect(sidebarsAction_, &QAction::toggled,
+            this, &MainWindow::setModelStructureVisible);
     toolbar_->addAction(sidebarsAction_);
     toolbar_->addSeparator();
 
     auto* newLayoutAction = toolbar_->addAction(toolbarIcon("new-layout"), "新建");
     newLayoutAction->setToolTip("新建布局 / 清空当前模型");
+    newLayoutAction->setStatusTip("新建布局 / 清空当前模型");
+    connect(newLayoutAction, &QAction::triggered,
+            this, &MainWindow::clearCurrentLayout);
 
     auto* openAction = toolbar_->addAction(toolbarIcon("open"), "打开");
     openAction->setToolTip("打开模型文件");
     connect(openAction, &QAction::triggered, this, [this]() {
-        browseModelFile();
-        applyFiles();
+        if (browseModelFile()) {
+            applyFiles();
+        }
     });
 
     auto* saveAction = toolbar_->addAction(toolbarIcon("save"), "保存");
@@ -975,17 +1048,11 @@ void MainWindow::setupToolBar() {
     });
 
     auto* importAction = toolbar_->addAction(toolbarIcon("import"), "导入");
-    importAction->setToolTip("导入 STEP / IGES / STL 几何文件");
+    importAction->setToolTip("导入几何或结果文件");
     connect(importAction, &QAction::triggered, this, [this]() {
-        browseImportFile();
-        applyFiles();
-    });
-
-    auto* importResultAction = toolbar_->addAction(toolbarIcon("import-result"), "导入结果");
-    importResultAction->setToolTip("导入 OP2 / UNV 结果文件");
-    connect(importResultAction, &QAction::triggered, this, [this]() {
-        browseResultFile();
-        applyFiles();
+        if (browseUnifiedImportFile()) {
+            applyFiles();
+        }
     });
 
     auto* printAction = toolbar_->addAction(toolbarIcon("print"), "打印");
@@ -1063,6 +1130,9 @@ void MainWindow::setupToolBar() {
         if (renderViewport_) {
             renderViewport_->setModelDisplayMode(mode);
         }
+        if (viewportContextMenu_) {
+            viewportContextMenu_->setDisplayMode(mode);
+        }
         if (statusLabel_) {
             statusLabel_->setText(QStringLiteral("  显示模式：%1").arg(modelDisplayModeText(mode)));
         }
@@ -1086,7 +1156,7 @@ void MainWindow::setupToolBar() {
 
     auto* clearAction = toolbar_->addAction(toolbarIcon("clear"), "清空");
     clearAction->setToolTip("清空当前模型");
-    connect(newLayoutAction, &QAction::triggered, clearAction, &QAction::trigger);
+    connect(clearAction, &QAction::triggered, this, &MainWindow::clearCurrentLayout);
     toolbar_->addSeparator();
 
     // ── 拾取模式 ──
@@ -1230,35 +1300,6 @@ void MainWindow::setupToolBar() {
     themeAction_->setMenu(themeMenu_);
 
     // ── 连接 ──
-    connect(clearAction, &QAction::triggered, this, [this]() {
-        // 清除全部后处理状态
-        deform_.clear();
-        postEffect_.clear();
-        contour_.clear();
-        renderViewport_->clearSliceLines();
-        renderViewport_->clearIsoSurface();
-        renderViewport_->clearClipPlanePreview();
-        renderViewport_->setOverlayVisible(false);
-        renderViewport_->setUseVertexColor(false);
-        renderViewport_->setColorBarVisible(false);
-        feModelPanel_->clearActiveScalarField();
-        resultPanel_->clearResults();
-        deformationPanel_->clearResults();
-        thresholdPanel_->clearResults();
-        if (animController_) animController_->setFrameCount(0);
-        loadedResultFrameCount_ = 0;
-
-        feModelPanel_->clearModel();
-        statusProgress_->setVisible(false);
-        progressText_->setVisible(false);
-        statusLabel_->setVisible(true);
-        statusLabel_->setText("  就绪");
-        statusLabel_->setStyleSheet(
-            QString("color: %1; font-weight: bold;").arg(currentTheme_.green));
-        updateProjectTreeSummary();
-        updateStatusSummaries();
-    });
-
     connect(pickGroup_, &QActionGroup::triggered, this, [this](QAction* action) {
         int mode = action->data().toInt();
         renderViewport_->setPickMode(static_cast<PickMode>(mode));
@@ -1291,6 +1332,29 @@ void MainWindow::updateRhiActionText()
     }
 }
 
+void MainWindow::setModelStructureVisible(bool visible)
+{
+    if (partsDock_) {
+        partsDock_->setVisible(visible);
+    }
+
+    if (sidebarsAction_) {
+        const bool block = sidebarsAction_->blockSignals(true);
+        sidebarsAction_->setChecked(visible);
+        sidebarsAction_->blockSignals(block);
+    }
+    if (leftPanelAction_) {
+        const bool block = leftPanelAction_->blockSignals(true);
+        leftPanelAction_->setChecked(visible);
+        leftPanelAction_->blockSignals(block);
+    }
+    if (statusLabel_) {
+        statusLabel_->setText(visible
+            ? QStringLiteral("  模型结构栏已显示")
+            : QStringLiteral("  模型结构栏已隐藏"));
+    }
+}
+
 void MainWindow::syncSidebarActions()
 {
     if (!sidebarsAction_) {
@@ -1300,12 +1364,11 @@ void MainWindow::syncSidebarActions()
     const bool leftVisible = leftPanelAction_
         ? leftPanelAction_->isChecked()
         : (partsDock_ && partsDock_->isVisible());
-    const bool rightVisible = rightPanelAction_
-        ? rightPanelAction_->isChecked()
-        : (modelInfoDock_ && modelInfoDock_->isVisible());
-    const bool block = sidebarsAction_->blockSignals(true);
-    sidebarsAction_->setChecked(leftVisible && rightVisible);
-    sidebarsAction_->blockSignals(block);
+    if (sidebarsAction_) {
+        const bool block = sidebarsAction_->blockSignals(true);
+        sidebarsAction_->setChecked(leftVisible);
+        sidebarsAction_->blockSignals(block);
+    }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1345,11 +1408,187 @@ void MainWindow::setupStatusBar() {
     triangleSummaryLabel_ = new QLabel("三角面 --");
     sb->addPermanentWidget(triangleSummaryLabel_);
 
+    modelSizeSummaryLabel_ = new QLabel("尺寸 --");
+    sb->addPermanentWidget(modelSizeSummaryLabel_);
+
     auto* fpsTimer = new QTimer(this);
     fpsTimer->setInterval(500);
     connect(fpsTimer, &QTimer::timeout, this, &MainWindow::updateStatusSummaries);
     fpsTimer->start();
     updateStatusSummaries();
+}
+
+void MainWindow::loadBackgroundSettings()
+{
+    const QColor themeTop = themeColor(currentTheme_.bgTopR, currentTheme_.bgTopG, currentTheme_.bgTopB);
+    const QColor themeBottom = themeColor(currentTheme_.bgBotR, currentTheme_.bgBotG, currentTheme_.bgBotB);
+    QSettings settings = makeAppSettings();
+    const int mode = settings.value(QString::fromLatin1(kBackgroundModeKey),
+                                    static_cast<int>(BackgroundMode::Gradient)).toInt();
+    backgroundMode_ = mode == static_cast<int>(BackgroundMode::Solid)
+        ? BackgroundMode::Solid
+        : BackgroundMode::Gradient;
+
+    backgroundSolidColor_ = QColor(settings.value(QString::fromLatin1(kBackgroundSolidKey),
+                                                  themeBottom.name(QColor::HexRgb)).toString());
+    if (!backgroundSolidColor_.isValid()) {
+        backgroundSolidColor_ = themeBottom;
+    }
+
+    backgroundGradientTopColor_ = QColor(settings.value(QString::fromLatin1(kBackgroundGradientTopKey),
+                                                        themeTop.name(QColor::HexRgb)).toString());
+    if (!backgroundGradientTopColor_.isValid()) {
+        backgroundGradientTopColor_ = themeTop;
+    }
+
+    backgroundGradientBottomColor_ = QColor(settings.value(QString::fromLatin1(kBackgroundGradientBottomKey),
+                                                           themeBottom.name(QColor::HexRgb)).toString());
+    if (!backgroundGradientBottomColor_.isValid()) {
+        backgroundGradientBottomColor_ = themeBottom;
+    }
+}
+
+void MainWindow::saveBackgroundSettings() const
+{
+    QSettings settings = makeAppSettings();
+    settings.setValue(QString::fromLatin1(kBackgroundModeKey), static_cast<int>(backgroundMode_));
+    settings.setValue(QString::fromLatin1(kBackgroundSolidKey),
+                      backgroundSolidColor_.name(QColor::HexRgb));
+    settings.setValue(QString::fromLatin1(kBackgroundGradientTopKey),
+                      backgroundGradientTopColor_.name(QColor::HexRgb));
+    settings.setValue(QString::fromLatin1(kBackgroundGradientBottomKey),
+                      backgroundGradientBottomColor_.name(QColor::HexRgb));
+    settings.sync();
+}
+
+void MainWindow::applyViewportBackground()
+{
+    if (!renderViewport_) {
+        return;
+    }
+
+    Theme viewportTheme = currentTheme_;
+    if (backgroundMode_ == BackgroundMode::Solid) {
+        writeThemeBackgroundColor(viewportTheme, backgroundSolidColor_, backgroundSolidColor_);
+    } else {
+        writeThemeBackgroundColor(viewportTheme, backgroundGradientTopColor_, backgroundGradientBottomColor_);
+    }
+    renderViewport_->applyTheme(viewportTheme);
+}
+
+void MainWindow::showBackgroundSettingsDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("背景色设置");
+    dialog.setModal(true);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 14, 16, 14);
+    layout->setSpacing(10);
+
+    auto* modeRow = new QHBoxLayout;
+    auto* solidRadio = new QRadioButton("纯色");
+    auto* gradientRadio = new QRadioButton("渐变色");
+    solidRadio->setChecked(backgroundMode_ == BackgroundMode::Solid);
+    gradientRadio->setChecked(backgroundMode_ == BackgroundMode::Gradient);
+    modeRow->addWidget(solidRadio);
+    modeRow->addWidget(gradientRadio);
+    modeRow->addStretch();
+    layout->addLayout(modeRow);
+
+    QColor color1 = backgroundMode_ == BackgroundMode::Solid
+        ? backgroundSolidColor_
+        : backgroundGradientTopColor_;
+    QColor color2 = backgroundGradientBottomColor_;
+
+    auto makeColorButton = [](const QString& title, const QColor& color) {
+        auto* button = new QPushButton;
+        button->setMinimumWidth(150);
+        auto updateButton = [button, title](const QColor& c) {
+            button->setText(QString("%1  %2").arg(title, c.name(QColor::HexRgb).toUpper()));
+            button->setStyleSheet(QString(
+                "QPushButton {"
+                "  text-align: left; padding: 6px 10px;"
+                "  border: 1px solid #7c7f93; border-radius: 5px;"
+                "  background: %1; color: %2; }")
+                .arg(c.name(QColor::HexRgb),
+                     c.lightness() < 128 ? QStringLiteral("#ffffff") : QStringLiteral("#202020")));
+        };
+        updateButton(color);
+        return button;
+    };
+
+    auto updateColorButton = [](QPushButton* button, const QString& title, const QColor& c) {
+        button->setText(QString("%1  %2").arg(title, c.name(QColor::HexRgb).toUpper()));
+        button->setStyleSheet(QString(
+            "QPushButton {"
+            "  text-align: left; padding: 6px 10px;"
+            "  border: 1px solid #7c7f93; border-radius: 5px;"
+            "  background: %1; color: %2; }")
+            .arg(c.name(QColor::HexRgb),
+                 c.lightness() < 128 ? QStringLiteral("#ffffff") : QStringLiteral("#202020")));
+    };
+
+    auto* color1Row = new QHBoxLayout;
+    color1Row->addWidget(new QLabel("颜色 1"));
+    auto* color1Button = makeColorButton("颜色 1", color1);
+    color1Row->addWidget(color1Button, 1);
+    layout->addLayout(color1Row);
+
+    auto* color2Row = new QHBoxLayout;
+    auto* color2Label = new QLabel("颜色 2");
+    color2Row->addWidget(color2Label);
+    auto* color2Button = makeColorButton("颜色 2", color2);
+    color2Row->addWidget(color2Button, 1);
+    layout->addLayout(color2Row);
+
+    auto updateMode = [&]() {
+        const bool gradient = gradientRadio->isChecked();
+        color2Label->setVisible(gradient);
+        color2Button->setVisible(gradient);
+    };
+    updateMode();
+
+    connect(solidRadio, &QRadioButton::toggled, &dialog, [&]() { updateMode(); });
+    connect(color1Button, &QPushButton::clicked, &dialog, [&]() {
+        const QColor selected = QColorDialog::getColor(color1, &dialog, "选择颜色 1");
+        if (selected.isValid()) {
+            color1 = selected;
+            updateColorButton(color1Button, "颜色 1", color1);
+        }
+    });
+    connect(color2Button, &QPushButton::clicked, &dialog, [&]() {
+        const QColor selected = QColorDialog::getColor(color2, &dialog, "选择颜色 2");
+        if (selected.isValid()) {
+            color2 = selected;
+            updateColorButton(color2Button, "颜色 2", color2);
+        }
+    });
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Apply | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Apply)->setText("应用");
+    buttons->button(QDialogButtonBox::Cancel)->setText("取消");
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, &dialog, [&]() {
+        if (solidRadio->isChecked()) {
+            backgroundMode_ = BackgroundMode::Solid;
+            backgroundSolidColor_ = color1;
+        } else {
+            backgroundMode_ = BackgroundMode::Gradient;
+            backgroundGradientTopColor_ = color1;
+            backgroundGradientBottomColor_ = color2;
+        }
+        saveBackgroundSettings();
+        applyViewportBackground();
+        if (statusLabel_) {
+            statusLabel_->setText(backgroundMode_ == BackgroundMode::Solid
+                ? QStringLiteral("  背景已切换为纯色")
+                : QStringLiteral("  背景已切换为渐变色"));
+        }
+    });
+
+    dialog.exec();
 }
 
 void MainWindow::applyTheme(const Theme& t) {
@@ -1377,7 +1616,6 @@ void MainWindow::applyTheme(const Theme& t) {
         "  padding: 6px 10px; }"
     ).arg(t.blue, t.mantle, t.surface0);
     partsDock_->setStyleSheet(dockStyle);
-    modelInfoDock_->setStyleSheet(dockStyle);
 
     // 工具栏 — Tecplot 式紧凑图标按钮
     const QString toolBarStyle = QString(
@@ -1391,12 +1629,16 @@ void MainWindow::applyTheme(const Theme& t) {
         "  min-width: 24px; min-height: 24px;"
         "  max-width: 24px; max-height: 24px; }"
         "QToolButton:hover {"
-        "  background: %2; }"
+        "  background: %4;"
+        "  border: 1px solid %5; }"
         "QToolButton:pressed {"
         "  background: %4; }"
         "QToolButton:checked {"
         "  background: %4; color: %5;"
         "  border: 1px solid %5; border-radius: 2px; }"
+        "QToolButton:checked:hover {"
+        "  background: %4;"
+        "  border: 1px solid %5; }"
         "QToolBar::separator {"
         "  width: 1px; background: %2; margin: 3px 3px; }"
     ).arg(t.mantle, t.surface0, t.text, t.surface1, t.blue);
@@ -1451,6 +1693,7 @@ void MainWindow::applyTheme(const Theme& t) {
     if (frameTimeSummaryLabel_) frameTimeSummaryLabel_->setStyleSheet(summaryStyle);
     if (vertexSummaryLabel_) vertexSummaryLabel_->setStyleSheet(summaryStyle);
     if (triangleSummaryLabel_) triangleSummaryLabel_->setStyleSheet(summaryStyle);
+    if (modelSizeSummaryLabel_) modelSizeSummaryLabel_->setStyleSheet(summaryStyle);
     statusProgress_->setStyleSheet(QString(
         "QProgressBar {"
         "  border: 1px solid %1; border-radius: 7px;"
@@ -1478,37 +1721,13 @@ void MainWindow::applyTheme(const Theme& t) {
         ).arg(t.base, t.text, t.mantle, t.surface0, t.surface1, t.blue));
     }
 
-    if (inspectorPanel_) {
-        inspectorPanel_->setStyleSheet(QString(
-            "QWidget { background: %1; color: %2; }"
-        ).arg(t.base, t.text));
-    }
-
-    if (displayControlPanel_) {
-        displayControlPanel_->setStyleSheet(QString(
-            "QGroupBox {"
-            "  background: %1; border: 1px solid %2;"
-            "  border-radius: 8px; margin: 10px 8px 8px 8px;"
-            "  padding: 14px 10px 10px 10px;"
-            "  font-weight: bold; font-size: 12px; color: %3; }"
-            "QGroupBox::title {"
-            "  subcontrol-origin: margin; left: 12px; padding: 0 6px;"
-            "  color: %4; }"
-            "QPushButton {"
-            "  background: %2; color: %5; border: 1px solid %6;"
-            "  border-radius: 5px; padding: 5px 10px; font-size: 12px; }"
-            "QPushButton:hover { background: %6; border-color: %4; }"
-            "QPushButton:pressed { background: %7; }"
-        ).arg(t.mantle, t.surface0, t.subtext0, t.green, t.text, t.surface1, t.surface2));
-    }
-
     // 各面板
     feModelPanel_->applyTheme(t);
     partsPanel_->applyTheme(t);
     resultPanel_->applyTheme(t);
     deformationPanel_->applyTheme(t);
     thresholdPanel_->applyTheme(t);
-    renderViewport_->applyTheme(t);
+    applyViewportBackground();
 
     const QString dialogStyle = QString("QDialog { background: %1; }").arg(t.base);
     if (contourDialog_) contourDialog_->setStyleSheet(dialogStyle);
