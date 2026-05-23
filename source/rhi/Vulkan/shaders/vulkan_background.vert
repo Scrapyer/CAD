@@ -5,6 +5,7 @@ layout(location = 0) out vec3 vColor;
 layout(push_constant) uniform BackgroundPushConstants {
     vec4 bottomColor;
     vec4 topColor;
+    vec4 gridParams;
 } pc;
 
 vec2 positions[3] = vec2[](

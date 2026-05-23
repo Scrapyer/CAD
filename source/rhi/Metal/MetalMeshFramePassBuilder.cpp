@@ -91,6 +91,10 @@ MetalMeshFramePassInputs buildMetalMeshFramePassInputs(const MetalMeshFrameDrawF
     framePass.backgroundUniforms.topColor[1] = resources.backgroundTopColor.y();
     framePass.backgroundUniforms.topColor[2] = resources.backgroundTopColor.z();
     framePass.backgroundUniforms.topColor[3] = 1.0f;
+    framePass.backgroundUniforms.gridParams[0] = resources.backgroundGridVisible ? 1.0f : 0.0f;
+    framePass.backgroundUniforms.gridParams[1] = resources.backgroundGridMinorStep;
+    framePass.backgroundUniforms.gridParams[2] = resources.backgroundGridFineAlpha;
+    framePass.backgroundUniforms.gridParams[3] = 0.0f;
     framePass.surface = makeIndexedDraw(flags.surface,
                                         resources.meshPipelineState,
                                         resources.meshVertexBuffer,

@@ -1021,6 +1021,7 @@ explicit GLWidget(QWidget* parent = nullptr);
 | `void setObjectColor(const glm::vec3& c)` | 设置统一物体颜色 |
 | `void setUseVertexColor(bool use)` | 切换云图模式 (`true`) / 纯色模式 (`false`) |
 | `void setModelDisplayMode(ModelDisplayMode mode)` | 切换模型显示方式：实体、线框、实体+线框或点显示 |
+| `void setViewportGridVisible(bool visible)` | 显示/隐藏视口背景辅助网格；网格线距会随相机缩放自适应分级 |
 | `void setVertexScalars(const std::vector<float>& scalars, float minVal, float maxVal, int numBands)` | 上传 per-vertex 标量值，由 GPU 着色器做量化 + 颜色映射 |
 
 #### 相机与视图
@@ -1165,6 +1166,7 @@ signals:
 void setMesh(const Mesh& mesh);
 void setPickMode(PickMode mode);
 void setModelDisplayMode(ModelDisplayMode mode);
+void setViewportGridVisible(bool visible);
 void setStandardView(StandardView view);
 void setPreferredRenderBackend(RenderBackendKind kind);
 RenderBackendKind requestedRenderBackendKind() const;

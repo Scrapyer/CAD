@@ -227,6 +227,26 @@ void VulkanRenderBackend::setBackgroundGradient(const QVector3D& topColor, const
     }
 }
 
+void VulkanRenderBackend::setViewportGridVisible(bool visible)
+{
+    viewportGridVisible_ = visible;
+    if (clearFrameRenderer_) {
+        clearFrameRenderer_->setViewportGridParams(visible ? 1.0f : 0.0f,
+                                                   viewportGridMinorStep_,
+                                                   viewportGridFineAlpha_);
+    }
+}
+
+void VulkanRenderBackend::setViewportGridParams(float alpha, float minorStep, float fineAlpha)
+{
+    viewportGridVisible_ = alpha > 0.0f;
+    viewportGridMinorStep_ = minorStep;
+    viewportGridFineAlpha_ = fineAlpha;
+    if (clearFrameRenderer_) {
+        clearFrameRenderer_->setViewportGridParams(alpha, minorStep, fineAlpha);
+    }
+}
+
 bool VulkanRenderBackend::renderClearFrame(float red,
                                           float green,
                                           float blue,

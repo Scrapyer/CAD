@@ -1,5 +1,6 @@
 #include "VulkanViewport.h"
 
+#include "ViewportGridMetrics.h"
 #include "VulkanMacOSSurfaceFactory.h"
 
 #include <QEvent>
@@ -245,6 +246,11 @@ void VulkanViewport::renderFrame()
         return;
     }
 
+    const ViewportGridMetrics gridMetrics =
+        computeViewportGridMetrics(modelSize_, cam_.distance, viewportGridVisible_);
+    backend_.setViewportGridParams(gridMetrics.alpha,
+                                   gridMetrics.minorStep,
+                                   gridMetrics.fineAlpha);
     const QMatrix4x4 axesMvp = currentAxesMvp();
     const bool rendered = hasMesh_
         ? backend_.renderMeshFrame(currentMvp(), 0.04f, 0.05f, 0.07f, 1.0f, axesMvp, displayMode_)
@@ -562,6 +568,12 @@ void VulkanViewport::setStandardView(StandardView view)
 void VulkanViewport::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
 {
     backend_.setBackgroundGradient(topColor, bottomColor);
+    renderFrame();
+}
+
+void VulkanViewport::setViewportGridVisible(bool visible)
+{
+    viewportGridVisible_ = visible;
     renderFrame();
 }
 

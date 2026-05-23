@@ -9,6 +9,7 @@
 #include "OpenGLRenderBackend.h"
 #include "RenderBackendFactory.h"
 #include "RenderSettings.h"
+#include "ViewportGridMetrics.h"
 
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -356,6 +357,15 @@ void GLWidget::setModelDisplayMode(ModelDisplayMode mode)
         return;
     }
     displayMode_ = mode;
+    update();
+}
+
+void GLWidget::setViewportGridVisible(bool visible)
+{
+    if (viewportGridVisible_ == visible) {
+        return;
+    }
+    viewportGridVisible_ = visible;
     update();
 }
 
@@ -748,6 +758,13 @@ void GLWidget::renderBackground() {
     auto* glBackend = openGLBackend();
     glBackend->clearDepthBuffer();
     bgShader_->bind();
+    const ViewportGridMetrics gridMetrics =
+        computeViewportGridMetrics(modelSize_, cam_.distance, viewportGridVisible_);
+    bgShader_->setUniformValue("uGridParams",
+                               gridMetrics.alpha,
+                               gridMetrics.minorStep,
+                               gridMetrics.fineAlpha,
+                               0.0f);
     ScenePassState passState;
     passState.applyDepthTest = true;
     passState.depthTestEnabled = false;

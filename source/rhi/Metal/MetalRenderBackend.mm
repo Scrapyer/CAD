@@ -455,6 +455,18 @@ void MetalRenderBackend::setBackgroundGradient(const QVector3D& topColor, const 
     backgroundBottomColor_ = bottomColor;
 }
 
+void MetalRenderBackend::setViewportGridVisible(bool visible)
+{
+    viewportGridVisible_ = visible;
+}
+
+void MetalRenderBackend::setViewportGridParams(float alpha, float minorStep, float fineAlpha)
+{
+    viewportGridVisible_ = alpha > 0.0f;
+    viewportGridMinorStep_ = minorStep;
+    viewportGridFineAlpha_ = fineAlpha;
+}
+
 bool MetalRenderBackend::uploadMesh(const Mesh& mesh, const MetalMeshUploadOptions& options)
 {
     lastError_.clear();
@@ -805,6 +817,9 @@ MetalMeshFrameResourceHandles MetalRenderBackend::buildMeshFrameResourceHandles(
     frameResources.drawableSize = drawableSize_;
     frameResources.backgroundTopColor = backgroundTopColor_;
     frameResources.backgroundBottomColor = backgroundBottomColor_;
+    frameResources.backgroundGridVisible = viewportGridVisible_;
+    frameResources.backgroundGridMinorStep = viewportGridMinorStep_;
+    frameResources.backgroundGridFineAlpha = viewportGridFineAlpha_;
     frameResources.meshVertexBuffer = meshVertexBuffer_.handle();
     frameResources.meshIndexBuffer = meshIndexBuffer_.handle();
     frameResources.meshVertexCount = meshVertexCount_;

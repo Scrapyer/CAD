@@ -65,6 +65,9 @@ public:
     /** @brief 设置主模型显示模式。 */
     void setModelDisplayMode(ModelDisplayMode mode);
 
+    /** @brief 显示/隐藏视口背景辅助网格。 */
+    void setViewportGridVisible(bool visible);
+
     /** @brief 自适应缩放 */
     void fitToModel(const glm::vec3& center, float size);
 
@@ -339,6 +342,7 @@ private:
     // 背景渐变颜色（initializeGL 使用，applyTheme 更新）
     float bgTopColor_[3] = {0.38f, 0.45f, 0.58f};
     float bgBotColor_[3] = {0.68f, 0.74f, 0.82f};
+    bool viewportGridVisible_ = true;
     glm::mat4 axesMVP_{1.0f};          // drawAxesIndicator() 计算后传给 drawAxesLabels()
 
     // ── 交互状态 ──

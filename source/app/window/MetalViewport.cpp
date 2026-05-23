@@ -1,5 +1,7 @@
 #include "MetalViewport.h"
 
+#include "ViewportGridMetrics.h"
+
 #include <QEvent>
 #include <QFont>
 #include <QMouseEvent>
@@ -246,6 +248,11 @@ void MetalViewport::renderFrame()
         return;
     }
 
+    const ViewportGridMetrics gridMetrics =
+        computeViewportGridMetrics(modelSize_, cam_.distance, viewportGridVisible_);
+    backend_.setViewportGridParams(gridMetrics.alpha,
+                                   gridMetrics.minorStep,
+                                   gridMetrics.fineAlpha);
     const bool rendered = hasMesh_
         ? backend_.renderMeshFrame(currentMvp(),
                                    QVector3D(objectColor_.x, objectColor_.y, objectColor_.z),
@@ -577,6 +584,12 @@ void MetalViewport::setClearColor(float red, float green, float blue, float alph
 void MetalViewport::setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor)
 {
     backend_.setBackgroundGradient(topColor, bottomColor);
+    renderFrame();
+}
+
+void MetalViewport::setViewportGridVisible(bool visible)
+{
+    viewportGridVisible_ = visible;
     renderFrame();
 }
 

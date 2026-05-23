@@ -11,6 +11,7 @@ struct MetalMeshUniforms {
 struct MetalBackgroundUniforms {
     float bottomColor[4];
     float topColor[4];
+    float gridParams[4];
 };
 
 struct MetalMeshVertex {

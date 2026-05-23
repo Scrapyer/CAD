@@ -61,6 +61,7 @@ public:
     void fitToModel(const glm::vec3& center, float size);
     void setStandardView(StandardView view);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
+    void setViewportGridVisible(bool visible);
 
     const RenderBackendInfo& backendInfo() const { return backend_.info(); }
     QString lastError() const { return lastError_; }
@@ -147,6 +148,7 @@ private:
     glm::vec3 objectColor_{0.48f, 0.72f, 0.76f};
     ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;
     float modelSize_ = 1.0f;
+    bool viewportGridVisible_ = true;
     bool useVertexColor_ = false;
     std::vector<float> vertexColors_;
     std::vector<float> vertexScalars_;

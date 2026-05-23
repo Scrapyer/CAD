@@ -71,6 +71,7 @@ public:
     void setStandardView(StandardView view);
     void setClearColor(float red, float green, float blue, float alpha = 1.0f);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
+    void setViewportGridVisible(bool visible);
 
     const RenderBackendInfo& backendInfo() const { return backend_.info(); }
     QString lastError() const { return lastError_; }
@@ -184,6 +185,7 @@ private:
     ModelDisplayMode displayMode_ = ModelDisplayMode::SolidWireframe;
     float selectionMarkerSize_ = 0.02f;
     float modelSize_ = 1.0f;
+    bool viewportGridVisible_ = true;
     float clearRed_ = 0.04f;
     float clearGreen_ = 0.05f;
     float clearBlue_ = 0.07f;

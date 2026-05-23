@@ -90,11 +90,13 @@ using namespace metal;
 struct VertexOut {
     float4 position [[position]];
     float3 color;
+    float4 gridParams;
 };
 
 struct BackgroundUniforms {
     float4 bottomColor;
     float4 topColor;
+    float4 gridParams;
 };
 
 vertex VertexOut vertex_main(uint vertexId [[vertex_id]],
@@ -110,12 +112,38 @@ vertex VertexOut vertex_main(uint vertexId [[vertex_id]],
     VertexOut out;
     out.position = float4(pos, 0.0, 1.0);
     out.color = mix(uniforms.bottomColor.xyz, uniforms.topColor.xyz, t);
+    out.gridParams = uniforms.gridParams;
     return out;
+}
+
+float3 applyViewportGrid(float3 baseColor, float2 fragCoord, float4 gridParams)
+{
+    float minorStep = max(gridParams.y, 1.0);
+    float fineStep = max(minorStep * 0.5, 1.0);
+    float majorStep = minorStep * 5.0;
+
+    float2 fineRatio = fract(fragCoord / fineStep);
+    float2 minorRatio = fract(fragCoord / minorStep);
+    float2 majorRatio = fract(fragCoord / majorStep);
+    float2 fineCell = min(fineRatio, 1.0 - fineRatio) * fineStep;
+    float2 minorCell = min(minorRatio, 1.0 - minorRatio) * minorStep;
+    float2 majorCell = min(majorRatio, 1.0 - majorRatio) * majorStep;
+    float fineLine = 1.0 - smoothstep(0.45, 1.00, min(fineCell.x, fineCell.y));
+    float minorLine = 1.0 - smoothstep(0.55, 1.35, min(minorCell.x, minorCell.y));
+    float majorLine = 1.0 - smoothstep(0.65, 1.80, min(majorCell.x, majorCell.y));
+
+    float luminance = dot(baseColor, float3(0.299, 0.587, 0.114));
+    float3 lightGrid = float3(0.88, 0.93, 1.0);
+    float3 darkGrid = float3(0.22, 0.28, 0.36);
+    float3 gridColor = mix(lightGrid, darkGrid, step(0.58, luminance));
+    float alpha = max(fineLine * 0.08 * gridParams.z,
+                      max(minorLine * 0.16, majorLine * 0.28)) * gridParams.x;
+    return mix(baseColor, gridColor, alpha);
 }
 
 fragment float4 fragment_main(VertexOut in [[stage_in]])
 {
-    return float4(in.color, 1.0);
+    return float4(applyViewportGrid(in.color, in.position.xy, in.gridParams), 1.0);
 }
 )";
 

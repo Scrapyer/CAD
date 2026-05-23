@@ -72,6 +72,11 @@ void ViewportContextMenu::setDisplayMode(ModelDisplayMode mode)
     displayMode_ = mode;
 }
 
+void ViewportContextMenu::setGridVisible(bool visible)
+{
+    gridVisible_ = visible;
+}
+
 void ViewportContextMenu::popup(QWidget* parent, const QPoint& globalPos)
 {
     if (!parent) {
@@ -124,6 +129,14 @@ void ViewportContextMenu::popup(QWidget* parent, const QPoint& globalPos)
     });
 
     menu->addSeparator();
+    QAction* gridAction = menu->addAction(QStringLiteral("网格"));
+    gridAction->setCheckable(true);
+    gridAction->setChecked(gridVisible_);
+    connect(gridAction, &QAction::toggled, this, [this](bool visible) {
+        gridVisible_ = visible;
+        emit gridVisibleChanged(visible);
+    });
+
     QAction* backgroundAction = menu->addAction(QStringLiteral("背景色设置..."));
     connect(backgroundAction, &QAction::triggered,
             this, &ViewportContextMenu::backgroundSettingsRequested);

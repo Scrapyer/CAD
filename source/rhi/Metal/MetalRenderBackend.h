@@ -36,6 +36,8 @@ public:
     bool attachLayer(void* metalLayer, const QSize& drawableSize);
     void updateDrawableSize(const QSize& drawableSize);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
+    void setViewportGridVisible(bool visible);
+    void setViewportGridParams(float alpha, float minorStep, float fineAlpha);
     bool uploadMesh(const Mesh& mesh, const MetalMeshUploadOptions& options = {});
     bool uploadVertexScalars(const std::vector<float>& scalars,
                              float minVal,
@@ -147,6 +149,9 @@ private:
     int meshNumBands_ = 10;
     QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
     QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
+    bool viewportGridVisible_ = true;
+    float viewportGridMinorStep_ = 24.0f;
+    float viewportGridFineAlpha_ = 0.0f;
     std::vector<MetalMeshVertex> meshVertexCpuCache_;
     std::vector<unsigned int> meshScalarSourceIndices_;
 

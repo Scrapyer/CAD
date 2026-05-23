@@ -717,6 +717,18 @@ void VulkanClearFrameRenderer::setBackgroundGradient(const QVector3D& topColor, 
     backgroundBottomColor_ = bottomColor;
 }
 
+void VulkanClearFrameRenderer::setViewportGridVisible(bool visible)
+{
+    viewportGridVisible_ = visible;
+}
+
+void VulkanClearFrameRenderer::setViewportGridParams(float alpha, float minorStep, float fineAlpha)
+{
+    viewportGridVisible_ = alpha > 0.0f;
+    viewportGridMinorStep_ = minorStep;
+    viewportGridFineAlpha_ = fineAlpha;
+}
+
 bool VulkanClearFrameRenderer::uploadOverlayLines(
     const VulkanDevice& device,
     const std::vector<float>& lineVertices)
@@ -1170,13 +1182,14 @@ void VulkanClearFrameRenderer::recordBackground(VkCommandBuffer commandBuffer, V
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.background.pipeline());
-    std::array<float, 8> pushConstants = {
+    std::array<float, 12> pushConstants = {
         backgroundBottomColor_.x(), backgroundBottomColor_.y(), backgroundBottomColor_.z(), 1.0f,
-        backgroundTopColor_.x(), backgroundTopColor_.y(), backgroundTopColor_.z(), 1.0f
+        backgroundTopColor_.x(), backgroundTopColor_.y(), backgroundTopColor_.z(), 1.0f,
+        viewportGridVisible_ ? 1.0f : 0.0f, viewportGridMinorStep_, viewportGridFineAlpha_, 0.0f
     };
     vkCmdPushConstants(commandBuffer,
                        pipelines_.background.layout(),
-                       VK_SHADER_STAGE_VERTEX_BIT,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0,
                        static_cast<uint32_t>(pushConstants.size() * sizeof(float)),
                        pushConstants.data());
@@ -1550,9 +1563,9 @@ bool VulkanClearFrameRenderer::createBackgroundGraphicsPipeline(const VulkanDevi
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     VkPushConstantRange backgroundPushRange{};
-    backgroundPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    backgroundPushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     backgroundPushRange.offset = 0;
-    backgroundPushRange.size = sizeof(float) * 8;
+    backgroundPushRange.size = sizeof(float) * 12;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &backgroundPushRange;
 

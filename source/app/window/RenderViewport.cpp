@@ -163,6 +163,23 @@ void RenderViewport::applyTheme(const Theme& theme)
     }
 #endif
 }
+
+void RenderViewport::setViewportGridVisible(bool visible)
+{
+    viewportGridVisible_ = visible;
+    glWidget_->setViewportGridVisible(visible);
+#if defined(FERENDER_HAS_METAL_RHI)
+    if (metalViewport_) {
+        metalViewport_->setViewportGridVisible(visible);
+    }
+#endif
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    if (vulkanViewport_) {
+        vulkanViewport_->setViewportGridVisible(visible);
+    }
+#endif
+}
+
 void RenderViewport::setColorBarVisible(bool visible)
 {
     colorBarVisible_ = visible;
@@ -737,6 +754,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
             metalViewport_->setMesh(currentMesh_);
         }
         metalViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
+        metalViewport_->setViewportGridVisible(viewportGridVisible_);
         metalViewport_->setObjectColor(objectColor_);
         metalViewport_->setModelDisplayMode(displayMode_);
         metalViewport_->setOverlayMesh(overlayMesh_);
@@ -817,6 +835,7 @@ void RenderViewport::activateBackend(RenderBackendKind kind)
             vulkanViewport_->setMesh(currentMesh_);
         }
         vulkanViewport_->setBackgroundGradient(backgroundTopColor_, backgroundBottomColor_);
+        vulkanViewport_->setViewportGridVisible(viewportGridVisible_);
         vulkanViewport_->setPickMode(currentPickMode_);
         vulkanViewport_->setShowLabels(showLabels_);
         vulkanViewport_->setObjectColor(objectColor_);

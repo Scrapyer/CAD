@@ -64,6 +64,8 @@ public:
     bool uploadClipPreviewMesh(const VulkanDevice& device, const Mesh& mesh);
     bool uploadSelectionLines(const VulkanDevice& device, const std::vector<float>& lineVertices);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
+    void setViewportGridVisible(bool visible);
+    void setViewportGridParams(float alpha, float minorStep, float fineAlpha);
     bool renderMeshFrame(const VulkanDevice& device,
                          const VulkanSwapchain& swapchain,
                          const VkClearColorValue& clearColor,
@@ -170,5 +172,8 @@ private:
     bool swapchainOutOfDate_ = false;
     QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
     QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
+    bool viewportGridVisible_ = true;
+    float viewportGridMinorStep_ = 24.0f;
+    float viewportGridFineAlpha_ = 0.0f;
     QString lastError_;
 };

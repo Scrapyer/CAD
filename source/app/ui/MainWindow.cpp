@@ -307,6 +307,18 @@ MainWindow::MainWindow() {
     });
     connect(viewportContextMenu_, &ViewportContextMenu::backgroundSettingsRequested,
             this, &MainWindow::showBackgroundSettingsDialog);
+    connect(viewportContextMenu_, &ViewportContextMenu::gridVisibleChanged,
+            this, [this](bool visible) {
+        viewportGridVisible_ = visible;
+        if (renderViewport_) {
+            renderViewport_->setViewportGridVisible(visible);
+        }
+        if (statusLabel_) {
+            statusLabel_->setText(visible
+                ? QStringLiteral("  辅助网格已显示")
+                : QStringLiteral("  辅助网格已隐藏"));
+        }
+    });
 
     // ── 信号/槽连接 ──
 

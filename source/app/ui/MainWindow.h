@@ -147,4 +147,5 @@ private:
     QColor         backgroundSolidColor_{210, 217, 230};
     QColor         backgroundGradientTopColor_{150, 166, 190};
     QColor         backgroundGradientBottomColor_{210, 217, 230};
+    bool           viewportGridVisible_ = true;
 };

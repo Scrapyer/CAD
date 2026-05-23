@@ -45,6 +45,7 @@ public:
     void fitToModel(const glm::vec3& center, float size);
     void setStandardView(StandardView view);
     void applyTheme(const Theme& theme);
+    void setViewportGridVisible(bool visible);
 
     void setColorBarVisible(bool visible);
     void setColorBarRange(float min, float max);
@@ -140,6 +141,7 @@ private:
     QColor colorBarTextColor_{30, 30, 30};
     QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
     QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
+    bool viewportGridVisible_ = true;
     bool useVertexColor_ = false;
     Mesh overlayMesh_;
     bool overlayVisible_ = false;

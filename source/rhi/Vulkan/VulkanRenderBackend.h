@@ -64,6 +64,8 @@ public:
     bool uploadClipPreviewMesh(const Mesh& mesh);
     bool uploadSelectionLines(const std::vector<float>& lineVertices);
     void setBackgroundGradient(const QVector3D& topColor, const QVector3D& bottomColor);
+    void setViewportGridVisible(bool visible);
+    void setViewportGridParams(float alpha, float minorStep, float fineAlpha);
     bool renderClearFrame(float red,
                          float green,
                          float blue,
@@ -107,6 +109,9 @@ private:
     std::unique_ptr<VulkanClearFrameRenderer> clearFrameRenderer_;
     QVector3D backgroundTopColor_{0.38f, 0.45f, 0.58f};
     QVector3D backgroundBottomColor_{0.68f, 0.74f, 0.82f};
+    bool viewportGridVisible_ = true;
+    float viewportGridMinorStep_ = 24.0f;
+    float viewportGridFineAlpha_ = 0.0f;
     bool initialized_ = false;
     QString lastError_;
 };
