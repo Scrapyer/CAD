@@ -1501,6 +1501,9 @@ void MainWindow::setupMenuBar() {
     auto* optionsMenu = menuBar()->addMenu("Options");
     if (themeMenu_) optionsMenu->addMenu(themeMenu_);
     if (rhiMenu_) optionsMenu->addMenu(rhiMenu_);
+    auto* modelInfoAction = optionsMenu->addAction("Model Info...");
+    connect(modelInfoAction, &QAction::triggered,
+            this, &MainWindow::showModelInfoDialog);
     auto* backgroundAction = optionsMenu->addAction("Background...");
     connect(backgroundAction, &QAction::triggered,
             this, &MainWindow::showBackgroundSettingsDialog);

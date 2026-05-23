@@ -273,6 +273,12 @@ set(RENDER_SOURCES
     ${SOURCE_DIR}/render/ColorBarOverlay.cpp
     ${SOURCE_DIR}/render/Geometry.cpp
     ${SOURCE_DIR}/render/GLWidget.cpp
+    ${SOURCE_DIR}/render/GLWidgetInteraction.cpp
+    ${SOURCE_DIR}/render/GLWidgetOverlays.cpp
+    ${SOURCE_DIR}/render/GLWidgetPicking.cpp
+    ${SOURCE_DIR}/render/GLWidgetRender.cpp
+    ${SOURCE_DIR}/render/GLWidgetSelection.cpp
+    ${SOURCE_DIR}/render/GLWidgetVisibility.cpp
     ${SOURCE_DIR}/app/window/RenderViewport.cpp
     ${SOURCE_DIR}/rhi/RenderBackendFactory.cpp
     ${SOURCE_DIR}/rhi/RenderSettings.cpp
