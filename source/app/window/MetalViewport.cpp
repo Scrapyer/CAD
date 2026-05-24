@@ -2346,10 +2346,13 @@ void MetalViewport::updateIdLabels()
 
 void MetalViewport::updateFrameStats(qint64 frameNs)
 {
-    frameTimeMs_ = static_cast<float>(frameNs) / 1'000'000.0f;
+    (void)frameNs;
     ++frameCounter_;
-    if (fpsTimer_.elapsed() >= 250) {
-        fps_ = frameCounter_ * 1000.0f / static_cast<float>(fpsTimer_.elapsed());
+    const qint64 elapsedNs = fpsTimer_.nsecsElapsed();
+    if (elapsedNs >= 250'000'000 && frameCounter_ > 0) {
+        fps_ = frameCounter_ * 1'000'000'000.0f / static_cast<float>(elapsedNs);
+        frameTimeMs_ = static_cast<float>(elapsedNs) /
+            (static_cast<float>(frameCounter_) * 1'000'000.0f);
         frameCounter_ = 0;
         fpsTimer_.restart();
     }
