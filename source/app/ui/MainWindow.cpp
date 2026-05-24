@@ -1841,12 +1841,24 @@ void MainWindow::setupToolBar() {
         }
         RenderSettings::setPreferredVulkanDrawStrategy(strategy);
         updateVulkanDrawStrategyMenu();
+        const bool reloadActiveVulkanMesh =
+            renderViewport_ &&
+            renderViewport_->activeRenderBackendKind() == RenderBackendKind::Vulkan;
+        if (reloadActiveVulkanMesh) {
+            pushRenderDataToGL(displayRenderData());
+            reapplyContourIfNeeded();
+            renderViewport_->refresh();
+        }
         if (statusLabel_) {
             const QString suffix = strategy == VulkanDrawStrategy::GpuDrivenIndirect
                 ? QStringLiteral("；运行时失败会自动回退")
                 : QString();
+            const QString reloadSuffix = reloadActiveVulkanMesh
+                ? QStringLiteral("；已重传当前模型")
+                : QString();
             statusLabel_->setText(QStringLiteral("  Vulkan 渲染策略已保存为 %1%2")
-                                      .arg(RenderSettings::vulkanDrawStrategyName(strategy), suffix));
+                                      .arg(RenderSettings::vulkanDrawStrategyName(strategy),
+                                           suffix + reloadSuffix));
         }
     });
     rhiAction_ = new QAction(style()->standardIcon(QStyle::SP_ComputerIcon), "RHI", this);

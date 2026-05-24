@@ -271,7 +271,8 @@ int main(int argc, char** argv)
     uploadOptions.scalarMin = 0.0f;
     uploadOptions.scalarMax = static_cast<float>(uploadOptions.vertexScalars.size() - 1);
     uploadOptions.numBands = 9;
-    if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh")) {
+    RenderSettings::setPreferredVulkanDrawStrategy(VulkanDrawStrategy::Traditional);
+    if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh(traditional)")) {
         return 9;
     }
     for (size_t i = 0; i < uploadOptions.vertexScalars.size(); ++i) {
@@ -286,10 +287,62 @@ int main(int argc, char** argv)
                      backend.lastError().toUtf8().constData());
         return 18;
     }
-    if (!backend.renderMeshFrame()) {
-        std::fprintf(stderr, "renderMeshFrame failed: %s\n",
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::Solid)) {
+        std::fprintf(stderr, "renderMeshFrame(traditional solid) failed: %s\n",
                      backend.lastError().toUtf8().constData());
         return 10;
+    }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::Wireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(traditional wireframe) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 77;
+    }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::SolidWireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(traditional solid wireframe) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 78;
+    }
+    const QString traditionalDiagnostics = backend.renderDiagnostics();
+    if (!traditionalDiagnostics.contains(QStringLiteral("actual=传统"))) {
+        std::fprintf(stderr, "Traditional diagnostics missing active state: %s\n",
+                     traditionalDiagnostics.toUtf8().constData());
+        return 79;
+    }
+    RenderSettings::setPreferredVulkanDrawStrategy(VulkanDrawStrategy::GpuDrivenIndirect);
+    if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh(gpu-driven)")) {
+        return 80;
+    }
+    if (!backend.uploadVertexScalars(uploadOptions.vertexScalars,
+                                     uploadOptions.scalarMin,
+                                     uploadOptions.scalarMax,
+                                     uploadOptions.numBands,
+                                     true)) {
+        std::fprintf(stderr, "uploadVertexScalars(gpu-driven) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 81;
+    }
+    if (!backend.renderMeshFrame()) {
+        std::fprintf(stderr, "renderMeshFrame(gpu-driven) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 82;
     }
     if (!backend.renderMeshFrame(QMatrix4x4(),
                                  0.04f,

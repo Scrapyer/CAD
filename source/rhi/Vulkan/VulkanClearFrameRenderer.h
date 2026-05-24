@@ -138,6 +138,7 @@ private:
                                  VkExtent2D extent,
                                  const VkClearColorValue& clearColor,
                                  const QMatrix4x4& mvp,
+                                 bool useGpuDrivenIndirect,
                                  const QMatrix4x4& axesMvp = QMatrix4x4(),
                                  ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
     bool prepareGpuDrivenVisibilityPass(const VulkanDevice& device);

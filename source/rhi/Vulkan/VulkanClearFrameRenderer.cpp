@@ -1364,6 +1364,7 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
                                  swapchain.extent(),
                                  clearColor,
                                  mvp,
+                                 useGpuDrivenIndirect,
                                  axesMvp,
                                  displayMode)) {
         return false;
@@ -2197,7 +2198,7 @@ bool VulkanClearFrameRenderer::createMeshGraphicsPipeline(const VulkanDevice& de
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = sizeof(VulkanLineVertex);
+    binding.stride = sizeof(VulkanMeshVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     std::array<VkVertexInputAttributeDescription, 3> attributes{};
@@ -2941,14 +2942,14 @@ bool VulkanClearFrameRenderer::createPointGraphicsPipeline(const VulkanDevice& d
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = sizeof(VulkanMeshVertex);
+    binding.stride = sizeof(VulkanLineVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     std::array<VkVertexInputAttributeDescription, 2> attributes{};
     attributes[0].binding = 0;
     attributes[0].location = 0;
     attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributes[0].offset = offsetof(VulkanMeshVertex, position);
+    attributes[0].offset = offsetof(VulkanLineVertex, position);
     attributes[1].binding = 0;
     attributes[1].location = 1;
     attributes[1].format = VK_FORMAT_R32_SFLOAT;
@@ -3750,6 +3751,7 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     VkExtent2D extent,
     const VkClearColorValue& clearColor,
     const QMatrix4x4& mvp,
+    bool useGpuDrivenIndirect,
     const QMatrix4x4& axesMvp,
     ModelDisplayMode displayMode)
 {
@@ -3763,7 +3765,6 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
         return false;
     }
 
-    const bool useGpuDrivenIndirect = shouldUseGpuDrivenIndirect();
     if (useGpuDrivenIndirect) {
         recordGpuDrivenVisibilityPass(commandBuffer);
     }
