@@ -23,9 +23,12 @@ public:
     VulkanPipelineResource background;
     VulkanPipelineResource triangle;
     VulkanPipelineResource mesh;
+    VulkanPipelineResource gpuDrivenMeshV2;
+    VulkanPipelineResource gpuDrivenPointV2;
     VulkanPipelineResource point;
     VulkanPipelineResource isoSurface;
     VulkanPipelineResource line;
     VulkanPipelineResource axes;
     VulkanPipelineResource pick;
+    VulkanPipelineResource gpuDrivenPickV2;
 };

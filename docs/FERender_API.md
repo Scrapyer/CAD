@@ -1127,7 +1127,7 @@ public slots:
 | `glVersion()` | `QString` | OpenGL 版本 |
 | `glslVersion()` | `QString` | GLSL 版本 |
 | `gpuVendor()` | `QString` | GPU 厂商 |
-| `renderDiagnostics()` | `QString` | 当前视口诊断文本；Metal 路径包含 layer 状态、drawable size、DPR 和最近错误 |
+| `renderDiagnostics()` | `QString` | 当前视口诊断文本；Metal 路径包含 layer 状态、drawable size、DPR 和最近错误，Vulkan 路径包含设备、queue compute 能力、GPU-driven actual/fallback 状态、V1/V2 资源计数、V2 surface 启用状态、CPU surface/point 保留数量、fallback/dispatch 次数、frustum culling 状态、可见三角/点/边数量、visibility compute GPU timestamp 耗时和 CPU 侧耗时 |
 | `vertexCount()` | `int` | 当前渲染顶点数 |
 | `triangleCount()` | `int` | 当前渲染三角形数 |
 | `currentFps()` | `float` | 当前帧率 |
@@ -1198,7 +1198,7 @@ void setEdgeScalars(const std::vector<float>& scalars, float minVal, float maxVa
 Vulkan 路径当前实现 `PickMode::Node` / `PickMode::Element` / `PickMode::Part` 的单点拾取、框选添加和点选/框选取消。Metal 路径当前提供基础主网格三角面、普通边线、点显示绘制、云图标量映射、部件颜色/显隐、Node / Element / Part 点选/框选、选中高亮、未变形叠加线框、切片交线、等值面、裁剪/切片平面预览和轨道相机交互。`RenderViewport` 启动时读取全局 RHI 配置并激活对应视口；运行时调用 `setPreferredRenderBackend()` 只写入下次启动的首选 RHI，不再立即销毁/重建当前视口。
 运行时 `VulkanContext` 会优先请求 SDK 和 loader 共同支持的 Vulkan 1.4 API；shader 编译默认使用
 `FERENDER_VULKAN_SHADER_TARGET_ENV=vulkan1.4`，可在老工具链上通过 CMake cache 改为较低 target env。
-Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readback buffer、scalar descriptor/set layout、主视口/拾取 render pass、framebuffer、graphics pipeline / pipeline layout 和 command pool / command buffer 从裸 handle 收敛到独立资源对象；主网格帧录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。Metal 内部资源模型已开始用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer 的 `MTLBuffer` 生命周期，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture 生命周期，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state 生命周期，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MacOSMetalLayerHost` 管理 `QWindow` 到 `NSView/CAMetalLayer` 的宿主配置，`MetalRenderBackend` 只接收已准备好的 layer 和 drawable size，用 `MetalObjectResource` 管理 device、command queue 和 layer 生命周期，用 `MetalShaderSources` 管理运行时 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建。公开 `RenderViewport` API 不暴露这些实现细节。
+Vulkan 内部资源模型已开始把 device-local/staging buffer、动态/readback buffer、scalar descriptor/set layout、主视口/拾取 render pass、framebuffer、graphics pipeline / pipeline layout 和 command pool / command buffer 从裸 handle 收敛到独立资源对象；主网格帧录制已收敛到 `VulkanMeshFramePass`，拾取绘制和 readback barrier/copy 录制已收敛到 `VulkanPickPass`。Vulkan GPU-driven 基础路径已新增内部 `VulkanGpuDrivenMeshResources`、`VulkanGpuDrivenUploadBuilder`、`VulkanGpuDrivenMeshUploader`、`VulkanVisibilityComputePass` 和 `VulkanGpuDrivenRuntimeStats`，默认 Vulkan 绘制策略会由 compute pass 生成可见三角 index buffer、可见 edge index buffer 与 indirect command，并通过 `vkCmdDrawIndexedIndirect` 绘制主三角面、点模式和具备 edge metadata 的 Wireframe/SolidWireframe 边线；pick pass 也可复用同一份 GPU-driven visible index buffer 和 indirect command 绘制到离屏 pick framebuffer；GPU-driven surface 已支持 V2 source-vertex sidecar、V2 visibility compute variant、无 vertex input 的 V2 mesh/point/pick pipeline，启用时 visible index buffer 输出 draw-corner id，vertex shader 再从 triangle metadata 反查 source vertex，从而避免 surface 顶点按三角形展开；V2 点模式会在 Points 模式下由 compute pass 通过 source-vertex flag 去重，输出独立 visible point index buffer 和 point indirect command，用 unique visible source vertex 绘制点，非 Points 模式不生成 visible point list；V2 默认上传路径会跳过 V1 展开 surface 资源、传统 mesh surface 资源和 CPU point buffer，并支持通过 V2 source vertex cache 更新云图 scalar；若 V2 sidecar、descriptor 或 pipeline 不完整会保留 V1 GPU-driven 路径。part state、hidden element 和 visibility uniform 已支持内部小 buffer 更新，每帧会从 MVP 写入 frustum planes 供 compute pass 做 AABB 剔除，不需要重传完整 vertex/triangle/edge metadata；compute 后会把 indirect command 复制到 host-visible readback buffer 以记录可见三角/点/边数量，并在设备支持时用 timestamp query 记录 visibility compute GPU 耗时；`VulkanViewport` 在 `Solid` / `Points` 以及具备 surface+edge 数据的 `Wireframe` / `SolidWireframe` 显示模式下可走该热路径，线框-only、缺少 surface metadata、graphics queue 不支持 compute 或 shader/pipeline/descriptor 创建失败时会回退传统过滤资源；诊断字符串会显示 requested/effective/actual 策略、GPU-driven 计数、sourceV2/v2 状态、CPU surface/point 保留数量、fallback 原因、fallback 次数、visibility dispatch 次数、frustum culling 状态、可见三角/点/边数量、visibility compute GPU timestamp 耗时和 CPU 侧 upload/update/render/pick 耗时；该路径仍不作为公开 API 暴露，用户界面默认选择 GPU-driven，并保留 Traditional 作为手动兼容回退。Metal 内部资源模型已开始用 `MetalBufferResource` 管理主网格、普通边线、点显示、overlay、slice、selection、坐标轴、等值面、裁剪预览和 pick readback buffer 的 `MTLBuffer` 生命周期，用 `MetalTextureResource` 管理主 depth 与 pick color/depth texture 生命周期，用 `MetalStateResource` 管理 pipeline 和 depth-stencil state 生命周期，用 `MetalDeviceFactory` 管理系统默认 device、command queue 和 backend info 创建，用 `MacOSMetalLayerHost` 管理 `QWindow` 到 `NSView/CAMetalLayer` 的宿主配置，`MetalRenderBackend` 只接收已准备好的 layer 和 drawable size，用 `MetalObjectResource` 管理 device、command queue 和 layer 生命周期，用 `MetalShaderSources` 管理运行时 MSL 源码，用 `MetalShaderTypes` 管理 C++/MSL 共享布局，用 `MetalPipelineFactory` 管理 shader 编译和 render pipeline 创建与资源确保，用 `MetalRenderPassFactory` 管理 render pass descriptor 创建，用 `MetalUniformUtils` 管理 uniform 构建，用 `MetalPickUtils` 管理 pick 颜色编解码和 readback 读取，用 `MetalMeshUploadBuilder` 管理 mesh 上传数据构建，用 `MetalMeshUploader` 管理主 mesh/point/edge buffer 上传和计数同步，用 `MetalMeshScalarUpdater` 管理 mesh scalar 局部更新，用 `MetalSurfaceUploadBuilder` 管理等值面/裁剪预览上传数据构建，用 `MetalSurfaceUploader` 管理等值面/裁剪预览 buffer 上传和计数同步，用 `MetalLineUpload` 管理动态线段上传，用 `MetalClearFramePass` 管理 clear/present 提交，用 `MetalDrawableFrameSubmitter` 管理主 drawable frame 提交，用 `MetalMeshFramePassBuilder` 管理主视口 draw pass 输入组装，用 `MetalMeshFramePass` 管理主视口 draw 录制，用 `MetalPickPassBuilder` 管理离屏拾取 pass 输入组装，用 `MetalPickPass` 管理离屏拾取 draw/readback 录制，并用 `MetalDepthStencilFactory` 管理 depth-stencil state 创建。公开 `RenderViewport` API 不暴露这些实现细节。
 
 信号：
 
@@ -1215,7 +1215,7 @@ void contextMenuRequested(const QPoint& globalPos);
 
 **头文件**：`RenderBackend.h`、`RenderBackendFactory.h`、`RenderSettings.h`
 
-使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。`RenderBackendKind` 当前包含 `OpenGL`、`Vulkan`、`Metal`；Metal 后端在 macOS 构建中会探测默认 `MTLDevice`，创建 command queue，并通过 `CAMetalLayer` 执行基础 clear/present、渐变背景、深度测试、主网格三角面、普通边线、点绘制、云图标量映射、部件颜色/显隐、Node/Element/Part 点选/框选、选中高亮、叠加线框、切片交线、等值面、裁剪预览、左下角坐标轴和轨道相机交互。
+使用应用目录下的 `config/settings.ini` 持久化用户首选 RHI 与 Vulkan 绘制策略；启动时读取，运行时写入后下次启动生效。测试或特殊部署可通过环境变量 `FEMODELVIEWER_CONFIG_DIR` 指定配置目录。`RenderBackendKind` 当前包含 `OpenGL`、`Vulkan`、`Metal`；`VulkanDrawStrategy` 当前公开 `Traditional`、`GpuDrivenIndirect`、`MeshShader`，其中 `GpuDrivenIndirect` 为默认 Vulkan 绘制策略并支持运行时 fallback，`Traditional` 保留为兼容回退路径，`MeshShader` 仍作为 UI/配置预留。旧配置中没有 `vulkanDrawStrategyVersion` 的 `traditional` 会迁移为 `gpu_driven_indirect`；迁移后用户仍可手动选择 Traditional。Metal 后端在 macOS 构建中会探测默认 `MTLDevice`，创建 command queue，并通过 `CAMetalLayer` 执行基础 clear/present、渐变背景、深度测试、主网格三角面、普通边线、点绘制、云图标量映射、部件颜色/显隐、Node/Element/Part 点选/框选、选中高亮、叠加线框、切片交线、等值面、裁剪预览、左下角坐标轴和轨道相机交互。
 
 `RenderBackend.h` 公开 `RenderBackendInfo`、`RenderBackendKind`、`ModelDisplayMode`、`StandardView`、`IRenderBackend` 和 scene pass 描述结构。`IRenderBackend` 是后端最小生命周期边界，目前暴露 `initialize()` 和 `info()`；OpenGL 完整模型绘制由 `OpenGLRenderBackend` 实现，Vulkan/Metal 可沿同一边界接入。`ModelDisplayMode` 取值为 `Solid`、`Wireframe`、`SolidWireframe`、`Points`，由 `GLWidget` 和 `RenderViewport` 统一接收并转发到当前 OpenGL、Vulkan 或 Metal 视口。`StandardView` 取值为 `Front`、`Back`、`Left`、`Right`、`Top`、`Bottom`，用于标准方向视图切换。
 
@@ -1241,8 +1241,24 @@ public:
     static QString backendKey(RenderBackendKind kind);
     static RenderBackendKind backendFromKey(const QString& key,
                                             RenderBackendKind fallback = RenderBackendKind::OpenGL);
+
+    static VulkanDrawStrategy preferredVulkanDrawStrategy();
+    static void setPreferredVulkanDrawStrategy(VulkanDrawStrategy strategy);
+    static VulkanDrawStrategy effectiveVulkanDrawStrategy();
+    static bool isVulkanDrawStrategyAvailable(VulkanDrawStrategy strategy);
+    static QString vulkanDrawStrategyKey(VulkanDrawStrategy strategy);
+    static VulkanDrawStrategy vulkanDrawStrategyFromKey(
+        const QString& key,
+        VulkanDrawStrategy fallback = VulkanDrawStrategy::Traditional);
+    static QString vulkanDrawStrategyName(VulkanDrawStrategy strategy);
 };
 ```
+
+| Vulkan 绘制策略 | 配置值 | 当前状态 |
+|-----------------|--------|----------|
+| `Traditional` | `traditional` | 可用，兼容 Vulkan 路径，可手动选择用于回退验证 |
+| `GpuDrivenIndirect` | `gpu_driven_indirect` | 默认 Vulkan 路径；内部基础路径已覆盖三角面、点、边线和拾取，运行时能力不足会回退 |
+| `MeshShader` | `mesh_shader` | UI 中显示为实验预留，暂不可启用 |
 
 | 方法 | 说明 |
 |------|------|
@@ -1251,6 +1267,8 @@ public:
 | `effectiveBackend()` | 首选 RHI 已编译可用时返回首选，否则回退 OpenGL |
 | `backendKey(kind)` | 转换为稳定配置字符串：`"opengl"` / `"vulkan"` / `"metal"` |
 | `backendFromKey(key, fallback)` | 从配置字符串解析 RHI，支持 `gl` / `vk` / `mtl` 简写 |
+| `preferredVulkanDrawStrategy()` | 从 `config/settings.ini` 读取 Vulkan 绘制策略；未配置或旧版默认 `traditional` 时迁移为 `GpuDrivenIndirect` |
+| `effectiveVulkanDrawStrategy()` | 配置层返回当前可选择的 Vulkan 绘制策略；运行时资源或能力不足仍会回退传统路径 |
 
 ---
 

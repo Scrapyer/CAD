@@ -229,6 +229,7 @@ set(RENDER_INCLUDE_DIRS
     ${SOURCE_DIR}/rhi/OpenGL
     ${SOURCE_DIR}/rhi/Metal
     ${SOURCE_DIR}/rhi/Vulkan
+    ${SOURCE_DIR}/rhi/Vulkan/gpu_driven
     ${SOURCE_DIR}/render
 )
 
@@ -357,6 +358,10 @@ if(FERENDER_HAS_VULKAN_RHI)
         ${SOURCE_DIR}/rhi/Vulkan/VulkanSurface.cpp
         ${SOURCE_DIR}/rhi/Vulkan/VulkanSwapchain.cpp
         ${SOURCE_DIR}/rhi/Vulkan/VulkanSwapchainFrameResources.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/gpu_driven/VulkanGpuDrivenMeshResources.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/gpu_driven/VulkanGpuDrivenMeshUploader.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/gpu_driven/VulkanGpuDrivenUploadBuilder.cpp
+        ${SOURCE_DIR}/rhi/Vulkan/gpu_driven/VulkanVisibilityComputePass.cpp
     )
     if(APPLE)
         list(APPEND RENDER_SOURCES
@@ -444,6 +449,11 @@ if(FERENDER_HAS_VULKAN_RHI)
         set(VULKAN_AXES_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_axes.frag.spv")
         set(VULKAN_PICK_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_pick.vert.spv")
         set(VULKAN_PICK_FRAG_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_pick.frag.spv")
+        set(VULKAN_VISIBILITY_COMP_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_visibility.comp.spv")
+        set(VULKAN_VISIBILITY_V2_COMP_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_visibility_v2.comp.spv")
+        set(VULKAN_GPU_DRIVEN_MESH_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_gpu_driven_mesh.vert.spv")
+        set(VULKAN_GPU_DRIVEN_POINT_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_gpu_driven_point.vert.spv")
+        set(VULKAN_GPU_DRIVEN_PICK_VERT_SPV "${VULKAN_SHADER_BINARY_DIR}/vulkan_gpu_driven_pick.vert.spv")
 
         add_custom_command(
             OUTPUT "${VULKAN_BACKGROUND_VERT_SPV}"
@@ -571,6 +581,51 @@ if(FERENDER_HAS_VULKAN_RHI)
             DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_pick.frag"
             VERBATIM
         )
+        add_custom_command(
+            OUTPUT "${VULKAN_VISIBILITY_COMP_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_visibility.comp"
+                    -o "${VULKAN_VISIBILITY_COMP_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_visibility.comp"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${VULKAN_VISIBILITY_V2_COMP_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_visibility_v2.comp"
+                    -o "${VULKAN_VISIBILITY_V2_COMP_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_visibility_v2.comp"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${VULKAN_GPU_DRIVEN_MESH_VERT_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_gpu_driven_mesh.vert"
+                    -o "${VULKAN_GPU_DRIVEN_MESH_VERT_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_gpu_driven_mesh.vert"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${VULKAN_GPU_DRIVEN_PICK_VERT_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_gpu_driven_pick.vert"
+                    -o "${VULKAN_GPU_DRIVEN_PICK_VERT_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_gpu_driven_pick.vert"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${VULKAN_GPU_DRIVEN_POINT_VERT_SPV}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_BINARY_DIR}"
+            COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "--target-env=${FERENDER_VULKAN_SHADER_TARGET_ENV}"
+                    "${VULKAN_SHADER_SOURCE_DIR}/vulkan_gpu_driven_point.vert"
+                    -o "${VULKAN_GPU_DRIVEN_POINT_VERT_SPV}"
+            DEPENDS "${VULKAN_SHADER_SOURCE_DIR}/vulkan_gpu_driven_point.vert"
+            VERBATIM
+        )
         add_custom_target(FERenderVulkanShaders
             DEPENDS
                 "${VULKAN_BACKGROUND_VERT_SPV}"
@@ -587,6 +642,11 @@ if(FERENDER_HAS_VULKAN_RHI)
                 "${VULKAN_AXES_FRAG_SPV}"
                 "${VULKAN_PICK_VERT_SPV}"
                 "${VULKAN_PICK_FRAG_SPV}"
+                "${VULKAN_VISIBILITY_COMP_SPV}"
+                "${VULKAN_VISIBILITY_V2_COMP_SPV}"
+                "${VULKAN_GPU_DRIVEN_MESH_VERT_SPV}"
+                "${VULKAN_GPU_DRIVEN_POINT_VERT_SPV}"
+                "${VULKAN_GPU_DRIVEN_PICK_VERT_SPV}"
         )
         add_dependencies(FERender FERenderVulkanShaders)
         target_compile_definitions(FERender PRIVATE
@@ -852,6 +912,23 @@ if(BUILD_TESTING)
         )
     endif()
 
+    if(FERENDER_HAS_VULKAN_RHI)
+        add_executable(test_vulkan_gpu_driven_upload_builder
+            tests/test_vulkan_gpu_driven_upload_builder.cpp
+        )
+        target_include_directories(test_vulkan_gpu_driven_upload_builder PRIVATE
+            ${SOURCE_DIR}/rhi
+            ${SOURCE_DIR}/rhi/Vulkan
+            ${SOURCE_DIR}/rhi/Vulkan/gpu_driven
+            ${SOURCE_DIR}/render
+        )
+        target_compile_definitions(test_vulkan_gpu_driven_upload_builder PRIVATE FERENDER_HAS_VULKAN_RHI=1)
+        target_link_libraries(test_vulkan_gpu_driven_upload_builder PRIVATE FERender Vulkan::Vulkan Qt6::Gui)
+        add_test(NAME vulkan_gpu_driven_upload_builder
+            COMMAND test_vulkan_gpu_driven_upload_builder
+        )
+    endif()
+
     if(FERENDER_HAS_VULKAN_RHI AND APPLE)
         add_executable(test_macos_vulkan_surface
             tests/test_macos_vulkan_surface.cpp
@@ -874,6 +951,60 @@ if(BUILD_TESTING)
         add_test(NAME macos_vulkan_surface
             COMMAND test_macos_vulkan_surface
         )
+        add_executable(benchmark_vulkan_gpu_driven
+            tests/benchmark_vulkan_gpu_driven.cpp
+        )
+        target_include_directories(benchmark_vulkan_gpu_driven PRIVATE
+            ${SOURCE_DIR}/rhi
+        )
+        target_compile_definitions(benchmark_vulkan_gpu_driven PRIVATE
+            FERENDER_HAS_VULKAN_RHI=1
+            FERENDER_HAS_MACOS_VULKAN_SURFACE=1
+        )
+        if(FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE)
+            target_compile_definitions(benchmark_vulkan_gpu_driven PRIVATE
+                FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE=1
+            )
+        endif()
+        target_link_libraries(benchmark_vulkan_gpu_driven PRIVATE
+            FERender Vulkan::Vulkan Qt6::Gui
+        )
+        if(FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE)
+            add_executable(soak_vulkan_gpu_driven
+                tests/soak_vulkan_gpu_driven.cpp
+            )
+            target_include_directories(soak_vulkan_gpu_driven PRIVATE
+                ${SOURCE_DIR}/rhi
+            )
+            target_compile_definitions(soak_vulkan_gpu_driven PRIVATE
+                FERENDER_HAS_VULKAN_RHI=1
+                FERENDER_HAS_MACOS_VULKAN_SURFACE=1
+                FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE=1
+            )
+            target_link_libraries(soak_vulkan_gpu_driven PRIVATE
+                FERender Vulkan::Vulkan Qt6::Gui
+            )
+            add_executable(test_vulkan_gpu_driven_stress
+                tests/test_vulkan_gpu_driven_stress.cpp
+            )
+            target_include_directories(test_vulkan_gpu_driven_stress PRIVATE
+                ${SOURCE_DIR}/rhi
+            )
+            target_compile_definitions(test_vulkan_gpu_driven_stress PRIVATE
+                FERENDER_HAS_VULKAN_RHI=1
+                FERENDER_HAS_MACOS_VULKAN_SURFACE=1
+                FERENDER_HAS_VULKAN_TRIANGLE_PIPELINE=1
+            )
+            target_link_libraries(test_vulkan_gpu_driven_stress PRIVATE
+                FERender Vulkan::Vulkan Qt6::Gui
+            )
+            add_test(NAME vulkan_gpu_driven_stress
+                COMMAND test_vulkan_gpu_driven_stress
+            )
+            set_tests_properties(vulkan_gpu_driven_stress PROPERTIES
+                DEPENDS macos_vulkan_surface
+            )
+        endif()
         set_tests_properties(render_backend_factory PROPERTIES
             DEPENDS macos_vulkan_surface
         )

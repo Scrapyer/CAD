@@ -9,17 +9,36 @@ bool VulkanDescriptorResource::createStorageBufferSet(const VulkanDevice& device
                                                       VkDeviceSize range,
                                                       QString& lastError)
 {
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = range;
+    return createStorageBufferSet(device, layout, std::vector<VkDescriptorBufferInfo>{bufferInfo}, lastError);
+}
+
+bool VulkanDescriptorResource::createStorageBufferSet(
+    const VulkanDevice& device,
+    VkDescriptorSetLayout layout,
+    const std::vector<VkDescriptorBufferInfo>& buffers,
+    QString& lastError)
+{
     VkDevice vkDevice = device.device();
-    if (vkDevice == VK_NULL_HANDLE || layout == VK_NULL_HANDLE || buffer == VK_NULL_HANDLE) {
+    if (vkDevice == VK_NULL_HANDLE || layout == VK_NULL_HANDLE || buffers.empty()) {
         lastError = QStringLiteral("Vulkan descriptor input is not initialized");
         return false;
+    }
+    for (const VkDescriptorBufferInfo& buffer : buffers) {
+        if (buffer.buffer == VK_NULL_HANDLE || buffer.range == 0) {
+            lastError = QStringLiteral("Vulkan descriptor buffer input is not initialized");
+            return false;
+        }
     }
 
     destroy(device);
 
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSize.descriptorCount = 1;
+    poolSize.descriptorCount = static_cast<uint32_t>(buffers.size());
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -29,7 +48,7 @@ bool VulkanDescriptorResource::createStorageBufferSet(const VulkanDevice& device
 
     VkResult result = vkCreateDescriptorPool(vkDevice, &poolInfo, nullptr, &descriptorPool_);
     if (result != VK_SUCCESS) {
-        lastError = QStringLiteral("vkCreateDescriptorPool(storage buffer) failed: ") +
+        lastError = QStringLiteral("vkCreateDescriptorPool(storage buffers) failed: ") +
             VulkanContext::formatResult(result);
         return false;
     }
@@ -42,26 +61,26 @@ bool VulkanDescriptorResource::createStorageBufferSet(const VulkanDevice& device
 
     result = vkAllocateDescriptorSets(vkDevice, &allocInfo, &descriptorSet_);
     if (result != VK_SUCCESS) {
-        lastError = QStringLiteral("vkAllocateDescriptorSets(storage buffer) failed: ") +
+        lastError = QStringLiteral("vkAllocateDescriptorSets(storage buffers) failed: ") +
             VulkanContext::formatResult(result);
         return false;
     }
 
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = buffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = range;
-
-    VkWriteDescriptorSet descriptorWrite{};
-    descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrite.dstSet = descriptorSet_;
-    descriptorWrite.dstBinding = 0;
-    descriptorWrite.dstArrayElement = 0;
-    descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    descriptorWrite.descriptorCount = 1;
-    descriptorWrite.pBufferInfo = &bufferInfo;
-
-    vkUpdateDescriptorSets(vkDevice, 1, &descriptorWrite, 0, nullptr);
+    std::vector<VkWriteDescriptorSet> descriptorWrites(buffers.size());
+    for (size_t i = 0; i < descriptorWrites.size(); ++i) {
+        descriptorWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[i].dstSet = descriptorSet_;
+        descriptorWrites[i].dstBinding = static_cast<uint32_t>(i);
+        descriptorWrites[i].dstArrayElement = 0;
+        descriptorWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        descriptorWrites[i].descriptorCount = 1;
+        descriptorWrites[i].pBufferInfo = &buffers[i];
+    }
+    vkUpdateDescriptorSets(vkDevice,
+                           static_cast<uint32_t>(descriptorWrites.size()),
+                           descriptorWrites.data(),
+                           0,
+                           nullptr);
     return true;
 }
 

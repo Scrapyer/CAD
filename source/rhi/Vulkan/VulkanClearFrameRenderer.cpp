@@ -2,13 +2,18 @@
 
 #include "VulkanContext.h"
 #include "VulkanDevice.h"
+#include "VulkanGpuDrivenMeshUploader.h"
+#include "VulkanGpuDrivenUploadBuilder.h"
 #include "VulkanMeshFramePass.h"
 #include "VulkanPickPass.h"
 #include "VulkanRenderBackend.h"
+#include "RenderSettings.h"
 #include "VulkanStagingUploadContext.h"
 #include "VulkanSwapchain.h"
 #include "Geometry.h"
 
+#include <QByteArray>
+#include <QElapsedTimer>
 #include <QFile>
 
 #include <algorithm>
@@ -22,6 +27,81 @@ namespace {
 constexpr size_t kMaxInteractiveEdgeIndices = 8000000;
 constexpr uint32_t kAxesViewportSize = 192;
 constexpr float kPi = 3.14159265358979323846f;
+constexpr const char* kDisableGpuDrivenV2Env = "FEMODELVIEWER_VULKAN_GPU_DRIVEN_DISABLE_V2";
+
+class ScopedCpuTimer {
+public:
+    explicit ScopedCpuTimer(double& targetMs)
+        : targetMs_(targetMs)
+    {
+        timer_.start();
+    }
+
+    ~ScopedCpuTimer()
+    {
+        targetMs_ = static_cast<double>(timer_.nsecsElapsed()) / 1000000.0;
+    }
+
+private:
+    double& targetMs_;
+    QElapsedTimer timer_;
+};
+
+void writeNormalizedPlane(float target[4], float a, float b, float c, float d)
+{
+    const float len2 = a * a + b * b + c * c;
+    if (len2 <= 1.0e-12f) {
+        target[0] = a;
+        target[1] = b;
+        target[2] = c;
+        target[3] = d;
+        return;
+    }
+    const float invLen = 1.0f / std::sqrt(len2);
+    target[0] = a * invLen;
+    target[1] = b * invLen;
+    target[2] = c * invLen;
+    target[3] = d * invLen;
+}
+
+void writeFrustumPlanes(const QMatrix4x4& mvp, VulkanGpuDrivenVisibilityUniforms& uniforms)
+{
+    auto m = [&mvp](int row, int column) {
+        return mvp(row, column);
+    };
+
+    // 从 clip 矩阵行组合提取世界/模型空间视锥平面，供 compute pass 做 AABB 剔除。
+    writeNormalizedPlane(uniforms.frustumPlanes[0],
+                         m(3, 0) + m(0, 0),
+                         m(3, 1) + m(0, 1),
+                         m(3, 2) + m(0, 2),
+                         m(3, 3) + m(0, 3));
+    writeNormalizedPlane(uniforms.frustumPlanes[1],
+                         m(3, 0) - m(0, 0),
+                         m(3, 1) - m(0, 1),
+                         m(3, 2) - m(0, 2),
+                         m(3, 3) - m(0, 3));
+    writeNormalizedPlane(uniforms.frustumPlanes[2],
+                         m(3, 0) + m(1, 0),
+                         m(3, 1) + m(1, 1),
+                         m(3, 2) + m(1, 2),
+                         m(3, 3) + m(1, 3));
+    writeNormalizedPlane(uniforms.frustumPlanes[3],
+                         m(3, 0) - m(1, 0),
+                         m(3, 1) - m(1, 1),
+                         m(3, 2) - m(1, 2),
+                         m(3, 3) - m(1, 3));
+    writeNormalizedPlane(uniforms.frustumPlanes[4],
+                         m(3, 0) + m(2, 0),
+                         m(3, 1) + m(2, 1),
+                         m(3, 2) + m(2, 2),
+                         m(3, 3) + m(2, 3));
+    writeNormalizedPlane(uniforms.frustumPlanes[5],
+                         m(3, 0) - m(2, 0),
+                         m(3, 1) - m(2, 1),
+                         m(3, 2) - m(2, 2),
+                         m(3, 3) - m(2, 3));
+}
 
 struct VulkanMeshVertex {
     float position[3];
@@ -198,6 +278,12 @@ bool isElementVisible(const VulkanMeshUploadOptions& options, int elementId)
     return elementId < 0 || options.hiddenElementIds.count(elementId) == 0;
 }
 
+bool isGpuDrivenSurfaceV2Disabled()
+{
+    QByteArray value = qgetenv(kDisableGpuDrivenV2Env).trimmed().toLower();
+    return value == "1" || value == "true" || value == "yes" || value == "on";
+}
+
 QVector3D triangleColor(const VulkanMeshUploadOptions& options, int part)
 {
     if (part >= 0 && part < static_cast<int>(options.partColors.size())) {
@@ -249,13 +335,17 @@ bool VulkanClearFrameRenderer::initialize(const VulkanDevice& device, const Vulk
            createBackgroundGraphicsPipeline(device) &&
            createGraphicsPipeline(device) &&
            createMeshGraphicsPipeline(device) &&
+           createGpuDrivenSurfaceDescriptorLayout(device) &&
+           createGpuDrivenMeshGraphicsPipeline(device) &&
            createPointGraphicsPipeline(device) &&
+           createGpuDrivenPointGraphicsPipeline(device) &&
            createIsoSurfaceGraphicsPipeline(device) &&
            createLineGraphicsPipeline(device) &&
            createAxesGraphicsPipeline(device) &&
            createAxesIndicatorResource(device) &&
            createPickRenderPass(device) &&
            createPickGraphicsPipeline(device) &&
+           createGpuDrivenPickGraphicsPipeline(device) &&
            createDepthResources(device, swapchain) &&
            createFramebuffers(device, swapchain) &&
            createCommandPool(device) &&
@@ -268,6 +358,8 @@ void VulkanClearFrameRenderer::destroy(const VulkanDevice& device)
     if (vkDevice == VK_NULL_HANDLE) {
         return;
     }
+
+    vkDeviceWaitIdle(vkDevice);
 
     if (inFlightFence_ != VK_NULL_HANDLE) {
         vkDestroyFence(vkDevice, inFlightFence_, nullptr);
@@ -282,11 +374,19 @@ void VulkanClearFrameRenderer::destroy(const VulkanDevice& device)
         imageAvailableSemaphore_ = VK_NULL_HANDLE;
     }
     commandResource_.destroy(device);
+    if (gpuDrivenTimestampQueryPool_ != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(vkDevice, gpuDrivenTimestampQueryPool_, nullptr);
+        gpuDrivenTimestampQueryPool_ = VK_NULL_HANDLE;
+    }
+    gpuDrivenTimestampQueryPending_ = false;
+    gpuDrivenReadbackPending_ = false;
+    visibilityComputePass_.destroy(device);
     pickResources_.destroy(device);
     swapchainFrameResources_.destroy(device);
     depthResource_.destroy(device);
     depthFormat_ = VK_FORMAT_UNDEFINED;
     pipelines_.destroy(device);
+    gpuDrivenSurfaceSetLayout_.destroy(device);
     meshScalarSetLayout_.destroy(device);
     destroyMeshBuffers(device);
     destroyIsoSurfaceBuffers(device);
@@ -317,7 +417,9 @@ bool VulkanClearFrameRenderer::renderClearFrame(
     }
 
     VkDevice vkDevice = device.device();
-    vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+    if (!waitForInFlightAndCollectGpuDrivenStats(device, "clear frame")) {
+        return false;
+    }
 
     uint32_t imageIndex = 0;
     if (!acquireSwapchainImage(device, swapchain, imageIndex)) {
@@ -380,7 +482,9 @@ bool VulkanClearFrameRenderer::renderTriangleFrame(
     }
 
     VkDevice vkDevice = device.device();
-    vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+    if (!waitForInFlightAndCollectGpuDrivenStats(device, "triangle frame")) {
+        return false;
+    }
 
     uint32_t imageIndex = 0;
     if (!acquireSwapchainImage(device, swapchain, imageIndex)) {
@@ -434,6 +538,8 @@ bool VulkanClearFrameRenderer::uploadMesh(
     const VulkanMeshUploadOptions& options)
 {
     lastError_.clear();
+    ++gpuDrivenStats_.uploadMeshCount;
+    ScopedCpuTimer uploadTimer(gpuDrivenStats_.lastUploadMeshMs);
     vkDeviceWaitIdle(device.device());
     destroyMeshBuffers(device);
 
@@ -441,6 +547,20 @@ bool VulkanClearFrameRenderer::uploadMesh(
         !mesh.vertices.empty() && !mesh.indices.empty() && mesh.vertices.size() % 6 == 0;
     const bool hasEdgeMesh =
         !mesh.edgeVertices.empty() && !mesh.edgeIndices.empty() && mesh.edgeVertices.size() % 3 == 0;
+    gpuDrivenRequestedForMesh_ =
+        RenderSettings::effectiveVulkanDrawStrategy() == VulkanDrawStrategy::GpuDrivenIndirect;
+    gpuDrivenActive_ = false;
+    gpuDrivenUseSurfaceV2_ = false;
+    gpuDrivenUseVertexColor_ = options.useVertexColor && !options.vertexColors.empty();
+    gpuDrivenPointOutputEnabled_ = false;
+    gpuDrivenFallbackReason_.clear();
+    gpuDrivenStats_.requested = gpuDrivenRequestedForMesh_;
+    gpuDrivenStats_.active = false;
+    gpuDrivenStats_.lastMeshFrameGpuDriven = false;
+    gpuDrivenStats_.lastPickFrameGpuDriven = false;
+    gpuDrivenStats_.lastPickElementGpuDriven = false;
+    gpuDrivenStats_.lastFallbackReason.clear();
+    gpuDrivenStats_.lastGpuDrivenUploadMs = 0.0;
     if (!hasSurfaceMesh && !hasEdgeMesh) {
         return true;
     }
@@ -465,7 +585,109 @@ bool VulkanClearFrameRenderer::uploadMesh(
     std::vector<unsigned char> visiblePointVertices(sourceVertexCount, 0);
     std::vector<float> expandedScalars;
     meshResources_.meshScalarSourceIndices.clear();
-    if (hasSurfaceMesh) {
+    gpuDrivenSourceVertexCpuCache_.clear();
+    QString gpuDrivenUnavailableReason;
+    const bool prepareGpuDrivenMesh =
+        gpuDrivenRequestedForMesh_ &&
+        canUseGpuDrivenIndirect(device, hasSurfaceMesh, gpuDrivenUnavailableReason);
+    const bool preferGpuDrivenSurfaceV2 =
+        prepareGpuDrivenMesh &&
+        !isGpuDrivenSurfaceV2Disabled() &&
+        pipelines_.gpuDrivenMeshV2.isValid() &&
+        pipelines_.gpuDrivenPointV2.isValid() &&
+        pipelines_.gpuDrivenPickV2.isValid();
+    if (gpuDrivenRequestedForMesh_ && !prepareGpuDrivenMesh) {
+        setGpuDrivenFallback(gpuDrivenUnavailableReason);
+    }
+
+    VulkanGpuDrivenUploadData gpuDrivenUploadData;
+    VulkanGpuDrivenUploadV2Data gpuDrivenUploadV2Data;
+    if (prepareGpuDrivenMesh) {
+        if (preferGpuDrivenSurfaceV2) {
+            gpuDrivenUploadV2Data = buildVulkanGpuDrivenUploadV2Data(mesh, options);
+            gpuDrivenSourceVertexCpuCache_ = gpuDrivenUploadV2Data.sourceVertices;
+        } else {
+            gpuDrivenUploadData = buildVulkanGpuDrivenUploadData(mesh, options);
+        }
+    }
+
+    if (prepareGpuDrivenMesh) {
+        ScopedCpuTimer gpuUploadTimer(gpuDrivenStats_.lastGpuDrivenUploadMs);
+        VulkanStagingUploadContext gpuDrivenUploadContext;
+        bool gpuDrivenUploadOk = false;
+        if (preferGpuDrivenSurfaceV2) {
+            gpuDrivenUploadOk = uploadVulkanGpuDrivenMeshV2Resources(device,
+                                                                     gpuDrivenMeshResources_,
+                                                                     gpuDrivenUploadContext,
+                                                                     gpuDrivenUploadV2Data,
+                                                                     lastError_);
+        } else {
+            gpuDrivenUploadOk = uploadVulkanGpuDrivenMeshResources(device,
+                                                                   gpuDrivenMeshResources_,
+                                                                   gpuDrivenUploadContext,
+                                                                   gpuDrivenUploadData,
+                                                                   meshScalarSetLayout_.handle(),
+                                                                   true,
+                                                                   lastError_);
+        }
+
+        if (!gpuDrivenUploadOk) {
+            const QString reason = lastError_;
+            gpuDrivenUploadContext.discard(device);
+            gpuDrivenMeshResources_.destroy(device);
+            gpuDrivenSourceVertexCpuCache_.clear();
+            setGpuDrivenFallback(QStringLiteral("GPU-driven mesh upload failed: %1").arg(reason));
+            lastError_.clear();
+        } else if (!gpuDrivenUploadContext.submit(device,
+                                                  commandResource_.pool(),
+                                                  device.graphicsQueue(),
+                                                  lastError_)) {
+            const QString reason = lastError_;
+            gpuDrivenMeshResources_.destroy(device);
+            gpuDrivenSourceVertexCpuCache_.clear();
+            setGpuDrivenFallback(QStringLiteral("GPU-driven staging submit failed: %1").arg(reason));
+            lastError_.clear();
+        } else {
+            gpuDrivenVisibilityDescriptorDirty_ = true;
+            if (!gpuDrivenMeshResources_.isReady()) {
+                gpuDrivenSourceVertexCpuCache_.clear();
+                setGpuDrivenFallback(QStringLiteral("GPU-driven metadata is empty"));
+            } else {
+                if (gpuDrivenMeshResources_.hasV2Sidecar() &&
+                    preferGpuDrivenSurfaceV2 &&
+                    pipelines_.gpuDrivenMeshV2.isValid() &&
+                    pipelines_.gpuDrivenPointV2.isValid() &&
+                    pipelines_.gpuDrivenPickV2.isValid() &&
+                    createGpuDrivenSurfaceDescriptor(device)) {
+                    gpuDrivenUseSurfaceV2_ = true;
+                } else {
+                    gpuDrivenUseSurfaceV2_ = false;
+                    gpuDrivenSourceVertexCpuCache_.clear();
+                    lastError_.clear();
+                }
+
+                if (gpuDrivenUseSurfaceV2_ && !prepareGpuDrivenVisibilityPass(device)) {
+                    gpuDrivenUseSurfaceV2_ = false;
+                    gpuDrivenSourceVertexCpuCache_.clear();
+                    gpuDrivenVisibilityDescriptorDirty_ = true;
+                    lastError_.clear();
+                }
+                if (!prepareGpuDrivenVisibilityPass(device)) {
+                    const QString reason = lastError_;
+                    setGpuDrivenFallback(QStringLiteral("GPU-driven visibility pass unavailable: %1").arg(reason));
+                    lastError_.clear();
+                } else {
+                    gpuDrivenActive_ = true;
+                    gpuDrivenFallbackReason_.clear();
+                    gpuDrivenStats_.active = true;
+                    syncGpuDrivenStatsFromResources();
+                }
+            }
+        }
+    }
+
+    const bool skipTraditionalSurface = gpuDrivenUseSurfaceV2_;
+    if (hasSurfaceMesh && !skipTraditionalSurface) {
         vertices.reserve(triangleCount * 3);
         indices.reserve(triangleCount * 3);
         expandedScalars.reserve(triangleCount * 3);
@@ -515,11 +737,32 @@ bool VulkanClearFrameRenderer::uploadMesh(
                 meshResources_.meshScalarSourceIndices.push_back(sourceIndex);
             }
         }
+    } else if (hasSurfaceMesh) {
+        for (size_t tri = 0; tri < triangleCount; ++tri) {
+            const int part = tri < options.triangleToPart.size()
+                ? options.triangleToPart[tri]
+                : -1;
+            if (!isPartVisible(options, part)) {
+                continue;
+            }
+            const int elementId = tri < options.triangleToElement.size()
+                ? options.triangleToElement[tri]
+                : static_cast<int>(tri);
+            if (!isElementVisible(options, elementId)) {
+                continue;
+            }
+            for (size_t corner = 0; corner < 3; ++corner) {
+                const uint32_t sourceIndex = mesh.indices[tri * 3 + corner];
+                if (sourceIndex < sourceVertexCount) {
+                    visiblePointVertices[sourceIndex] = 1;
+                }
+            }
+        }
     }
 
     VulkanStagingUploadContext uploadContext;
     std::vector<VulkanLineVertex> pointVertices;
-    if (hasSurfaceMesh) {
+    if (hasSurfaceMesh && !gpuDrivenUseSurfaceV2_) {
         pointVertices.reserve(sourceVertexCount);
         for (size_t sourceIndex = 0; sourceIndex < sourceVertexCount; ++sourceIndex) {
             if (!visiblePointVertices[sourceIndex]) {
@@ -561,20 +804,21 @@ bool VulkanClearFrameRenderer::uploadMesh(
             return false;
         }
 
-        if (!pointVertices.empty()) {
-            const VkDeviceSize pointVertexSize =
-                static_cast<VkDeviceSize>(pointVertices.size() * sizeof(VulkanLineVertex));
-            if (!uploadContext.uploadBuffer(device,
-                                            meshResources_.pointVertexResource,
-                                            pointVertices.data(),
-                                            pointVertexSize,
-                                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                            "point vertex",
-                                            lastError_)) {
-                uploadContext.discard(device);
-                destroyMeshBuffers(device);
-                return false;
-            }
+    }
+
+    if (!pointVertices.empty()) {
+        const VkDeviceSize pointVertexSize =
+            static_cast<VkDeviceSize>(pointVertices.size() * sizeof(VulkanLineVertex));
+        if (!uploadContext.uploadBuffer(device,
+                                        meshResources_.pointVertexResource,
+                                        pointVertices.data(),
+                                        pointVertexSize,
+                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                        "point vertex",
+                                        lastError_)) {
+            uploadContext.discard(device);
+            destroyMeshBuffers(device);
+            return false;
         }
     }
 
@@ -683,6 +927,49 @@ bool VulkanClearFrameRenderer::uploadMesh(
     return true;
 }
 
+bool VulkanClearFrameRenderer::updateGpuDrivenVisibilityState(
+    const VulkanDevice& device,
+    const VulkanMeshUploadOptions& options)
+{
+    lastError_.clear();
+    ++gpuDrivenStats_.visibilityUpdateCount;
+    ScopedCpuTimer updateTimer(gpuDrivenStats_.lastVisibilityUpdateMs);
+    if (!shouldUseGpuDrivenIndirect()) {
+        lastError_ = gpuDrivenFallbackReason_.isEmpty()
+            ? QStringLiteral("Vulkan GPU-driven visibility state is not active")
+            : gpuDrivenFallbackReason_;
+        return false;
+    }
+
+    const VulkanGpuDrivenVisibilityStateData stateData =
+        buildVulkanGpuDrivenVisibilityStateData(
+            options,
+            gpuDrivenMeshResources_.triangleCount,
+            gpuDrivenMeshResources_.partStateCount);
+    bool descriptorDirty = gpuDrivenVisibilityDescriptorDirty_;
+    if (!updateVulkanGpuDrivenVisibilityState(device,
+                                              gpuDrivenMeshResources_,
+                                              stateData,
+                                              descriptorDirty,
+                                              lastError_)) {
+        return false;
+    }
+    gpuDrivenVisibilityDescriptorDirty_ = descriptorDirty;
+    syncGpuDrivenStatsFromResources();
+    if (gpuDrivenUseSurfaceV2_ && descriptorDirty && !createGpuDrivenSurfaceDescriptor(device)) {
+        gpuDrivenUseSurfaceV2_ = false;
+        gpuDrivenVisibilityDescriptorDirty_ = true;
+        lastError_.clear();
+    }
+    if (!prepareGpuDrivenVisibilityPass(device)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility pass unavailable: %1").arg(reason));
+        lastError_ = gpuDrivenFallbackReason_;
+        return false;
+    }
+    return true;
+}
+
 bool VulkanClearFrameRenderer::uploadVertexScalars(
     const VulkanDevice& device,
     const std::vector<float>& scalars,
@@ -697,7 +984,14 @@ bool VulkanClearFrameRenderer::uploadVertexScalars(
         lastError_ = QStringLiteral("Vulkan device is not initialized");
         return false;
     }
-    if (!meshResources_.meshScalarResource.isValid() || meshResources_.meshScalarSourceIndices.empty()) {
+    const bool canUpdateTraditionalScalars =
+        meshResources_.meshScalarResource.isValid() &&
+        !meshResources_.meshScalarSourceIndices.empty();
+    const bool canUpdateGpuDrivenV2Scalars =
+        gpuDrivenUseSurfaceV2_ &&
+        gpuDrivenMeshResources_.sourceVertexResource.isValid() &&
+        !gpuDrivenSourceVertexCpuCache_.empty();
+    if (!canUpdateTraditionalScalars && !canUpdateGpuDrivenV2Scalars) {
         lastError_ = QStringLiteral("Vulkan scalar storage buffer is not initialized");
         return false;
     }
@@ -708,28 +1002,60 @@ bool VulkanClearFrameRenderer::uploadVertexScalars(
     meshResources_.meshScalarMax = maxVal;
     meshResources_.meshNumBands = std::max(1, numBands);
 
-    std::vector<float> expandedScalars(meshResources_.meshScalarSourceIndices.size(), 0.0f);
-    for (size_t i = 0; i < meshResources_.meshScalarSourceIndices.size(); ++i) {
-        const uint32_t sourceIndex = meshResources_.meshScalarSourceIndices[i];
-        if (sourceIndex < scalars.size()) {
-            expandedScalars[i] = scalars[sourceIndex];
+    if (canUpdateTraditionalScalars) {
+        std::vector<float> expandedScalars(meshResources_.meshScalarSourceIndices.size(), 0.0f);
+        for (size_t i = 0; i < meshResources_.meshScalarSourceIndices.size(); ++i) {
+            const uint32_t sourceIndex = meshResources_.meshScalarSourceIndices[i];
+            if (sourceIndex < scalars.size()) {
+                expandedScalars[i] = scalars[sourceIndex];
+            }
+        }
+
+        const VkDeviceSize scalarSize = static_cast<VkDeviceSize>(
+            std::max<size_t>(expandedScalars.size(), 1) * sizeof(float));
+        const void* scalarData = expandedScalars.empty()
+            ? static_cast<const void*>(nullptr)
+            : static_cast<const void*>(expandedScalars.data());
+        float zeroScalar = 0.0f;
+        if (expandedScalars.empty()) {
+            scalarData = &zeroScalar;
+        }
+        if (!meshResources_.meshScalarResource.updateHostVisible(device,
+                                                                 scalarData,
+                                                                 scalarSize,
+                                                                 "mesh scalar storage",
+                                                                 lastError_)) {
+            return false;
         }
     }
 
-    const VkDeviceSize scalarSize = static_cast<VkDeviceSize>(
-        std::max<size_t>(expandedScalars.size(), 1) * sizeof(float));
-    const void* scalarData = expandedScalars.empty()
-        ? static_cast<const void*>(nullptr)
-        : static_cast<const void*>(expandedScalars.data());
-    float zeroScalar = 0.0f;
-    if (expandedScalars.empty()) {
-        scalarData = &zeroScalar;
+    if (canUpdateGpuDrivenV2Scalars) {
+        for (size_t i = 0; i < gpuDrivenSourceVertexCpuCache_.size(); ++i) {
+            gpuDrivenSourceVertexCpuCache_[i].scalar =
+                useScalars && i < scalars.size() ? scalars[i] : 0.0f;
+        }
+        VulkanStagingUploadContext uploadContext;
+        if (!uploadContext.uploadBuffer(device,
+                                        gpuDrivenMeshResources_.sourceVertexResource,
+                                        gpuDrivenSourceVertexCpuCache_.data(),
+                                        static_cast<VkDeviceSize>(
+                                            gpuDrivenSourceVertexCpuCache_.size() *
+                                            sizeof(VulkanGpuDrivenSourceVertex)),
+                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                        "gpu-driven v2 source vertex scalar update",
+                                        lastError_)) {
+            uploadContext.discard(device);
+            return false;
+        }
+        if (!uploadContext.submit(device, commandResource_.pool(), device.graphicsQueue(), lastError_)) {
+            return false;
+        }
+        if (!createGpuDrivenSurfaceDescriptor(device)) {
+            return false;
+        }
     }
-    return meshResources_.meshScalarResource.updateHostVisible(device,
-                                                 scalarData,
-                                                 scalarSize,
-                                                 "mesh scalar storage",
-                                                 lastError_);
+
+    return true;
 }
 
 bool VulkanClearFrameRenderer::uploadSelectionLines(
@@ -980,17 +1306,46 @@ bool VulkanClearFrameRenderer::renderMeshFrame(
     ModelDisplayMode displayMode)
 {
     lastError_.clear();
+    ++gpuDrivenStats_.meshFrameCount;
+    ScopedCpuTimer frameTimer(gpuDrivenStats_.lastMeshFrameMs);
+    gpuDrivenStats_.lastMeshFrameGpuDriven = false;
     swapchainOutOfDate_ = false;
     if (!isInitialized() || pipelines_.mesh.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan mesh pipeline is not initialized");
         return false;
     }
-    if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
+    bool useGpuDrivenIndirect = shouldUseGpuDrivenIndirect();
+    const bool hasTraditionalMesh =
+        meshResources_.meshVertexResource.isValid() &&
+        meshResources_.meshIndexResource.isValid() &&
+        meshResources_.meshIndexCount > 0;
+    if (!hasTraditionalMesh && !useGpuDrivenIndirect) {
         return renderClearFrame(device, swapchain, clearColor, axesMvp);
     }
 
     VkDevice vkDevice = device.device();
-    vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+    if (!waitForInFlightAndCollectGpuDrivenStats(device, "mesh frame")) {
+        return false;
+    }
+
+    if (useGpuDrivenIndirect && !prepareGpuDrivenVisibilityPass(device)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility pass unavailable: %1").arg(reason));
+        lastError_.clear();
+        useGpuDrivenIndirect = false;
+    }
+    const bool enableGpuDrivenPointOutput = displayMode == ModelDisplayMode::Points;
+    if (useGpuDrivenIndirect &&
+        !updateGpuDrivenFrameUniforms(device, mvp, true, enableGpuDrivenPointOutput)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility uniforms unavailable: %1").arg(reason));
+        lastError_.clear();
+        useGpuDrivenIndirect = false;
+    }
+    if (!hasTraditionalMesh && !useGpuDrivenIndirect) {
+        return renderClearFrame(device, swapchain, clearColor, axesMvp);
+    }
+    gpuDrivenStats_.lastMeshFrameGpuDriven = useGpuDrivenIndirect;
 
     uint32_t imageIndex = 0;
     if (!acquireSwapchainImage(device, swapchain, imageIndex)) {
@@ -1208,23 +1563,50 @@ bool VulkanClearFrameRenderer::renderPickFrame(
     uint32_t height)
 {
     lastError_.clear();
+    ++gpuDrivenStats_.pickFrameCount;
+    ScopedCpuTimer pickTimer(gpuDrivenStats_.lastPickFrameMs);
+    gpuDrivenStats_.lastPickFrameGpuDriven = false;
     if (!isInitialized() || pipelines_.pick.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan pick pipeline is not initialized");
         return false;
     }
-    if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
+    bool useGpuDrivenIndirect = shouldUseGpuDrivenIndirect();
+    const bool hasTraditionalMesh =
+        meshResources_.meshVertexResource.isValid() &&
+        meshResources_.meshIndexResource.isValid() &&
+        meshResources_.meshIndexCount > 0;
+    if (!hasTraditionalMesh && !useGpuDrivenIndirect) {
         lastError_ = QStringLiteral("Vulkan mesh buffers are not initialized");
         return false;
     }
+    VkDevice vkDevice = device.device();
+    if (!waitForInFlightAndCollectGpuDrivenStats(device, "pick frame")) {
+        return false;
+    }
+
+    if (useGpuDrivenIndirect && !prepareGpuDrivenVisibilityPass(device)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility pass unavailable: %1").arg(reason));
+        lastError_.clear();
+        useGpuDrivenIndirect = false;
+    }
+    if (useGpuDrivenIndirect && !updateGpuDrivenFrameUniforms(device, mvp, true, false)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility uniforms unavailable: %1").arg(reason));
+        lastError_.clear();
+        useGpuDrivenIndirect = false;
+    }
+    if (!hasTraditionalMesh && !useGpuDrivenIndirect) {
+        lastError_ = QStringLiteral("Vulkan mesh buffers are not initialized");
+        return false;
+    }
+    gpuDrivenStats_.lastPickFrameGpuDriven = useGpuDrivenIndirect;
 
     width = std::max<uint32_t>(1, width);
     height = std::max<uint32_t>(1, height);
     if (!pickResources_.create(device, pickRenderPass_.handle(), depthFormat_, width, height, lastError_)) {
         return false;
     }
-
-    VkDevice vkDevice = device.device();
-    vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
 
     if (!commandResource_.resetCommandBuffer(device, lastError_)) {
         return false;
@@ -1234,9 +1616,22 @@ bool VulkanClearFrameRenderer::renderPickFrame(
     pickResources.framebuffer = pickResources_.framebuffer();
     pickResources.colorImage = pickResources_.colorImage();
     pickResources.pipeline = &pipelines_.pick;
+    pickResources.gpuDrivenPipelineV2 = &pipelines_.gpuDrivenPickV2;
     pickResources.meshVertexResource = &meshResources_.meshVertexResource;
     pickResources.meshIndexResource = &meshResources_.meshIndexResource;
     pickResources.meshIndexCount = meshResources_.meshIndexCount;
+    pickResources.useGpuDrivenIndirect = useGpuDrivenIndirect;
+    pickResources.useGpuDrivenSurfaceV2 =
+        useGpuDrivenIndirect && gpuDrivenUseSurfaceV2_ &&
+        gpuDrivenMeshResources_.surfaceDescriptorV2.isValid();
+    pickResources.gpuDrivenVertexResource = &gpuDrivenMeshResources_.vertexResource;
+    pickResources.gpuDrivenVisibleIndexResource = &gpuDrivenMeshResources_.visibleIndexResource;
+    pickResources.gpuDrivenIndirectCommandResource = &gpuDrivenMeshResources_.indirectCommandResource;
+    pickResources.gpuDrivenSurfaceDescriptorV2 = &gpuDrivenMeshResources_.surfaceDescriptorV2;
+    const std::function<void(VkCommandBuffer)> beforeRenderPass =
+        useGpuDrivenIndirect
+        ? [this](VkCommandBuffer commandBuffer) { recordGpuDrivenVisibilityPass(commandBuffer); }
+        : std::function<void(VkCommandBuffer)>{};
     if (!VulkanPickPass::record(commandResource_.buffer(),
                                 pickResources_.extent(),
                                 mvp,
@@ -1244,6 +1639,7 @@ bool VulkanClearFrameRenderer::renderPickFrame(
                                 VK_NULL_HANDLE,
                                 0,
                                 0,
+                                beforeRenderPass,
                                 lastError_)) {
         return false;
     }
@@ -1260,6 +1656,13 @@ bool VulkanClearFrameRenderer::renderPickFrame(
         return false;
     }
 
+    result = vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+    if (result != VK_SUCCESS) {
+        lastError_ = QStringLiteral("vkWaitForFences(pick) failed: ") + VulkanContext::formatResult(result);
+        return false;
+    }
+    collectGpuDrivenObservability(device);
+
     return true;
 }
 
@@ -1274,14 +1677,44 @@ bool VulkanClearFrameRenderer::pickElementAt(
 {
     elementId = -1;
     lastError_.clear();
+    ++gpuDrivenStats_.pickElementCount;
+    ScopedCpuTimer pickTimer(gpuDrivenStats_.lastPickElementMs);
+    gpuDrivenStats_.lastPickElementGpuDriven = false;
     if (!isInitialized() || pipelines_.pick.pipeline() == VK_NULL_HANDLE) {
         lastError_ = QStringLiteral("Vulkan pick pipeline is not initialized");
         return false;
     }
-    if (!meshResources_.meshVertexResource.isValid() || !meshResources_.meshIndexResource.isValid() || meshResources_.meshIndexCount == 0) {
+    bool useGpuDrivenIndirect = shouldUseGpuDrivenIndirect();
+    const bool hasTraditionalMesh =
+        meshResources_.meshVertexResource.isValid() &&
+        meshResources_.meshIndexResource.isValid() &&
+        meshResources_.meshIndexCount > 0;
+    if (!hasTraditionalMesh && !useGpuDrivenIndirect) {
         lastError_ = QStringLiteral("Vulkan mesh buffers are not initialized");
         return false;
     }
+    VkDevice vkDevice = device.device();
+    if (!waitForInFlightAndCollectGpuDrivenStats(device, "pick readback")) {
+        return false;
+    }
+
+    if (useGpuDrivenIndirect && !prepareGpuDrivenVisibilityPass(device)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility pass unavailable: %1").arg(reason));
+        lastError_.clear();
+        useGpuDrivenIndirect = false;
+    }
+    if (useGpuDrivenIndirect && !updateGpuDrivenFrameUniforms(device, mvp, true, false)) {
+        const QString reason = lastError_;
+        setGpuDrivenFallback(QStringLiteral("GPU-driven visibility uniforms unavailable: %1").arg(reason));
+        lastError_.clear();
+        useGpuDrivenIndirect = false;
+    }
+    if (!hasTraditionalMesh && !useGpuDrivenIndirect) {
+        lastError_ = QStringLiteral("Vulkan mesh buffers are not initialized");
+        return false;
+    }
+    gpuDrivenStats_.lastPickElementGpuDriven = useGpuDrivenIndirect;
 
     width = std::max<uint32_t>(1, width);
     height = std::max<uint32_t>(1, height);
@@ -1297,9 +1730,6 @@ bool VulkanClearFrameRenderer::pickElementAt(
         return false;
     }
 
-    VkDevice vkDevice = device.device();
-    vkWaitForFences(vkDevice, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
-
     if (!commandResource_.resetCommandBuffer(device, lastError_)) {
         return false;
     }
@@ -1308,9 +1738,22 @@ bool VulkanClearFrameRenderer::pickElementAt(
     pickResources.framebuffer = pickResources_.framebuffer();
     pickResources.colorImage = pickResources_.colorImage();
     pickResources.pipeline = &pipelines_.pick;
+    pickResources.gpuDrivenPipelineV2 = &pipelines_.gpuDrivenPickV2;
     pickResources.meshVertexResource = &meshResources_.meshVertexResource;
     pickResources.meshIndexResource = &meshResources_.meshIndexResource;
     pickResources.meshIndexCount = meshResources_.meshIndexCount;
+    pickResources.useGpuDrivenIndirect = useGpuDrivenIndirect;
+    pickResources.useGpuDrivenSurfaceV2 =
+        useGpuDrivenIndirect && gpuDrivenUseSurfaceV2_ &&
+        gpuDrivenMeshResources_.surfaceDescriptorV2.isValid();
+    pickResources.gpuDrivenVertexResource = &gpuDrivenMeshResources_.vertexResource;
+    pickResources.gpuDrivenVisibleIndexResource = &gpuDrivenMeshResources_.visibleIndexResource;
+    pickResources.gpuDrivenIndirectCommandResource = &gpuDrivenMeshResources_.indirectCommandResource;
+    pickResources.gpuDrivenSurfaceDescriptorV2 = &gpuDrivenMeshResources_.surfaceDescriptorV2;
+    const std::function<void(VkCommandBuffer)> beforeRenderPass =
+        useGpuDrivenIndirect
+        ? [this](VkCommandBuffer commandBuffer) { recordGpuDrivenVisibilityPass(commandBuffer); }
+        : std::function<void(VkCommandBuffer)>{};
     if (!VulkanPickPass::record(commandResource_.buffer(),
                                 pickResources_.extent(),
                                 mvp,
@@ -1318,6 +1761,7 @@ bool VulkanClearFrameRenderer::pickElementAt(
                                 pickResources_.readbackBuffer(),
                                 x,
                                 y,
+                                beforeRenderPass,
                                 lastError_)) {
         return false;
     }
@@ -1339,6 +1783,7 @@ bool VulkanClearFrameRenderer::pickElementAt(
         lastError_ = QStringLiteral("vkWaitForFences(pick readback) failed: ") + VulkanContext::formatResult(result);
         return false;
     }
+    collectGpuDrivenObservability(device);
 
     if (!pickResources_.readPixel(device, pixel, lastError_)) {
         return false;
@@ -1752,7 +2197,7 @@ bool VulkanClearFrameRenderer::createMeshGraphicsPipeline(const VulkanDevice& de
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
-    binding.stride = sizeof(VulkanMeshVertex);
+    binding.stride = sizeof(VulkanLineVertex);
     binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     std::array<VkVertexInputAttributeDescription, 3> attributes{};
@@ -1877,6 +2322,150 @@ bool VulkanClearFrameRenderer::createMeshGraphicsPipeline(const VulkanDevice& de
         return false;
     }
     return true;
+#else
+    Q_UNUSED(device);
+    return true;
+#endif
+}
+
+bool VulkanClearFrameRenderer::createGpuDrivenSurfaceDescriptorLayout(const VulkanDevice& device)
+{
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    for (uint32_t i = 0; i < static_cast<uint32_t>(bindings.size()); ++i) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    }
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
+    descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    descriptorSetLayoutInfo.pBindings = bindings.data();
+
+    return gpuDrivenSurfaceSetLayout_.create(
+        device, descriptorSetLayoutInfo, "gpu-driven surface v2", lastError_);
+}
+
+bool VulkanClearFrameRenderer::createGpuDrivenMeshGraphicsPipeline(const VulkanDevice& device)
+{
+#if defined(FERENDER_VULKAN_SHADER_DIR)
+    if (!gpuDrivenSurfaceSetLayout_.isValid()) {
+        lastError_ = QStringLiteral("Vulkan GPU-driven V2 surface descriptor layout is not initialized");
+        return false;
+    }
+
+    const QString shaderDir = QString::fromUtf8(FERENDER_VULKAN_SHADER_DIR);
+    const QString vertexShaderPath = shaderDir + QStringLiteral("/vulkan_gpu_driven_mesh.vert.spv");
+    const QString fragmentShaderPath = shaderDir + QStringLiteral("/vulkan_mesh.frag.spv");
+
+    VkShaderModule vertexShader = VK_NULL_HANDLE;
+    VkShaderModule fragmentShader = VK_NULL_HANDLE;
+    if (!createShaderModule(device, vertexShaderPath, vertexShader)) {
+        return false;
+    }
+    if (!createShaderModule(device, fragmentShaderPath, fragmentShader)) {
+        vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo vertexStage{};
+    vertexStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertexStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexStage.module = vertexShader;
+    vertexStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragmentStage{};
+    fragmentStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragmentStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragmentStage.module = fragmentShader;
+    fragmentStage.pName = "main";
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {vertexStage, fragmentStage};
+
+    VkPipelineVertexInputStateCreateInfo vertexInput{};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+        VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT |
+        VK_COLOR_COMPONENT_A_BIT;
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::array<VkDynamicState, 2> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = 24 * sizeof(float);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    const VkDescriptorSetLayout gpuDrivenSurfaceSetLayout = gpuDrivenSurfaceSetLayout_.handle();
+    pipelineLayoutInfo.pSetLayouts = &gpuDrivenSurfaceSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.pVertexInputState = &vertexInput;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.renderPass = renderPass_.handle();
+    pipelineInfo.subpass = 0;
+
+    const bool pipelineCreated = pipelines_.gpuDrivenMeshV2.createGraphics(
+        device, pipelineLayoutInfo, pipelineInfo, "gpu-driven mesh v2", lastError_);
+
+    vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
+    vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+
+    return pipelineCreated;
 #else
     Q_UNUSED(device);
     return true;
@@ -2363,7 +2952,7 @@ bool VulkanClearFrameRenderer::createPointGraphicsPipeline(const VulkanDevice& d
     attributes[1].binding = 0;
     attributes[1].location = 1;
     attributes[1].format = VK_FORMAT_R32_SFLOAT;
-    attributes[1].offset = offsetof(VulkanMeshVertex, color);
+    attributes[1].offset = offsetof(VulkanLineVertex, scalar);
 
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -2446,6 +3035,133 @@ bool VulkanClearFrameRenderer::createPointGraphicsPipeline(const VulkanDevice& d
 
     const bool pipelineCreated = pipelines_.point.createGraphics(
         device, pipelineLayoutInfo, pipelineInfo, "point", lastError_);
+
+    vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
+    vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+
+    return pipelineCreated;
+#else
+    Q_UNUSED(device);
+    return true;
+#endif
+}
+
+bool VulkanClearFrameRenderer::createGpuDrivenPointGraphicsPipeline(const VulkanDevice& device)
+{
+#if defined(FERENDER_VULKAN_SHADER_DIR)
+    if (!gpuDrivenSurfaceSetLayout_.isValid()) {
+        lastError_ = QStringLiteral("Vulkan GPU-driven V2 surface descriptor layout is not initialized");
+        return false;
+    }
+
+    const QString shaderDir = QString::fromUtf8(FERENDER_VULKAN_SHADER_DIR);
+    const QString vertexShaderPath = shaderDir + QStringLiteral("/vulkan_gpu_driven_point.vert.spv");
+    const QString fragmentShaderPath = shaderDir + QStringLiteral("/vulkan_line.frag.spv");
+
+    VkShaderModule vertexShader = VK_NULL_HANDLE;
+    VkShaderModule fragmentShader = VK_NULL_HANDLE;
+    if (!createShaderModule(device, vertexShaderPath, vertexShader)) {
+        return false;
+    }
+    if (!createShaderModule(device, fragmentShaderPath, fragmentShader)) {
+        vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo vertexStage{};
+    vertexStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertexStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexStage.module = vertexShader;
+    vertexStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragmentStage{};
+    fragmentStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragmentStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragmentStage.module = fragmentShader;
+    fragmentStage.pName = "main";
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {vertexStage, fragmentStage};
+
+    VkPipelineVertexInputStateCreateInfo vertexInput{};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+        VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT |
+        VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::array<VkDynamicState, 2> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = 24 * sizeof(float);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    const VkDescriptorSetLayout gpuDrivenSurfaceSetLayout = gpuDrivenSurfaceSetLayout_.handle();
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &gpuDrivenSurfaceSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.pVertexInputState = &vertexInput;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.renderPass = renderPass_.handle();
+    pipelineInfo.subpass = 0;
+
+    const bool pipelineCreated = pipelines_.gpuDrivenPointV2.createGraphics(
+        device, pipelineLayoutInfo, pipelineInfo, "gpu-driven point v2", lastError_);
 
     vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
     vkDestroyShaderModule(device.device(), vertexShader, nullptr);
@@ -2597,6 +3313,132 @@ bool VulkanClearFrameRenderer::createPickGraphicsPipeline(const VulkanDevice& de
 #endif
 }
 
+bool VulkanClearFrameRenderer::createGpuDrivenPickGraphicsPipeline(const VulkanDevice& device)
+{
+#if defined(FERENDER_VULKAN_SHADER_DIR)
+    if (!gpuDrivenSurfaceSetLayout_.isValid()) {
+        lastError_ = QStringLiteral("Vulkan GPU-driven V2 surface descriptor layout is not initialized");
+        return false;
+    }
+
+    const QString shaderDir = QString::fromUtf8(FERENDER_VULKAN_SHADER_DIR);
+    const QString vertexShaderPath = shaderDir + QStringLiteral("/vulkan_gpu_driven_pick.vert.spv");
+    const QString fragmentShaderPath = shaderDir + QStringLiteral("/vulkan_pick.frag.spv");
+
+    VkShaderModule vertexShader = VK_NULL_HANDLE;
+    VkShaderModule fragmentShader = VK_NULL_HANDLE;
+    if (!createShaderModule(device, vertexShaderPath, vertexShader)) {
+        return false;
+    }
+    if (!createShaderModule(device, fragmentShaderPath, fragmentShader)) {
+        vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo vertexStage{};
+    vertexStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertexStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexStage.module = vertexShader;
+    vertexStage.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragmentStage{};
+    fragmentStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragmentStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragmentStage.module = fragmentShader;
+    fragmentStage.pName = "main";
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = {vertexStage, fragmentStage};
+
+    VkPipelineVertexInputStateCreateInfo vertexInput{};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1;
+    viewportState.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizer.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+        VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT |
+        VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    std::array<VkDynamicState, 2> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = 16 * sizeof(float);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    const VkDescriptorSetLayout gpuDrivenSurfaceSetLayout = gpuDrivenSurfaceSetLayout_.handle();
+    pipelineLayoutInfo.pSetLayouts = &gpuDrivenSurfaceSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
+    pipelineInfo.pVertexInputState = &vertexInput;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.renderPass = pickRenderPass_.handle();
+    pipelineInfo.subpass = 0;
+
+    const bool pipelineCreated = pipelines_.gpuDrivenPickV2.createGraphics(
+        device, pipelineLayoutInfo, pipelineInfo, "gpu-driven pick v2", lastError_);
+
+    vkDestroyShaderModule(device.device(), fragmentShader, nullptr);
+    vkDestroyShaderModule(device.device(), vertexShader, nullptr);
+
+    return pipelineCreated;
+#else
+    Q_UNUSED(device);
+    return true;
+#endif
+}
+
 bool VulkanClearFrameRenderer::createShaderModule(
     const VulkanDevice& device,
     const QString& shaderPath,
@@ -2645,6 +3487,42 @@ bool VulkanClearFrameRenderer::createMeshScalarDescriptor(const VulkanDevice& de
                                                         meshResources_.meshScalarResource.buffer(),
                                                         range,
                                                         lastError_);
+}
+
+bool VulkanClearFrameRenderer::createGpuDrivenSurfaceDescriptor(const VulkanDevice& device)
+{
+    VkDevice vkDevice = device.device();
+    if (vkDevice == VK_NULL_HANDLE ||
+        !gpuDrivenSurfaceSetLayout_.isValid() ||
+        !gpuDrivenMeshResources_.hasV2Sidecar()) {
+        lastError_ = QStringLiteral("Vulkan GPU-driven V2 surface resources are not initialized");
+        return false;
+    }
+
+    VkDescriptorBufferInfo sourceVertexInfo{};
+    sourceVertexInfo.buffer = gpuDrivenMeshResources_.sourceVertexResource.buffer();
+    sourceVertexInfo.offset = 0;
+    sourceVertexInfo.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo triangleInfo{};
+    triangleInfo.buffer = gpuDrivenMeshResources_.triangleMetaV2Resource.buffer();
+    triangleInfo.offset = 0;
+    triangleInfo.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo partInfo{};
+    partInfo.buffer = gpuDrivenMeshResources_.partStateResource.isValid()
+        ? gpuDrivenMeshResources_.partStateResource.buffer()
+        : gpuDrivenMeshResources_.triangleMetaV2Resource.buffer();
+    partInfo.offset = 0;
+    partInfo.range = gpuDrivenMeshResources_.partStateResource.isValid()
+        ? VK_WHOLE_SIZE
+        : sizeof(uint32_t);
+
+    return gpuDrivenMeshResources_.surfaceDescriptorV2.createStorageBufferSet(
+        device,
+        gpuDrivenSurfaceSetLayout_.handle(),
+        std::vector<VkDescriptorBufferInfo>{sourceVertexInfo, triangleInfo, partInfo},
+        lastError_);
 }
 
 bool VulkanClearFrameRenderer::createAxesIndicatorResource(const VulkanDevice& device)
@@ -2716,6 +3594,17 @@ void VulkanClearFrameRenderer::destroyMeshBuffers(const VulkanDevice& device)
         return;
     }
     meshResources_.destroy(device);
+    gpuDrivenMeshResources_.destroy(device);
+    gpuDrivenRequestedForMesh_ = false;
+    gpuDrivenActive_ = false;
+    gpuDrivenUseSurfaceV2_ = false;
+    gpuDrivenUseVertexColor_ = false;
+    gpuDrivenFallbackReason_.clear();
+    gpuDrivenStats_.clearMeshState();
+    gpuDrivenSourceVertexCpuCache_.clear();
+    gpuDrivenTimestampQueryPending_ = false;
+    gpuDrivenReadbackPending_ = false;
+    gpuDrivenVisibilityDescriptorDirty_ = true;
     selectionLineVertexResource_.destroy(device);
     selectionLineVertexCount_ = 0;
 }
@@ -2874,6 +3763,11 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
         return false;
     }
 
+    const bool useGpuDrivenIndirect = shouldUseGpuDrivenIndirect();
+    if (useGpuDrivenIndirect) {
+        recordGpuDrivenVisibilityPass(commandBuffer);
+    }
+
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color = clearColor;
     clearValues[1].depthStencil = {1.0f, 0};
@@ -2892,6 +3786,8 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
 
     VulkanMeshFramePass::Resources meshFrameResources;
     meshFrameResources.meshPipeline = &pipelines_.mesh;
+    meshFrameResources.gpuDrivenMeshPipelineV2 = &pipelines_.gpuDrivenMeshV2;
+    meshFrameResources.gpuDrivenPointPipelineV2 = &pipelines_.gpuDrivenPointV2;
     meshFrameResources.isoSurfacePipeline = &pipelines_.isoSurface;
     meshFrameResources.linePipeline = &pipelines_.line;
     meshFrameResources.pointPipeline = &pipelines_.point;
@@ -2900,6 +3796,25 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     meshFrameResources.meshVertexResource = &meshResources_.meshVertexResource;
     meshFrameResources.meshIndexResource = &meshResources_.meshIndexResource;
     meshFrameResources.meshIndexCount = meshResources_.meshIndexCount;
+    meshFrameResources.useGpuDrivenIndirect = useGpuDrivenIndirect;
+    meshFrameResources.useGpuDrivenSurfaceV2 =
+        useGpuDrivenIndirect && gpuDrivenUseSurfaceV2_ &&
+        gpuDrivenMeshResources_.surfaceDescriptorV2.isValid();
+    meshFrameResources.gpuDrivenUseVertexColor = gpuDrivenUseVertexColor_;
+    meshFrameResources.gpuDrivenPartStateCount = gpuDrivenMeshResources_.partStateCount;
+    meshFrameResources.gpuDrivenVertexResource = &gpuDrivenMeshResources_.vertexResource;
+    meshFrameResources.gpuDrivenVisibleIndexResource = &gpuDrivenMeshResources_.visibleIndexResource;
+    meshFrameResources.gpuDrivenIndirectCommandResource = &gpuDrivenMeshResources_.indirectCommandResource;
+    meshFrameResources.gpuDrivenVisiblePointIndexResource =
+        &gpuDrivenMeshResources_.visiblePointIndexResource;
+    meshFrameResources.gpuDrivenPointIndirectCommandResource =
+        &gpuDrivenMeshResources_.pointIndirectCommandResource;
+    meshFrameResources.gpuDrivenSurfaceDescriptorV2 = &gpuDrivenMeshResources_.surfaceDescriptorV2;
+    meshFrameResources.useGpuDrivenEdges = useGpuDrivenIndirect && gpuDrivenMeshResources_.hasEdges();
+    meshFrameResources.gpuDrivenEdgeVertexResource = &gpuDrivenMeshResources_.edgeVertexResource;
+    meshFrameResources.gpuDrivenVisibleEdgeIndexResource = &gpuDrivenMeshResources_.visibleEdgeIndexResource;
+    meshFrameResources.gpuDrivenEdgeIndirectCommandResource = &gpuDrivenMeshResources_.edgeIndirectCommandResource;
+    meshFrameResources.gpuDrivenScalarDescriptor = &gpuDrivenMeshResources_.scalarDescriptor;
     meshFrameResources.pointVertexResource = &meshResources_.pointVertexResource;
     meshFrameResources.pointVertexCount = meshResources_.pointVertexCount;
     meshFrameResources.meshUseVertexScalars = meshResources_.meshUseVertexScalars;
@@ -2941,6 +3856,451 @@ bool VulkanClearFrameRenderer::recordMeshCommandBuffer(
     }
 
     return true;
+}
+
+bool VulkanClearFrameRenderer::prepareGpuDrivenVisibilityPass(const VulkanDevice& device)
+{
+    if (!gpuDrivenMeshResources_.isReady()) {
+        return true;
+    }
+    ensureGpuDrivenTimestampQueryPool(device);
+    if (!visibilityComputePass_.ensureInitialized(device, lastError_)) {
+        return false;
+    }
+    if ((gpuDrivenVisibilityDescriptorDirty_ || !visibilityComputePass_.hasDescriptorSet()) &&
+        !visibilityComputePass_.updateDescriptorSet(device,
+                                                    gpuDrivenMeshResources_,
+                                                    gpuDrivenUseSurfaceV2_,
+                                                    lastError_)) {
+        return false;
+    }
+    gpuDrivenVisibilityDescriptorDirty_ = false;
+    return true;
+}
+
+bool VulkanClearFrameRenderer::waitForInFlightAndCollectGpuDrivenStats(const VulkanDevice& device,
+                                                                       const char* label)
+{
+    VkResult result = vkWaitForFences(device.device(), 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
+    if (result != VK_SUCCESS) {
+        lastError_ = QStringLiteral("vkWaitForFences(%1) failed: %2")
+            .arg(QString::fromUtf8(label))
+            .arg(VulkanContext::formatResult(result));
+        return false;
+    }
+    collectGpuDrivenObservability(device);
+    return true;
+}
+
+void VulkanClearFrameRenderer::collectGpuDrivenObservability(const VulkanDevice& device)
+{
+    gpuDrivenStats_.timestampSupported = device.supportsGraphicsComputeTimestamp();
+
+    if (gpuDrivenTimestampQueryPending_ && gpuDrivenTimestampQueryPool_ != VK_NULL_HANDLE) {
+        std::array<uint64_t, 2> timestamps = {0, 0};
+        const VkResult result = vkGetQueryPoolResults(device.device(),
+                                                      gpuDrivenTimestampQueryPool_,
+                                                      0,
+                                                      static_cast<uint32_t>(timestamps.size()),
+                                                      sizeof(uint64_t) * timestamps.size(),
+                                                      timestamps.data(),
+                                                      sizeof(uint64_t),
+                                                      VK_QUERY_RESULT_64_BIT);
+        if (result == VK_SUCCESS) {
+            uint64_t start = timestamps[0];
+            uint64_t end = timestamps[1];
+            uint64_t delta = 0;
+            const uint32_t validBits = device.queueFamilies().graphicsTimestampValidBits;
+            if (validBits > 0 && validBits < 64) {
+                const uint64_t mask = (1ull << validBits) - 1ull;
+                start &= mask;
+                end &= mask;
+                delta = end >= start ? (end - start) : ((mask - start) + end + 1ull);
+            } else {
+                delta = end >= start ? (end - start) : 0ull;
+            }
+            gpuDrivenStats_.lastVisibilityGpuMs =
+                static_cast<double>(delta) * static_cast<double>(device.timestampPeriodNs()) / 1000000.0;
+            gpuDrivenStats_.lastTimestampValid = true;
+            ++gpuDrivenStats_.visibilityTimestampCount;
+            gpuDrivenTimestampQueryPending_ = false;
+        } else if (result != VK_NOT_READY) {
+            gpuDrivenStats_.lastTimestampValid = false;
+            gpuDrivenTimestampQueryPending_ = false;
+        }
+    }
+
+    if (gpuDrivenReadbackPending_ && gpuDrivenMeshResources_.visibilityReadbackResource.isValid()) {
+        std::array<VkDrawIndexedIndirectCommand, 3> commands{};
+        QString readbackError;
+        if (gpuDrivenMeshResources_.visibilityReadbackResource.readHostVisible(
+                device,
+                commands.data(),
+                static_cast<VkDeviceSize>(commands.size() * sizeof(commands[0])),
+                "gpu-driven visibility readback",
+                readbackError)) {
+            gpuDrivenStats_.lastVisibleIndexCount = commands[0].indexCount;
+            gpuDrivenStats_.lastVisibleTriangleCount = commands[0].indexCount / 3u;
+            gpuDrivenStats_.lastVisibleEdgeIndexCount =
+                gpuDrivenMeshResources_.hasEdges() ? commands[1].indexCount : 0u;
+            gpuDrivenStats_.lastVisibleEdgeCount = gpuDrivenStats_.lastVisibleEdgeIndexCount / 2u;
+            gpuDrivenStats_.lastVisiblePointIndexCount =
+                gpuDrivenMeshResources_.hasUniquePointIndices() && gpuDrivenPointOutputEnabled_
+                ? commands[2].indexCount
+                : 0u;
+            gpuDrivenStats_.lastVisiblePointCount = gpuDrivenStats_.lastVisiblePointIndexCount;
+            gpuDrivenReadbackPending_ = false;
+        }
+    }
+}
+
+void VulkanClearFrameRenderer::ensureGpuDrivenTimestampQueryPool(const VulkanDevice& device)
+{
+    gpuDrivenStats_.timestampSupported = device.supportsGraphicsComputeTimestamp();
+    if (!gpuDrivenStats_.timestampSupported || gpuDrivenTimestampQueryPool_ != VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkQueryPoolCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    createInfo.queryCount = 2;
+    const VkResult result = vkCreateQueryPool(device.device(),
+                                             &createInfo,
+                                             nullptr,
+                                             &gpuDrivenTimestampQueryPool_);
+    if (result != VK_SUCCESS) {
+        gpuDrivenTimestampQueryPool_ = VK_NULL_HANDLE;
+        gpuDrivenStats_.timestampSupported = false;
+    }
+}
+
+bool VulkanClearFrameRenderer::updateGpuDrivenFrameUniforms(const VulkanDevice& device,
+                                                            const QMatrix4x4& mvp,
+                                                            bool enableFrustumCulling,
+                                                            bool enablePointOutput)
+{
+    if (!gpuDrivenMeshResources_.isReady() ||
+        !gpuDrivenMeshResources_.frameUniformResource.isValid()) {
+        return true;
+    }
+
+    VulkanGpuDrivenVisibilityUniforms uniforms{};
+    std::memcpy(uniforms.viewProjection, mvp.constData(), sizeof(uniforms.viewProjection));
+    writeFrustumPlanes(mvp, uniforms);
+    uniforms.triangleCount = gpuDrivenMeshResources_.triangleCount;
+    uniforms.hiddenElementCount = gpuDrivenMeshResources_.hiddenElementCount;
+    uniforms.enableFrustumCulling = enableFrustumCulling ? 1u : 0u;
+    uniforms.enablePartVisibility = 1;
+    uniforms.partStateCount = gpuDrivenMeshResources_.partStateCount;
+    uniforms.edgeCount = gpuDrivenMeshResources_.edgeCount;
+    uniforms.sourceVertexCount = gpuDrivenMeshResources_.sourceVertexCount;
+    uniforms.enablePointOutput = enablePointOutput ? 1u : 0u;
+
+    const bool updated = gpuDrivenMeshResources_.frameUniformResource.updateHostVisible(
+        device,
+        &uniforms,
+        sizeof(uniforms),
+        "gpu-driven frame visibility uniforms",
+        lastError_);
+    if (updated) {
+        gpuDrivenStats_.lastFrustumCullingEnabled = enableFrustumCulling;
+        gpuDrivenPointOutputEnabled_ = enablePointOutput;
+    }
+    return updated;
+}
+
+bool VulkanClearFrameRenderer::canUseGpuDrivenIndirect(
+    const VulkanDevice& device,
+    bool hasSurfaceMesh,
+    QString& reason) const
+{
+    if (RenderSettings::effectiveVulkanDrawStrategy() != VulkanDrawStrategy::GpuDrivenIndirect) {
+        reason = QStringLiteral("GPU-driven Indirect is not the effective configured strategy");
+        return false;
+    }
+    if (!device.queueFamilies().graphicsSupportsCompute) {
+        reason = QStringLiteral("selected Vulkan graphics queue does not support compute dispatch");
+        return false;
+    }
+    if (!hasSurfaceMesh) {
+        reason = QStringLiteral("current mesh has no surface triangles; line-only models use the traditional path");
+        return false;
+    }
+    return true;
+}
+
+bool VulkanClearFrameRenderer::shouldUseGpuDrivenIndirect() const
+{
+    return RenderSettings::effectiveVulkanDrawStrategy() == VulkanDrawStrategy::GpuDrivenIndirect &&
+        gpuDrivenRequestedForMesh_ &&
+        gpuDrivenActive_ &&
+        gpuDrivenMeshResources_.isReady();
+}
+
+void VulkanClearFrameRenderer::setGpuDrivenFallback(const QString& reason)
+{
+    gpuDrivenActive_ = false;
+    gpuDrivenStats_.active = false;
+    ++gpuDrivenStats_.fallbackCount;
+    gpuDrivenFallbackReason_ = reason.isEmpty()
+        ? QStringLiteral("GPU-driven Indirect unavailable, using traditional Vulkan draw path")
+        : reason;
+    gpuDrivenStats_.lastFallbackReason = gpuDrivenFallbackReason_;
+}
+
+void VulkanClearFrameRenderer::syncGpuDrivenStatsFromResources()
+{
+    gpuDrivenStats_.requested = gpuDrivenRequestedForMesh_;
+    gpuDrivenStats_.active = shouldUseGpuDrivenIndirect();
+    gpuDrivenStats_.vertexCount = gpuDrivenMeshResources_.vertexCount;
+    gpuDrivenStats_.triangleCount = gpuDrivenMeshResources_.triangleCount;
+    gpuDrivenStats_.edgeVertexCount = gpuDrivenMeshResources_.edgeVertexCount;
+    gpuDrivenStats_.edgeCount = gpuDrivenMeshResources_.edgeCount;
+    gpuDrivenStats_.visibleIndexCapacity = gpuDrivenMeshResources_.maxVisibleIndexCount;
+    gpuDrivenStats_.visiblePointIndexCapacity = gpuDrivenMeshResources_.maxVisiblePointIndexCount;
+    gpuDrivenStats_.visibleEdgeIndexCapacity = gpuDrivenMeshResources_.maxVisibleEdgeIndexCount;
+    gpuDrivenStats_.partStateCount = gpuDrivenMeshResources_.partStateCount;
+    gpuDrivenStats_.hiddenElementCount = gpuDrivenMeshResources_.hiddenElementCount;
+}
+
+QString VulkanClearFrameRenderer::gpuDrivenDiagnostics() const
+{
+    const VulkanDrawStrategy requested = RenderSettings::preferredVulkanDrawStrategy();
+    const VulkanDrawStrategy effective = RenderSettings::effectiveVulkanDrawStrategy();
+    const QString actual = shouldUseGpuDrivenIndirect()
+        ? RenderSettings::vulkanDrawStrategyName(VulkanDrawStrategy::GpuDrivenIndirect)
+        : RenderSettings::vulkanDrawStrategyName(VulkanDrawStrategy::Traditional);
+    QString text = QStringLiteral("VulkanDraw requested=%1 effective=%2 actual=%3")
+        .arg(RenderSettings::vulkanDrawStrategyName(requested),
+             RenderSettings::vulkanDrawStrategyName(effective),
+             actual);
+    if (shouldUseGpuDrivenIndirect()) {
+        text += QStringLiteral(" | gpu vertices=%1 sourceV2=%2 tris=%3 edges=%4 visibleIdx=%5 visiblePointIdx=%6 visibleEdgeIdx=%7 parts=%8 hidden=%9 v2=%10 cpuSurface=%11 cpuPoints=%12")
+                    .arg(gpuDrivenStats_.vertexCount)
+                    .arg(gpuDrivenMeshResources_.sourceVertexCount)
+                    .arg(gpuDrivenStats_.triangleCount)
+                    .arg(gpuDrivenStats_.edgeCount)
+                    .arg(gpuDrivenStats_.visibleIndexCapacity)
+                    .arg(gpuDrivenStats_.visiblePointIndexCapacity)
+                    .arg(gpuDrivenStats_.visibleEdgeIndexCapacity)
+                    .arg(gpuDrivenStats_.partStateCount)
+                    .arg(gpuDrivenStats_.hiddenElementCount)
+                    .arg(gpuDrivenUseSurfaceV2_ ? 1 : 0)
+                    .arg(meshResources_.meshIndexCount)
+                    .arg(meshResources_.pointVertexCount);
+    } else if (gpuDrivenRequestedForMesh_ && !gpuDrivenFallbackReason_.isEmpty()) {
+        text += QStringLiteral(" | fallback=%1").arg(gpuDrivenFallbackReason_);
+    }
+    text += QStringLiteral(" | stats uploadMs=%1 gpuUploadMs=%2 updateMs=%3 frameMs=%4 pickFrameMs=%5 pickMs=%6 visibilityGpuMs=%7 uploads=%8 updates=%9 frames=%10 pickFrames=%11 picks=%12 dispatches=%13 timestamps=%14 fallbacks=%15 lastFrameGpu=%16 lastPickGpu=%17 frustum=%18 timestamp=%19 visibleTris=%20 visiblePoints=%21 visibleEdges=%22 visibleIdx=%23 visiblePointIdx=%24 visibleEdgeIdx=%25")
+                .arg(gpuDrivenStats_.lastUploadMeshMs, 0, 'f', 2)
+                .arg(gpuDrivenStats_.lastGpuDrivenUploadMs, 0, 'f', 2)
+                .arg(gpuDrivenStats_.lastVisibilityUpdateMs, 0, 'f', 2)
+                .arg(gpuDrivenStats_.lastMeshFrameMs, 0, 'f', 2)
+                .arg(gpuDrivenStats_.lastPickFrameMs, 0, 'f', 2)
+                .arg(gpuDrivenStats_.lastPickElementMs, 0, 'f', 2)
+                .arg(gpuDrivenStats_.lastVisibilityGpuMs, 0, 'f', 4)
+                .arg(gpuDrivenStats_.uploadMeshCount)
+                .arg(gpuDrivenStats_.visibilityUpdateCount)
+                .arg(gpuDrivenStats_.meshFrameCount)
+                .arg(gpuDrivenStats_.pickFrameCount)
+                .arg(gpuDrivenStats_.pickElementCount)
+                .arg(gpuDrivenStats_.visibilityDispatchCount)
+                .arg(gpuDrivenStats_.visibilityTimestampCount)
+                .arg(gpuDrivenStats_.fallbackCount)
+                .arg(gpuDrivenStats_.lastMeshFrameGpuDriven ? 1 : 0)
+                .arg((gpuDrivenStats_.lastPickFrameGpuDriven || gpuDrivenStats_.lastPickElementGpuDriven) ? 1 : 0)
+                .arg(gpuDrivenStats_.lastFrustumCullingEnabled ? 1 : 0)
+                .arg(gpuDrivenStats_.lastTimestampValid ? 1 : 0)
+                .arg(gpuDrivenStats_.lastVisibleTriangleCount)
+                .arg(gpuDrivenStats_.lastVisiblePointCount)
+                .arg(gpuDrivenStats_.lastVisibleEdgeCount)
+                .arg(gpuDrivenStats_.lastVisibleIndexCount)
+                .arg(gpuDrivenStats_.lastVisiblePointIndexCount)
+                .arg(gpuDrivenStats_.lastVisibleEdgeIndexCount);
+    return text;
+}
+
+void VulkanClearFrameRenderer::recordGpuDrivenVisibilityPass(VkCommandBuffer commandBuffer)
+{
+    if (commandBuffer == VK_NULL_HANDLE || !gpuDrivenMeshResources_.isReady()) {
+        return;
+    }
+    ++gpuDrivenStats_.visibilityDispatchCount;
+    const bool hasTimestampQuery = gpuDrivenTimestampQueryPool_ != VK_NULL_HANDLE &&
+        gpuDrivenStats_.timestampSupported;
+    const bool hasReadback = gpuDrivenMeshResources_.visibilityReadbackResource.isValid();
+    const bool emitUniquePointIndices =
+        gpuDrivenMeshResources_.hasUniquePointIndices() && gpuDrivenPointOutputEnabled_;
+
+    vkCmdFillBuffer(commandBuffer,
+                    gpuDrivenMeshResources_.indirectCommandResource.buffer(),
+                    0,
+                    sizeof(uint32_t),
+                    0);
+    if (emitUniquePointIndices) {
+        vkCmdFillBuffer(commandBuffer,
+                        gpuDrivenMeshResources_.pointIndirectCommandResource.buffer(),
+                        0,
+                        sizeof(uint32_t),
+                        0);
+        vkCmdFillBuffer(commandBuffer,
+                        gpuDrivenMeshResources_.visiblePointFlagResource.buffer(),
+                        0,
+                        gpuDrivenMeshResources_.visiblePointFlagRangeBytes(),
+                        0);
+    }
+    if (gpuDrivenMeshResources_.hasEdges()) {
+        vkCmdFillBuffer(commandBuffer,
+                        gpuDrivenMeshResources_.edgeIndirectCommandResource.buffer(),
+                        0,
+                        sizeof(uint32_t),
+                        0);
+    }
+
+    std::vector<VkBufferMemoryBarrier> resetBarriers;
+    auto appendResetBarrier = [&resetBarriers](VkBuffer buffer) {
+        VkBufferMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = buffer;
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+        resetBarriers.push_back(barrier);
+    };
+    appendResetBarrier(gpuDrivenMeshResources_.indirectCommandResource.buffer());
+    if (emitUniquePointIndices) {
+        appendResetBarrier(gpuDrivenMeshResources_.pointIndirectCommandResource.buffer());
+        appendResetBarrier(gpuDrivenMeshResources_.visiblePointFlagResource.buffer());
+    }
+    if (gpuDrivenMeshResources_.hasEdges()) {
+        appendResetBarrier(gpuDrivenMeshResources_.edgeIndirectCommandResource.buffer());
+    }
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0,
+                         0,
+                         nullptr,
+                         static_cast<uint32_t>(resetBarriers.size()),
+                         resetBarriers.data(),
+                         0,
+                         nullptr);
+
+    if (hasTimestampQuery) {
+        vkCmdResetQueryPool(commandBuffer, gpuDrivenTimestampQueryPool_, 0, 2);
+        vkCmdWriteTimestamp(commandBuffer,
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            gpuDrivenTimestampQueryPool_,
+                            0);
+    }
+
+    visibilityComputePass_.record(commandBuffer, gpuDrivenMeshResources_, gpuDrivenUseSurfaceV2_);
+
+    if (hasTimestampQuery) {
+        vkCmdWriteTimestamp(commandBuffer,
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                            gpuDrivenTimestampQueryPool_,
+                            1);
+        gpuDrivenTimestampQueryPending_ = true;
+    }
+
+    std::vector<VkBufferMemoryBarrier> computeBarriers;
+    auto appendComputeBarrier = [&computeBarriers](VkBuffer buffer, VkAccessFlags dstAccessMask) {
+        VkBufferMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = dstAccessMask;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = buffer;
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+        computeBarriers.push_back(barrier);
+    };
+    appendComputeBarrier(gpuDrivenMeshResources_.visibleIndexResource.buffer(), VK_ACCESS_INDEX_READ_BIT);
+    appendComputeBarrier(gpuDrivenMeshResources_.indirectCommandResource.buffer(),
+                         VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                             (hasReadback ? VK_ACCESS_TRANSFER_READ_BIT : 0));
+    if (emitUniquePointIndices) {
+        appendComputeBarrier(gpuDrivenMeshResources_.visiblePointIndexResource.buffer(),
+                             VK_ACCESS_INDEX_READ_BIT);
+        appendComputeBarrier(gpuDrivenMeshResources_.pointIndirectCommandResource.buffer(),
+                             VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                                 (hasReadback ? VK_ACCESS_TRANSFER_READ_BIT : 0));
+    }
+    if (gpuDrivenMeshResources_.hasEdges()) {
+        appendComputeBarrier(gpuDrivenMeshResources_.visibleEdgeIndexResource.buffer(), VK_ACCESS_INDEX_READ_BIT);
+        appendComputeBarrier(gpuDrivenMeshResources_.edgeIndirectCommandResource.buffer(),
+                             VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                                 (hasReadback ? VK_ACCESS_TRANSFER_READ_BIT : 0));
+    }
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+                             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                             (hasReadback ? VK_PIPELINE_STAGE_TRANSFER_BIT : 0),
+                         0,
+                         0,
+                         nullptr,
+                         static_cast<uint32_t>(computeBarriers.size()),
+                         computeBarriers.data(),
+                         0,
+                         nullptr);
+
+    if (hasReadback) {
+        VkBufferCopy surfaceCopy{};
+        surfaceCopy.size = sizeof(VkDrawIndexedIndirectCommand);
+        vkCmdCopyBuffer(commandBuffer,
+                        gpuDrivenMeshResources_.indirectCommandResource.buffer(),
+                        gpuDrivenMeshResources_.visibilityReadbackResource.buffer(),
+                        1,
+                        &surfaceCopy);
+        if (gpuDrivenMeshResources_.hasEdges()) {
+            VkBufferCopy edgeCopy{};
+            edgeCopy.dstOffset = sizeof(VkDrawIndexedIndirectCommand);
+            edgeCopy.size = sizeof(VkDrawIndexedIndirectCommand);
+            vkCmdCopyBuffer(commandBuffer,
+                            gpuDrivenMeshResources_.edgeIndirectCommandResource.buffer(),
+                            gpuDrivenMeshResources_.visibilityReadbackResource.buffer(),
+                            1,
+                            &edgeCopy);
+        }
+        if (emitUniquePointIndices) {
+            VkBufferCopy pointCopy{};
+            pointCopy.dstOffset = 2 * sizeof(VkDrawIndexedIndirectCommand);
+            pointCopy.size = sizeof(VkDrawIndexedIndirectCommand);
+            vkCmdCopyBuffer(commandBuffer,
+                            gpuDrivenMeshResources_.pointIndirectCommandResource.buffer(),
+                            gpuDrivenMeshResources_.visibilityReadbackResource.buffer(),
+                            1,
+                            &pointCopy);
+        }
+
+        VkBufferMemoryBarrier hostBarrier{};
+        hostBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        hostBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        hostBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        hostBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        hostBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        hostBarrier.buffer = gpuDrivenMeshResources_.visibilityReadbackResource.buffer();
+        hostBarrier.offset = 0;
+        hostBarrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(commandBuffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0,
+                             nullptr,
+                             1,
+                             &hostBarrier,
+                             0,
+                             nullptr);
+        gpuDrivenReadbackPending_ = true;
+    }
 }
 
 int VulkanClearFrameRenderer::colorToId(unsigned char r, unsigned char g, unsigned char b) const

@@ -6,8 +6,10 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <functional>
 
 class VulkanBufferResource;
+class VulkanDescriptorResource;
 class VulkanPipelineResource;
 
 /**
@@ -23,9 +25,16 @@ public:
         VkFramebuffer framebuffer = VK_NULL_HANDLE;
         VkImage colorImage = VK_NULL_HANDLE;
         const VulkanPipelineResource* pipeline = nullptr;
+        const VulkanPipelineResource* gpuDrivenPipelineV2 = nullptr;
         const VulkanBufferResource* meshVertexResource = nullptr;
         const VulkanBufferResource* meshIndexResource = nullptr;
         uint32_t meshIndexCount = 0;
+        const VulkanBufferResource* gpuDrivenVertexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenVisibleIndexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenIndirectCommandResource = nullptr;
+        const VulkanDescriptorResource* gpuDrivenSurfaceDescriptorV2 = nullptr;
+        bool useGpuDrivenIndirect = false;
+        bool useGpuDrivenSurfaceV2 = false;
     };
 
     static bool record(VkCommandBuffer commandBuffer,
@@ -35,5 +44,6 @@ public:
                        VkBuffer readbackBuffer,
                        uint32_t readbackX,
                        uint32_t readbackY,
+                       const std::function<void(VkCommandBuffer)>& beforeRenderPass,
                        QString& lastError);
 };

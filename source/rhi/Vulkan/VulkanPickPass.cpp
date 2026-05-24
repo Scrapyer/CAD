@@ -2,6 +2,7 @@
 
 #include "VulkanBufferResource.h"
 #include "VulkanContext.h"
+#include "VulkanDescriptorResource.h"
 #include "VulkanPipelineResource.h"
 
 #include <array>
@@ -13,18 +14,42 @@ bool VulkanPickPass::record(VkCommandBuffer commandBuffer,
                             VkBuffer readbackBuffer,
                             uint32_t readbackX,
                             uint32_t readbackY,
+                            const std::function<void(VkCommandBuffer)>& beforeRenderPass,
                             QString& lastError)
 {
+    const bool useGpuDrivenV2 =
+        resources.useGpuDrivenSurfaceV2 &&
+        resources.gpuDrivenPipelineV2 != nullptr &&
+        resources.gpuDrivenSurfaceDescriptorV2 != nullptr &&
+        resources.gpuDrivenVisibleIndexResource != nullptr &&
+        resources.gpuDrivenIndirectCommandResource != nullptr &&
+        resources.gpuDrivenPipelineV2->isValid() &&
+        resources.gpuDrivenSurfaceDescriptorV2->isValid() &&
+        resources.gpuDrivenVisibleIndexResource->isValid() &&
+        resources.gpuDrivenIndirectCommandResource->isValid();
+    const bool useGpuDrivenIndirect =
+        !useGpuDrivenV2 &&
+        resources.useGpuDrivenIndirect &&
+        resources.gpuDrivenVertexResource != nullptr &&
+        resources.gpuDrivenVisibleIndexResource != nullptr &&
+        resources.gpuDrivenIndirectCommandResource != nullptr &&
+        resources.gpuDrivenVertexResource->isValid() &&
+        resources.gpuDrivenVisibleIndexResource->isValid() &&
+        resources.gpuDrivenIndirectCommandResource->isValid();
+    const bool useTraditional =
+        resources.meshVertexResource != nullptr &&
+        resources.meshIndexResource != nullptr &&
+        resources.meshVertexResource->isValid() &&
+        resources.meshIndexResource->isValid() &&
+        resources.meshIndexCount > 0;
     if (resources.renderPass == VK_NULL_HANDLE ||
         resources.framebuffer == VK_NULL_HANDLE ||
         resources.colorImage == VK_NULL_HANDLE ||
-        resources.pipeline == nullptr ||
-        resources.meshVertexResource == nullptr ||
-        resources.meshIndexResource == nullptr ||
-        !resources.pipeline->isValid() ||
-        !resources.meshVertexResource->isValid() ||
-        !resources.meshIndexResource->isValid() ||
-        resources.meshIndexCount == 0) {
+        ((!useGpuDrivenV2 &&
+          (resources.pipeline == nullptr || !resources.pipeline->isValid())) ||
+         (useGpuDrivenV2 &&
+          (resources.gpuDrivenPipelineV2 == nullptr || !resources.gpuDrivenPipelineV2->isValid()))) ||
+        (!useGpuDrivenV2 && !useGpuDrivenIndirect && !useTraditional)) {
         lastError = QStringLiteral("Vulkan pick pass resources are not initialized");
         return false;
     }
@@ -37,6 +62,10 @@ bool VulkanPickPass::record(VkCommandBuffer commandBuffer,
         lastError = QStringLiteral("vkBeginCommandBuffer(pick) failed: ") +
             VulkanContext::formatResult(result);
         return false;
+    }
+
+    if (beforeRenderPass) {
+        beforeRenderPass(commandBuffer);
     }
 
     std::array<VkClearValue, 2> clearValues{};
@@ -69,18 +98,49 @@ bool VulkanPickPass::record(VkCommandBuffer commandBuffer,
     VkDeviceSize offsets[] = {0};
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipeline->pipeline());
+    const VulkanPipelineResource* activePipeline =
+        useGpuDrivenV2 ? resources.gpuDrivenPipelineV2 : resources.pipeline;
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline->pipeline());
     vkCmdPushConstants(commandBuffer,
-                       resources.pipeline->layout(),
+                       activePipeline->layout(),
                        VK_SHADER_STAGE_VERTEX_BIT,
                        0,
                        16 * sizeof(float),
                        mvp.constData());
-    VkBuffer meshVertexBuffer = resources.meshVertexResource->buffer();
-    VkBuffer meshIndexBuffer = resources.meshIndexResource->buffer();
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshVertexBuffer, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(commandBuffer, resources.meshIndexCount, 1, 0, 0, 0);
+    if (useGpuDrivenV2) {
+        VkDescriptorSet descriptorSet = resources.gpuDrivenSurfaceDescriptorV2->descriptorSet();
+        VkBuffer meshIndexBuffer = resources.gpuDrivenVisibleIndexResource->buffer();
+        vkCmdBindDescriptorSets(commandBuffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                activePipeline->layout(),
+                                0,
+                                1,
+                                &descriptorSet,
+                                0,
+                                nullptr);
+        vkCmdBindIndexBuffer(commandBuffer, meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexedIndirect(commandBuffer,
+                                 resources.gpuDrivenIndirectCommandResource->buffer(),
+                                 0,
+                                 1,
+                                 sizeof(VkDrawIndexedIndirectCommand));
+    } else if (useGpuDrivenIndirect) {
+        VkBuffer meshVertexBuffer = resources.gpuDrivenVertexResource->buffer();
+        VkBuffer meshIndexBuffer = resources.gpuDrivenVisibleIndexResource->buffer();
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshVertexBuffer, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexedIndirect(commandBuffer,
+                                 resources.gpuDrivenIndirectCommandResource->buffer(),
+                                 0,
+                                 1,
+                                 sizeof(VkDrawIndexedIndirectCommand));
+    } else {
+        VkBuffer meshVertexBuffer = resources.meshVertexResource->buffer();
+        VkBuffer meshIndexBuffer = resources.meshIndexResource->buffer();
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &meshVertexBuffer, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, meshIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(commandBuffer, resources.meshIndexCount, 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(commandBuffer);
 

@@ -1,4 +1,5 @@
 #include "Geometry.h"
+#include "RenderSettings.h"
 #include "VulkanMacOSSurfaceFactory.h"
 #include "VulkanRenderBackend.h"
 #include "VulkanSurface.h"
@@ -7,6 +8,7 @@
 #include <QEventLoop>
 #include <QGuiApplication>
 #include <QThread>
+#include <QTemporaryDir>
 #include <QWindow>
 
 #include <cstdio>
@@ -158,8 +160,15 @@ bool uploadMeshWithRetry(VulkanRenderBackend& backend,
 
 int main(int argc, char** argv)
 {
+    QTemporaryDir settingsDir;
+    if (!settingsDir.isValid()) {
+        return 66;
+    }
+    qputenv("FEMODELVIEWER_CONFIG_DIR", settingsDir.path().toLocal8Bit());
+
     QGuiApplication app(argc, argv);
     QThread::msleep(500);
+    RenderSettings::setPreferredVulkanDrawStrategy(VulkanDrawStrategy::GpuDrivenIndirect);
 
     VulkanRenderBackend backend;
     if (!backend.initializeContext(VulkanMacOSSurfaceFactory::requiredInstanceExtensions())) {
@@ -282,6 +291,76 @@ int main(int argc, char** argv)
                      backend.lastError().toUtf8().constData());
         return 10;
     }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::SolidWireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(gpu-driven solid wireframe) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 73;
+    }
+    const QString gpuDrivenDiagnostics = backend.renderDiagnostics();
+    if (!gpuDrivenDiagnostics.contains(QStringLiteral("actual=GPU-driven Indirect")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("tris=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("edges=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("sourceV2=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("visiblePointIdx=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("v2=1")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("cpuSurface=0")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("cpuPoints=0")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("uploadMs=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("frameMs=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("visibilityGpuMs=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("visibleTris=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("visibleEdges=")) ||
+        !gpuDrivenDiagnostics.contains(QStringLiteral("lastFrameGpu=1"))) {
+        std::fprintf(stderr, "GPU-driven diagnostics missing active state: %s\n",
+                     gpuDrivenDiagnostics.toUtf8().constData());
+        return 74;
+    }
+    VulkanMeshUploadOptions gpuDrivenHiddenState = uploadOptions;
+    gpuDrivenHiddenState.partVisibility[0] = false;
+    gpuDrivenHiddenState.partVisibility[1] = false;
+    if (!backend.updateGpuDrivenVisibilityState(gpuDrivenHiddenState)) {
+        std::fprintf(stderr, "updateGpuDrivenVisibilityState(hidden) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 67;
+    }
+    if (!backend.renderMeshFrame()) {
+        std::fprintf(stderr, "renderMeshFrame(gpu-driven hidden state) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 68;
+    }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::Wireframe)) {
+        std::fprintf(stderr, "renderMeshFrame(gpu-driven hidden wireframe) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 76;
+    }
+    if (!backend.renderMeshFrame(QMatrix4x4(),
+                                 0.04f,
+                                 0.05f,
+                                 0.07f,
+                                 1.0f,
+                                 QMatrix4x4(),
+                                 ModelDisplayMode::Points)) {
+        std::fprintf(stderr, "renderMeshFrame(gpu-driven points) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 72;
+    }
+    if (!backend.updateGpuDrivenVisibilityState(uploadOptions)) {
+        std::fprintf(stderr, "updateGpuDrivenVisibilityState(restore) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 69;
+    }
     if (!backend.renderPickFrame(QMatrix4x4(), 64, 64)) {
         std::fprintf(stderr, "renderPickFrame failed: %s\n",
                      backend.lastError().toUtf8().constData());
@@ -326,9 +405,18 @@ int main(int argc, char** argv)
     if (!uploadMeshWithRetry(backend, cube, hiddenOptions, "uploadMesh(hidden parts)")) {
         return 40;
     }
-    if (backend.renderPickFrame(QMatrix4x4(), 64, 64)) {
-        std::fprintf(stderr, "renderPickFrame(hidden parts) unexpectedly succeeded\n");
+    if (!backend.renderPickFrame(QMatrix4x4(), 64, 64)) {
+        std::fprintf(stderr, "renderPickFrame(hidden parts) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
         return 41;
+    }
+    if (!backend.pickElementAt(QMatrix4x4(), 64, 64, 32, 32, pickedElement)) {
+        std::fprintf(stderr, "pickElementAt(hidden parts) failed: %s\n",
+                     backend.lastError().toUtf8().constData());
+        return 70;
+    }
+    if (pickedElement != -1) {
+        return 71;
     }
     if (!uploadMeshWithRetry(backend, cube, uploadOptions, "uploadMesh(restore visible parts)")) {
         return 42;
@@ -527,6 +615,14 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "renderMeshFrame(line-only hidden part) failed: %s\n",
                      backend.lastError().toUtf8().constData());
         return 65;
+    }
+    const QString lineOnlyDiagnostics = backend.renderDiagnostics();
+    if (!lineOnlyDiagnostics.contains(QStringLiteral("actual=传统")) ||
+        !lineOnlyDiagnostics.contains(QStringLiteral("line-only")) ||
+        !lineOnlyDiagnostics.contains(QStringLiteral("fallbacks="))) {
+        std::fprintf(stderr, "GPU-driven line-only fallback diagnostics missing: %s\n",
+                     lineOnlyDiagnostics.toUtf8().constData());
+        return 75;
     }
     Mesh grid = makeGridMesh(40);
     for (int iteration = 0; iteration < 4; ++iteration) {

@@ -130,6 +130,20 @@ bool VulkanRenderBackend::uploadMesh(const Mesh& mesh, const VulkanMeshUploadOpt
     return true;
 }
 
+bool VulkanRenderBackend::updateGpuDrivenVisibilityState(const VulkanMeshUploadOptions& options)
+{
+    lastError_.clear();
+    if (!device_ || !device_->isInitialized()) {
+        lastError_ = QStringLiteral("Vulkan device is not initialized");
+        return false;
+    }
+    if (!clearFrameRenderer_->updateGpuDrivenVisibilityState(*device_, options)) {
+        lastError_ = clearFrameRenderer_->lastError();
+        return false;
+    }
+    return true;
+}
+
 bool VulkanRenderBackend::uploadVertexScalars(
     const std::vector<float>& scalars,
     float minVal,
@@ -408,4 +422,21 @@ VkPhysicalDevice VulkanRenderBackend::physicalDevice() const
 VkDevice VulkanRenderBackend::device() const
 {
     return device_ ? device_->device() : VK_NULL_HANDLE;
+}
+
+QString VulkanRenderBackend::renderDiagnostics() const
+{
+    QString text = QStringLiteral("Device: %1 | API: %2")
+        .arg(info_.renderer.isEmpty() ? QStringLiteral("--") : info_.renderer,
+             info_.version.isEmpty() ? QStringLiteral("--") : info_.version);
+    if (device_ && device_->isInitialized()) {
+        text += QStringLiteral(" | GraphicsQueueCompute: %1")
+                    .arg(device_->queueFamilies().graphicsSupportsCompute
+                             ? QStringLiteral("yes")
+                             : QStringLiteral("no"));
+    }
+    if (clearFrameRenderer_) {
+        text += QStringLiteral(" | ") + clearFrameRenderer_->gpuDrivenDiagnostics();
+    }
+    return text;
 }

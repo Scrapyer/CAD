@@ -636,6 +636,10 @@ QString RenderViewport::renderDiagnostics() const
                            .arg(vulkanViewport_->width())
                            .arg(vulkanViewport_->height())
                            .arg(vulkanViewport_->devicePixelRatioF(), 0, 'f', 2);
+        const QString backendDiagnostics = vulkanViewport_->renderDiagnostics();
+        if (!backendDiagnostics.isEmpty()) {
+            text += QStringLiteral(" | ") + backendDiagnostics;
+        }
         const QString error = vulkanViewport_->lastError();
         if (!error.isEmpty()) {
             text += QStringLiteral(" | Error: ") + error;

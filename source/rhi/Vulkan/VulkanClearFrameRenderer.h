@@ -6,10 +6,14 @@
 #include "VulkanDescriptorResource.h"
 #include "VulkanDescriptorSetLayoutResource.h"
 #include "VulkanFramePipelines.h"
+#include "VulkanGpuDrivenMeshResources.h"
+#include "VulkanGpuDrivenRuntimeStats.h"
+#include "VulkanGpuDrivenTypes.h"
 #include "VulkanMeshBufferResources.h"
 #include "VulkanPickResources.h"
 #include "VulkanRenderPassResource.h"
 #include "VulkanSwapchainFrameResources.h"
+#include "VulkanVisibilityComputePass.h"
 #include "RenderBackend.h"
 
 #include <QMatrix4x4>
@@ -52,6 +56,8 @@ public:
                              const VkClearColorValue& clearColor,
                              const QMatrix4x4& axesMvp = QMatrix4x4());
     bool uploadMesh(const VulkanDevice& device, const Mesh& mesh, const VulkanMeshUploadOptions& options);
+    bool updateGpuDrivenVisibilityState(const VulkanDevice& device,
+                                        const VulkanMeshUploadOptions& options);
     bool uploadVertexScalars(const VulkanDevice& device,
                              const std::vector<float>& scalars,
                              float minVal,
@@ -88,6 +94,7 @@ public:
     bool isInitialized() const { return renderPass_.isValid(); }
     bool needsSwapchainRecreate() const { return swapchainOutOfDate_; }
     const QString& lastError() const { return lastError_; }
+    QString gpuDrivenDiagnostics() const;
 
 private:
     bool createRenderPass(const VulkanDevice& device, VkFormat imageFormat);
@@ -95,13 +102,18 @@ private:
     bool createBackgroundGraphicsPipeline(const VulkanDevice& device);
     bool createGraphicsPipeline(const VulkanDevice& device);
     bool createMeshGraphicsPipeline(const VulkanDevice& device);
+    bool createGpuDrivenSurfaceDescriptorLayout(const VulkanDevice& device);
+    bool createGpuDrivenMeshGraphicsPipeline(const VulkanDevice& device);
+    bool createGpuDrivenPointGraphicsPipeline(const VulkanDevice& device);
     bool createPointGraphicsPipeline(const VulkanDevice& device);
     bool createIsoSurfaceGraphicsPipeline(const VulkanDevice& device);
     bool createLineGraphicsPipeline(const VulkanDevice& device);
     bool createAxesGraphicsPipeline(const VulkanDevice& device);
     bool createPickRenderPass(const VulkanDevice& device);
     bool createPickGraphicsPipeline(const VulkanDevice& device);
+    bool createGpuDrivenPickGraphicsPipeline(const VulkanDevice& device);
     bool createMeshScalarDescriptor(const VulkanDevice& device);
+    bool createGpuDrivenSurfaceDescriptor(const VulkanDevice& device);
     bool createAxesIndicatorResource(const VulkanDevice& device);
     bool createShaderModule(const VulkanDevice& device, const QString& shaderPath, VkShaderModule& shaderModule);
     bool uploadLineVerticesDeviceLocal(const VulkanDevice& device,
@@ -128,6 +140,22 @@ private:
                                  const QMatrix4x4& mvp,
                                  const QMatrix4x4& axesMvp = QMatrix4x4(),
                                  ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe);
+    bool prepareGpuDrivenVisibilityPass(const VulkanDevice& device);
+    bool updateGpuDrivenFrameUniforms(const VulkanDevice& device,
+                                      const QMatrix4x4& mvp,
+                                      bool enableFrustumCulling,
+                                      bool enablePointOutput);
+    bool waitForInFlightAndCollectGpuDrivenStats(const VulkanDevice& device,
+                                                 const char* label);
+    void collectGpuDrivenObservability(const VulkanDevice& device);
+    void ensureGpuDrivenTimestampQueryPool(const VulkanDevice& device);
+    void recordGpuDrivenVisibilityPass(VkCommandBuffer commandBuffer);
+    bool canUseGpuDrivenIndirect(const VulkanDevice& device,
+                                 bool hasSurfaceMesh,
+                                 QString& reason) const;
+    bool shouldUseGpuDrivenIndirect() const;
+    void setGpuDrivenFallback(const QString& reason);
+    void syncGpuDrivenStatsFromResources();
     bool acquireSwapchainImage(const VulkanDevice& device,
                                const VulkanSwapchain& swapchain,
                                uint32_t& imageIndex);
@@ -146,9 +174,12 @@ private:
     VulkanRenderPassResource renderPass_;
     VulkanFramePipelines pipelines_;
     VulkanDescriptorSetLayoutResource meshScalarSetLayout_;
+    VulkanDescriptorSetLayoutResource gpuDrivenSurfaceSetLayout_;
     VulkanRenderPassResource pickRenderPass_;
     VulkanPickResources pickResources_;
     VulkanMeshBufferResources meshResources_;
+    VulkanGpuDrivenMeshResources gpuDrivenMeshResources_;
+    VulkanVisibilityComputePass visibilityComputePass_;
     VulkanBufferResource isoSurfaceVertexResource_;
     VulkanBufferResource isoSurfaceIndexResource_;
     uint32_t isoSurfaceIndexCount_ = 0;
@@ -168,6 +199,7 @@ private:
     VulkanBufferResource axesSolidVertexResource_;
     uint32_t axesSolidVertexCount_ = 0;
     VulkanCommandResource commandResource_;
+    VkQueryPool gpuDrivenTimestampQueryPool_ = VK_NULL_HANDLE;
     VkSemaphore imageAvailableSemaphore_ = VK_NULL_HANDLE;
     VkSemaphore renderFinishedSemaphore_ = VK_NULL_HANDLE;
     VkFence inFlightFence_ = VK_NULL_HANDLE;
@@ -178,5 +210,16 @@ private:
     float viewportGridMinorStep_ = 24.0f;
     float viewportGridFineAlpha_ = 0.0f;
     float devicePixelRatio_ = 1.0f;
+    bool gpuDrivenRequestedForMesh_ = false;
+    bool gpuDrivenActive_ = false;
+    bool gpuDrivenUseSurfaceV2_ = false;
+    bool gpuDrivenUseVertexColor_ = false;
+    bool gpuDrivenPointOutputEnabled_ = false;
+    bool gpuDrivenVisibilityDescriptorDirty_ = true;
+    bool gpuDrivenTimestampQueryPending_ = false;
+    bool gpuDrivenReadbackPending_ = false;
+    VulkanGpuDrivenRuntimeStats gpuDrivenStats_;
+    std::vector<VulkanGpuDrivenSourceVertex> gpuDrivenSourceVertexCpuCache_;
+    QString gpuDrivenFallbackReason_;
     QString lastError_;
 };

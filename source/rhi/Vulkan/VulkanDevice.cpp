@@ -128,6 +128,10 @@ bool VulkanDevice::initialize(const VulkanContext& context, VkSurfaceKHR surface
 
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+    timestampPeriodNs_ = properties.limits.timestampPeriod;
+    supportsGraphicsComputeTimestamp_ =
+        properties.limits.timestampComputeAndGraphics == VK_TRUE &&
+        queueFamilies_.graphicsTimestampValidBits > 0;
     info_.renderer = QString::fromUtf8(properties.deviceName);
     info_.version = VulkanContext::formatVersion(properties.apiVersion);
     info_.vendor = QStringLiteral("vendorId=0x%1 deviceId=0x%2")
@@ -149,6 +153,8 @@ void VulkanDevice::destroy()
     graphicsQueue_ = VK_NULL_HANDLE;
     presentQueue_ = VK_NULL_HANDLE;
     queueFamilies_ = {};
+    timestampPeriodNs_ = 0.0f;
+    supportsGraphicsComputeTimestamp_ = false;
 }
 
 bool VulkanDevice::selectPhysicalDevice(const VulkanContext& context, VkSurfaceKHR surface)
@@ -191,8 +197,13 @@ VulkanQueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
     for (uint32_t i = 0; i < queueFamilyCount; ++i) {
-        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        const bool supportsGraphics = (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+        const bool supportsCompute = (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+        if (supportsGraphics &&
+            (!indices.hasGraphics() || (!indices.graphicsSupportsCompute && supportsCompute))) {
             indices.graphics = i;
+            indices.graphicsSupportsCompute = supportsCompute;
+            indices.graphicsTimestampValidBits = queueFamilies[i].timestampValidBits;
         }
 
         if (surface != VK_NULL_HANDLE) {
@@ -203,7 +214,9 @@ VulkanQueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device
             }
         }
 
-        if (indices.hasGraphics() && (surface == VK_NULL_HANDLE || indices.hasPresent())) {
+        if (indices.hasGraphics() &&
+            indices.graphicsSupportsCompute &&
+            (surface == VK_NULL_HANDLE || indices.hasPresent())) {
             break;
         }
     }

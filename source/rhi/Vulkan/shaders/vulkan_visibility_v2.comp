@@ -1,0 +1,181 @@
+#version 450
+
+layout(local_size_x = 128) in;
+
+struct TriangleMeta {
+    uvec4 indices;
+    ivec4 ids;
+    vec4 boundsMin;
+    vec4 boundsMax;
+};
+
+struct EdgeMeta {
+    uvec4 indices;
+    ivec4 ids;
+};
+
+struct PartState {
+    uint visible;
+    float colorR;
+    float colorG;
+    float colorB;
+};
+
+struct HiddenElement {
+    int elementId;
+};
+
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+
+layout(set = 0, binding = 0) readonly buffer TriangleMetaBuffer {
+    TriangleMeta triangles[];
+} triangleMetaBuffer;
+
+layout(set = 0, binding = 1) readonly buffer PartStateBuffer {
+    PartState parts[];
+} partStateBuffer;
+
+layout(set = 0, binding = 2) readonly buffer HiddenElementBuffer {
+    HiddenElement hiddenElements[];
+} hiddenElementBuffer;
+
+layout(set = 0, binding = 3) buffer VisibleIndexBuffer {
+    uint visibleIndices[];
+} visibleIndexBuffer;
+
+layout(set = 0, binding = 4) buffer IndirectCommandBuffer {
+    DrawIndexedIndirectCommand drawCommand;
+} indirectCommandBuffer;
+
+layout(set = 0, binding = 5) readonly buffer VisibilityUniformBuffer {
+    mat4 viewProjection;
+    vec4 frustumPlanes[6];
+    uint triangleCount;
+    uint hiddenElementCount;
+    uint enableFrustumCulling;
+    uint enablePartVisibility;
+    uint partStateCount;
+    uint edgeCount;
+    uint sourceVertexCount;
+    uint enablePointOutput;
+} uniforms;
+
+layout(set = 0, binding = 6) readonly buffer EdgeMetaBuffer {
+    EdgeMeta edges[];
+} edgeMetaBuffer;
+
+layout(set = 0, binding = 7) buffer VisibleEdgeIndexBuffer {
+    uint visibleEdgeIndices[];
+} visibleEdgeIndexBuffer;
+
+layout(set = 0, binding = 8) buffer EdgeIndirectCommandBuffer {
+    DrawIndexedIndirectCommand drawCommand;
+} edgeIndirectCommandBuffer;
+
+layout(set = 0, binding = 9) buffer VisiblePointIndexBuffer {
+    uint visiblePointIndices[];
+} visiblePointIndexBuffer;
+
+layout(set = 0, binding = 10) buffer PointIndirectCommandBuffer {
+    DrawIndexedIndirectCommand drawCommand;
+} pointIndirectCommandBuffer;
+
+layout(set = 0, binding = 11) buffer VisiblePointFlagBuffer {
+    uint visiblePointFlags[];
+} visiblePointFlagBuffer;
+
+bool isPartVisible(int partId)
+{
+    if (uniforms.enablePartVisibility == 0 ||
+        partId < 0 ||
+        uint(partId) >= uniforms.partStateCount) {
+        return true;
+    }
+    return partStateBuffer.parts[uint(partId)].visible != 0;
+}
+
+bool isElementHidden(int elementId)
+{
+    if (elementId < 0) {
+        return false;
+    }
+    for (uint i = 0; i < uniforms.hiddenElementCount; ++i) {
+        if (hiddenElementBuffer.hiddenElements[i].elementId == elementId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool aabbIntersectsFrustum(vec3 boundsMin, vec3 boundsMax)
+{
+    if (uniforms.enableFrustumCulling == 0) {
+        return true;
+    }
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane = uniforms.frustumPlanes[i];
+        vec3 positive = vec3(
+            plane.x >= 0.0 ? boundsMax.x : boundsMin.x,
+            plane.y >= 0.0 ? boundsMax.y : boundsMin.y,
+            plane.z >= 0.0 ? boundsMax.z : boundsMin.z);
+        if (dot(plane.xyz, positive) + plane.w < 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void appendVisiblePoint(uint sourceIndex)
+{
+    if (uniforms.enablePointOutput == 0) {
+        return;
+    }
+    if (sourceIndex >= uniforms.sourceVertexCount) {
+        return;
+    }
+    uint previous = atomicExchange(visiblePointFlagBuffer.visiblePointFlags[sourceIndex], 1u);
+    if (previous == 0u) {
+        uint offset = atomicAdd(pointIndirectCommandBuffer.drawCommand.indexCount, 1);
+        visiblePointIndexBuffer.visiblePointIndices[offset] = sourceIndex;
+    }
+}
+
+void main()
+{
+    uint item = gl_GlobalInvocationID.x;
+
+    if (item < uniforms.triangleCount) {
+        TriangleMeta meta = triangleMetaBuffer.triangles[item];
+        int elementId = meta.ids.x;
+        int partId = meta.ids.y;
+        if (isPartVisible(partId) &&
+            !isElementHidden(elementId) &&
+            aabbIntersectsFrustum(meta.boundsMin.xyz, meta.boundsMax.xyz)) {
+            uint offset = atomicAdd(indirectCommandBuffer.drawCommand.indexCount, 3);
+            uint cornerBase = item * 3u;
+            visibleIndexBuffer.visibleIndices[offset + 0] = cornerBase + 0u;
+            visibleIndexBuffer.visibleIndices[offset + 1] = cornerBase + 1u;
+            visibleIndexBuffer.visibleIndices[offset + 2] = cornerBase + 2u;
+            appendVisiblePoint(meta.indices.x);
+            appendVisiblePoint(meta.indices.y);
+            appendVisiblePoint(meta.indices.z);
+        }
+    }
+
+    if (item < uniforms.edgeCount) {
+        EdgeMeta meta = edgeMetaBuffer.edges[item];
+        int elementId = meta.ids.x;
+        int partId = meta.ids.y;
+        if (isPartVisible(partId) && !isElementHidden(elementId)) {
+            uint offset = atomicAdd(edgeIndirectCommandBuffer.drawCommand.indexCount, 2);
+            visibleEdgeIndexBuffer.visibleEdgeIndices[offset + 0] = meta.indices.x;
+            visibleEdgeIndexBuffer.visibleEdgeIndices[offset + 1] = meta.indices.y;
+        }
+    }
+}

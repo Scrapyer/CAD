@@ -14,6 +14,8 @@ class VulkanContext;
 struct VulkanQueueFamilyIndices {
     uint32_t graphics = UINT32_MAX;
     uint32_t present = UINT32_MAX;
+    bool graphicsSupportsCompute = false;
+    uint32_t graphicsTimestampValidBits = 0;
 
     bool hasGraphics() const { return graphics != UINT32_MAX; }
     bool hasPresent() const { return present != UINT32_MAX; }
@@ -40,6 +42,8 @@ public:
     VkQueue graphicsQueue() const { return graphicsQueue_; }
     VkQueue presentQueue() const { return presentQueue_; }
     const VulkanQueueFamilyIndices& queueFamilies() const { return queueFamilies_; }
+    float timestampPeriodNs() const { return timestampPeriodNs_; }
+    bool supportsGraphicsComputeTimestamp() const { return supportsGraphicsComputeTimestamp_; }
     const RenderBackendInfo& info() const { return info_; }
     const QString& lastError() const { return lastError_; }
 
@@ -54,6 +58,8 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     VulkanQueueFamilyIndices queueFamilies_;
+    float timestampPeriodNs_ = 0.0f;
+    bool supportsGraphicsComputeTimestamp_ = false;
     RenderBackendInfo info_;
     QString lastError_;
 };

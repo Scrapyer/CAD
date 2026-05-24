@@ -4,7 +4,7 @@
 它不是 API 参考，而是面向产品行为的验收清单：每次重构 UI、面板通信、RHI 或后处理入口后，
 应按本文逐项确认功能仍可达、状态仍同步、资源生命周期仍稳定。
 
-最后更新：2026-05-21
+最后更新：2026-05-24
 
 ## 1. 文件导入与模型数据
 
@@ -77,12 +77,16 @@
 |------|----------|------------|
 | OpenGL 后端 | 默认完整渲染路径，覆盖主要显示和交互能力 | 作为基准后端，所有 UI 功能先在 OpenGL 验收 |
 | Vulkan 后端 | 可选渲染后端，已覆盖模型、边线、部件、拾取、云图和部分后处理路径 | macOS 本机可启动并完成基础显示/拾取/resize |
-| RHI 配置 | RHI 首选项保存到 `config/settings.ini`，重启后读取 | 手动切换 RHI 不再运行时销毁视口，提示重启生效 |
+| RHI 配置 | RHI 首选项和 Vulkan 绘制策略保存到 `config/settings.ini`，重启后读取；Vulkan 绘制策略未配置时默认使用 GPU-driven Indirect，旧版无策略版本标记的 Traditional 配置会迁移到 GPU-driven，Mesh Shader 仍显示为禁用预留 | 手动切换 RHI 不再运行时销毁视口，提示重启生效；GPU-driven 能力不足时运行时回退传统路径，用户仍可手动选择 Traditional |
 | RHI 生命周期 | `RenderViewport` 负责当前活动后端和首选后端状态 | UI 高频操作下切换首选项不崩溃，重启后生效 |
 | Vulkan pick 资源 | Vulkan 拾取图像、framebuffer、readback buffer 已对象化 | resize/recreate 后点选和框选仍正确 |
 | Vulkan depth 资源 | 深度资源已从主 renderer 拆出 | swapchain 重建后深度附件尺寸正确 |
 | Vulkan frame 资源 | swapchain frame 相关资源已拆出 | resize、最小化/恢复后不访问失效资源 |
 | Vulkan staging | 上传路径已从 `vkQueueWaitIdle()` 改为 fence，并引入上传上下文 | 连续加载模型后无明显卡死或资源增长 |
+| Vulkan GPU-driven 基础路径 | 已新增 GPU-driven 资源/上传构建器、visibility compute pass、主三角面/点模式/边线 `vkCmdDrawIndexedIndirect` 绘制和 GPU-driven pick pass；part/hidden 显隐状态已有内部小 buffer 更新入口，Vulkan 视口在 Solid、Points 以及具备 surface+edge 数据的 Wireframe/SolidWireframe 模式可走该热路径；UI 默认选择 GPU-driven，并保留 Traditional 手动回退，运行时诊断会显示 actual/fallback 状态、资源计数、CPU surface/point 保留数量、fallback 次数、dispatch 次数、frustum culling 状态、可见三角/点/边数量、visibility compute GPU timestamp 耗时和 CPU 侧 upload/update/render/pick 耗时 | GPU-driven 默认策略下 macOS Vulkan surface 和默认压力测试通过；line-only 或能力不足时传统路径不受影响 |
+| Vulkan GPU-driven 上传 V2 | 已新增 `docs/Vulkan_GPU_Driven_Upload_V2.md`、CPU 侧 source-vertex builder、V2-only 上传入口、V2 visibility/mesh/point/pick shader、V2 surface descriptor layout、graphics/point/pick pipeline 和 V2 visibility compute variant；验证 source vertex 不展开、triangle metadata 保存 source index，V2 可跳过 V1 展开 surface 资源、传统 mesh surface 上传和 CPU point buffer，点模式按需使用 unique visible source vertex | GPU-driven Indirect 现在默认优先走 V2 surface/point/pick，并保留 V1 fallback；M4/MoltenVK benchmark 显示 V2 静态 surface bytes 较 V1 少约 60%，`320` grid 总上传约 `43.734ms` |
+| Vulkan GPU-driven benchmark | 新增手动 target `benchmark_vulkan_gpu_driven`，输出 Traditional、GPU-driven V1 与 GPU-driven V2 的 CSV 对比，不加入默认 `ctest` | 手动运行可查看不同 grid 规模下 V1/V2 surface bytes、CPU surface/point 保留数量、GPU 上传、显隐更新、render、离屏 pick frame、读回 pick、visibility GPU 耗时、可见三角/点/边数量、fallback 和 dispatch 数据 |
+| Vulkan GPU-driven soak | 新增手动 target `soak_vulkan_gpu_driven`，连续切换显隐、显示模式、pick 和 swapchain recreate，不加入默认 `ctest` | 手动运行可验证长时间 GPU-driven active 状态、visible count 和 fallback 稳定性 |
 
 ## 7. 配置与持久化
 
@@ -108,6 +112,7 @@
 | RHI 配置 | `test_render_settings` | `config/settings.ini` 写入和读取稳定 |
 | 视口状态 | `test_render_viewport_state` | RHI 首选项和活动后端状态符合重启生效策略 |
 | macOS Vulkan surface | `test_macos_vulkan_surface` | macOS Vulkan surface 创建逻辑稳定 |
+| Vulkan GPU-driven 压力测试 | `test_vulkan_gpu_driven_stress` | GPU-driven 在绘制模式切换、显隐更新、视锥 uniform、可见数量读回、拾取和 swapchain recreate 后保持 active 且不 fallback |
 | ResultPanel | `test_result_panel` | 面板到视口的后处理信号稳定 |
 | 公开头 | `test_ferender_public_headers` | 安装头文件和公开 API 可被外部项目引用 |
 | 解析探针 | `manual_parse_probe` | 手动解析诊断仍可用 |
@@ -128,6 +133,6 @@
 
 - Windows Vulkan 路径还需要 MinGW/MSVC 实机验证。
 - Vulkan pipeline 创建逻辑仍在 `VulkanClearFrameRenderer` 里，资源组已拆出，但 builder/factory 还没完全独立。
-- 还没有更极端的大模型性能基准和长时间 soak test。
+- 还没有更极端的大模型长时间 soak test；GPU-driven 已有默认确定性压力测试、手动 benchmark 和手动 soak，仍需积累多机器数据。
 - RHI 切换在真实 UI 高频操作下还可以继续手测。
 - 运行时 RHI 热切换当前已故意关闭，设计目标是“保存配置，下次启动生效”。

@@ -1802,6 +1802,53 @@ void MainWindow::setupToolBar() {
         }
         rhiGroup_->addAction(act);
     }
+    rhiMenu_->addSeparator();
+    vulkanDrawStrategyMenu_ = rhiMenu_->addMenu(QStringLiteral("Vulkan 渲染策略"));
+    vulkanDrawStrategyMenu_->setToolTipsVisible(true);
+    vulkanDrawStrategyGroup_ = new QActionGroup(this);
+    vulkanDrawStrategyGroup_->setExclusive(true);
+    const VulkanDrawStrategy vulkanStrategies[] = {
+        VulkanDrawStrategy::Traditional,
+        VulkanDrawStrategy::GpuDrivenIndirect,
+        VulkanDrawStrategy::MeshShader
+    };
+    for (VulkanDrawStrategy strategy : vulkanStrategies) {
+        QAction* act = vulkanDrawStrategyMenu_->addAction(RenderSettings::vulkanDrawStrategyName(strategy));
+        act->setCheckable(true);
+        act->setData(static_cast<int>(strategy));
+        const bool available = RenderSettings::isVulkanDrawStrategyAvailable(strategy);
+        act->setEnabled(available);
+        if (strategy == VulkanDrawStrategy::Traditional) {
+            act->setToolTip(QStringLiteral("兼容 Vulkan 绘制路径：CPU 过滤 + vkCmdDrawIndexed；用于 GPU-driven 回退验证"));
+        } else if (strategy == VulkanDrawStrategy::GpuDrivenIndirect) {
+            act->setText(QStringLiteral("GPU-driven Indirect（默认）"));
+            act->setToolTip(QStringLiteral("默认 Vulkan 绘制路径：compute 生成可见索引和 indirect draw 命令；能力不足或资源创建失败时运行时回退传统路径"));
+        } else {
+            act->setText(QStringLiteral("Mesh Shader（实验预留）"));
+            act->setToolTip(QStringLiteral("预留路径：meshlet/task/mesh shader；当前暂不可启用"));
+        }
+        vulkanDrawStrategyGroup_->addAction(act);
+    }
+    updateVulkanDrawStrategyMenu();
+    connect(vulkanDrawStrategyGroup_, &QActionGroup::triggered, this, [this](QAction* action) {
+        const auto strategy = static_cast<VulkanDrawStrategy>(action->data().toInt());
+        if (!RenderSettings::isVulkanDrawStrategyAvailable(strategy)) {
+            updateVulkanDrawStrategyMenu();
+            if (statusLabel_) {
+                statusLabel_->setText(QStringLiteral("  Vulkan 渲染策略尚不可用，已保持传统路径"));
+            }
+            return;
+        }
+        RenderSettings::setPreferredVulkanDrawStrategy(strategy);
+        updateVulkanDrawStrategyMenu();
+        if (statusLabel_) {
+            const QString suffix = strategy == VulkanDrawStrategy::GpuDrivenIndirect
+                ? QStringLiteral("；运行时失败会自动回退")
+                : QString();
+            statusLabel_->setText(QStringLiteral("  Vulkan 渲染策略已保存为 %1%2")
+                                      .arg(RenderSettings::vulkanDrawStrategyName(strategy), suffix));
+        }
+    });
     rhiAction_ = new QAction(style()->standardIcon(QStyle::SP_ComputerIcon), "RHI", this);
     rhiAction_->setToolTip("选择下次启动使用的渲染后端");
     rhiAction_->setMenu(rhiMenu_);
@@ -1889,8 +1936,46 @@ void MainWindow::updateRhiActionText()
 
     if (rhiMenu_) {
         for (QAction* action : rhiMenu_->actions()) {
+            if (action->menu() || !action->isCheckable()) {
+                continue;
+            }
             action->setChecked(action->data().toInt() == static_cast<int>(requested));
         }
+    }
+    updateVulkanDrawStrategyMenu();
+}
+
+void MainWindow::updateVulkanDrawStrategyMenu()
+{
+    if (!vulkanDrawStrategyMenu_) {
+        return;
+    }
+
+    const VulkanDrawStrategy requested = RenderSettings::preferredVulkanDrawStrategy();
+    const VulkanDrawStrategy active = RenderSettings::effectiveVulkanDrawStrategy();
+    const bool vulkanRequested = renderViewport_
+        ? renderViewport_->requestedRenderBackendKind() == RenderBackendKind::Vulkan
+        : RenderSettings::preferredBackend() == RenderBackendKind::Vulkan;
+
+    QString title = QStringLiteral("Vulkan 渲染策略: %1")
+        .arg(RenderSettings::vulkanDrawStrategyName(active));
+    if (requested != active) {
+        title += QStringLiteral("（%1 未启用）")
+            .arg(RenderSettings::vulkanDrawStrategyName(requested));
+    }
+    vulkanDrawStrategyMenu_->setTitle(title);
+    vulkanDrawStrategyMenu_->setToolTipsVisible(true);
+    vulkanDrawStrategyMenu_->setToolTip(vulkanRequested
+        ? QStringLiteral("选择 Vulkan 后端内部绘制策略；GPU-driven 为默认路径，运行时能力不足会回退")
+        : QStringLiteral("切换到 Vulkan RHI 后此策略生效；GPU-driven 为默认路径，运行时能力不足会回退"));
+
+    for (QAction* action : vulkanDrawStrategyMenu_->actions()) {
+        const auto strategy = static_cast<VulkanDrawStrategy>(action->data().toInt());
+        const bool available = RenderSettings::isVulkanDrawStrategyAvailable(strategy);
+        const bool block = action->blockSignals(true);
+        action->setEnabled(available);
+        action->setChecked(strategy == active);
+        action->blockSignals(block);
     }
 }
 

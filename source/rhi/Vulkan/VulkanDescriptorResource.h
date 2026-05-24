@@ -4,6 +4,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <vector>
+
 class VulkanDevice;
 
 /**
@@ -24,6 +26,10 @@ public:
                                 VkDescriptorSetLayout layout,
                                 VkBuffer buffer,
                                 VkDeviceSize range,
+                                QString& lastError);
+    bool createStorageBufferSet(const VulkanDevice& device,
+                                VkDescriptorSetLayout layout,
+                                const std::vector<VkDescriptorBufferInfo>& buffers,
                                 QString& lastError);
     void destroy(const VulkanDevice& device);
 

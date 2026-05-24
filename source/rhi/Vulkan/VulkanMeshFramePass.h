@@ -22,6 +22,8 @@ class VulkanMeshFramePass {
 public:
     struct Resources {
         const VulkanPipelineResource* meshPipeline = nullptr;
+        const VulkanPipelineResource* gpuDrivenMeshPipelineV2 = nullptr;
+        const VulkanPipelineResource* gpuDrivenPointPipelineV2 = nullptr;
         const VulkanPipelineResource* pointPipeline = nullptr;
         const VulkanPipelineResource* isoSurfacePipeline = nullptr;
         const VulkanPipelineResource* linePipeline = nullptr;
@@ -30,6 +32,21 @@ public:
         const VulkanBufferResource* meshVertexResource = nullptr;
         const VulkanBufferResource* meshIndexResource = nullptr;
         uint32_t meshIndexCount = 0;
+        const VulkanBufferResource* gpuDrivenVertexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenVisibleIndexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenIndirectCommandResource = nullptr;
+        const VulkanBufferResource* gpuDrivenVisiblePointIndexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenPointIndirectCommandResource = nullptr;
+        const VulkanDescriptorResource* gpuDrivenSurfaceDescriptorV2 = nullptr;
+        const VulkanBufferResource* gpuDrivenEdgeVertexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenVisibleEdgeIndexResource = nullptr;
+        const VulkanBufferResource* gpuDrivenEdgeIndirectCommandResource = nullptr;
+        const VulkanDescriptorResource* gpuDrivenScalarDescriptor = nullptr;
+        bool useGpuDrivenIndirect = false;
+        bool useGpuDrivenSurfaceV2 = false;
+        bool useGpuDrivenEdges = false;
+        bool gpuDrivenUseVertexColor = false;
+        uint32_t gpuDrivenPartStateCount = 0;
         const VulkanBufferResource* pointVertexResource = nullptr;
         uint32_t pointVertexCount = 0;
         ModelDisplayMode displayMode = ModelDisplayMode::SolidWireframe;

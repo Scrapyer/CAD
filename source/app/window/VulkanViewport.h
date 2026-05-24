@@ -72,6 +72,7 @@ public:
 
     const RenderBackendInfo& backendInfo() const { return backend_.info(); }
     QString lastError() const { return lastError_; }
+    QString renderDiagnostics() const { return backend_.renderDiagnostics(); }
     float currentFps() const { return fps_; }
     float frameTimeMs() const { return frameTimeMs_; }
 
@@ -90,6 +91,11 @@ private:
     bool initializeIfNeeded();
     bool recreateSwapchain();
     bool uploadMeshIfNeeded();
+    VulkanMeshUploadOptions currentMeshUploadOptions() const;
+    bool displayModeNeedsCpuFilteredMesh() const;
+    bool applyGpuDrivenVisibilityStateForSolidMode();
+    void markVisibilityStateChanged();
+    void ensureCpuFilteredMeshForPicking();
     bool uploadOverlayIfNeeded();
     bool uploadSliceIfNeeded();
     bool uploadIsoSurfaceIfNeeded();
@@ -139,6 +145,7 @@ private:
     bool initializedEmitted_ = false;
     bool swapchainDirty_ = true;
     bool meshDirty_ = false;
+    bool gpuDrivenVisibilityStateDiverged_ = false;
     bool hasMesh_ = false;
     bool rotating_ = false;
     bool panning_ = false;

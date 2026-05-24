@@ -1,5 +1,6 @@
 #include "VulkanViewport.h"
 
+#include "RenderSettings.h"
 #include "ScreenSpacePicking.h"
 #include "ViewportGridMetrics.h"
 #include "VulkanMacOSSurfaceFactory.h"
@@ -273,6 +274,7 @@ void VulkanViewport::setMesh(const Mesh& mesh)
     partColors_.clear();
     partVisibility_.clear();
     hiddenElementIds_.clear();
+    gpuDrivenVisibilityStateDiverged_ = false;
     vertexColors_.clear();
     vertexScalars_.clear();
     edgeScalars_.clear();
@@ -301,6 +303,9 @@ void VulkanViewport::setModelDisplayMode(ModelDisplayMode mode)
         return;
     }
     displayMode_ = mode;
+    if (gpuDrivenVisibilityStateDiverged_ && displayModeNeedsCpuFilteredMesh()) {
+        meshDirty_ = true;
+    }
     resetFrameStats();
     renderFrame();
 }
@@ -503,7 +508,7 @@ void VulkanViewport::setPartVisibility(int partIndex, bool visible)
         }
         updateIdLabels();
     }
-    meshDirty_ = true;
+    markVisibilityStateChanged();
     renderFrame();
 }
 
@@ -517,7 +522,7 @@ void VulkanViewport::setElementVisibility(int elementId, bool visible)
     } else {
         hiddenElementIds_.insert(elementId);
     }
-    meshDirty_ = true;
+    markVisibilityStateChanged();
     renderFrame();
 }
 
@@ -537,7 +542,7 @@ void VulkanViewport::setElementsVisibility(const std::vector<int>& elementIds, b
     if (!changed) {
         return;
     }
-    meshDirty_ = true;
+    markVisibilityStateChanged();
     renderFrame();
 }
 
@@ -547,7 +552,7 @@ void VulkanViewport::setAllElementsVisible()
         return;
     }
     hiddenElementIds_.clear();
-    meshDirty_ = true;
+    markVisibilityStateChanged();
     renderFrame();
 }
 
@@ -743,10 +748,29 @@ bool VulkanViewport::recreateSwapchain()
 
 bool VulkanViewport::uploadMeshIfNeeded()
 {
+    if (gpuDrivenVisibilityStateDiverged_ && displayModeNeedsCpuFilteredMesh()) {
+        meshDirty_ = true;
+    }
     if (!meshDirty_) {
         return true;
     }
 
+    VulkanMeshUploadOptions options = currentMeshUploadOptions();
+    if (!backend_.uploadMesh(mesh_, options)) {
+        lastError_ = backend_.lastError();
+        return false;
+    }
+    if (!rebuildSelectionHighlight()) {
+        return false;
+    }
+    meshDirty_ = false;
+    gpuDrivenVisibilityStateDiverged_ = false;
+    overlayDirty_ = true;
+    return true;
+}
+
+VulkanMeshUploadOptions VulkanViewport::currentMeshUploadOptions() const
+{
     VulkanMeshUploadOptions options;
     options.objectColor = QVector3D(objectColor_.x, objectColor_.y, objectColor_.z);
     options.triangleToElement = triangleToElement_;
@@ -765,17 +789,63 @@ bool VulkanViewport::uploadMeshIfNeeded()
     for (const glm::vec3& color : partColors_) {
         options.partColors.emplace_back(color.x, color.y, color.z);
     }
+    return options;
+}
 
-    if (!backend_.uploadMesh(mesh_, options)) {
+bool VulkanViewport::displayModeNeedsCpuFilteredMesh() const
+{
+    const bool edgeMode = displayMode_ == ModelDisplayMode::Wireframe ||
+        displayMode_ == ModelDisplayMode::SolidWireframe;
+    if (!edgeMode) {
+        return false;
+    }
+
+    const bool hasGpuDrivenSurface =
+        !mesh_.vertices.empty() && !mesh_.indices.empty() && mesh_.vertices.size() % 6 == 0;
+    const bool hasGpuDrivenEdges =
+        !mesh_.edgeVertices.empty() && !mesh_.edgeIndices.empty() && mesh_.edgeVertices.size() % 3 == 0;
+    if (RenderSettings::preferredVulkanDrawStrategy() == VulkanDrawStrategy::GpuDrivenIndirect &&
+        hasGpuDrivenSurface &&
+        hasGpuDrivenEdges) {
+        return false;
+    }
+    return true;
+}
+
+bool VulkanViewport::applyGpuDrivenVisibilityStateForSolidMode()
+{
+    if (RenderSettings::preferredVulkanDrawStrategy() != VulkanDrawStrategy::GpuDrivenIndirect ||
+        !backend_.isInitialized() ||
+        meshDirty_ ||
+        displayModeNeedsCpuFilteredMesh()) {
+        return false;
+    }
+
+    if (!backend_.updateGpuDrivenVisibilityState(currentMeshUploadOptions())) {
         lastError_ = backend_.lastError();
         return false;
     }
     if (!rebuildSelectionHighlight()) {
         return false;
     }
-    meshDirty_ = false;
+    gpuDrivenVisibilityStateDiverged_ = true;
     overlayDirty_ = true;
     return true;
+}
+
+void VulkanViewport::markVisibilityStateChanged()
+{
+    if (!applyGpuDrivenVisibilityStateForSolidMode()) {
+        meshDirty_ = true;
+    }
+}
+
+void VulkanViewport::ensureCpuFilteredMeshForPicking()
+{
+    if (gpuDrivenVisibilityStateDiverged_ &&
+        RenderSettings::preferredVulkanDrawStrategy() != VulkanDrawStrategy::GpuDrivenIndirect) {
+        meshDirty_ = true;
+    }
 }
 
 bool VulkanViewport::uploadOverlayIfNeeded()
@@ -1020,6 +1090,7 @@ bool VulkanViewport::pickAtPosition(const QPointF& position, bool appendSelectio
     if (swapchainDirty_ && !recreateSwapchain()) {
         return true;
     }
+    ensureCpuFilteredMeshForPicking();
     if (!uploadMeshIfNeeded()) {
         return true;
     }
@@ -1104,6 +1175,7 @@ bool VulkanViewport::deselectAtPosition(const QPointF& position)
     if (swapchainDirty_ && !recreateSwapchain()) {
         return true;
     }
+    ensureCpuFilteredMeshForPicking();
     if (!uploadMeshIfNeeded()) {
         return true;
     }
@@ -1162,6 +1234,7 @@ bool VulkanViewport::selectInRect(const QRect& rect, bool removeSelection)
     if (swapchainDirty_ && !recreateSwapchain()) {
         return true;
     }
+    ensureCpuFilteredMeshForPicking();
     if (!uploadMeshIfNeeded()) {
         return true;
     }

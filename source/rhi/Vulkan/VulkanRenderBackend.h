@@ -56,6 +56,7 @@ public:
     bool initializeDevice(VkSurfaceKHR surface = VK_NULL_HANDLE);
     bool initializeSwapchain(VkSurfaceKHR surface, uint32_t width, uint32_t height, bool vsync = true);
     bool uploadMesh(const Mesh& mesh, const VulkanMeshUploadOptions& options = {});
+    bool updateGpuDrivenVisibilityState(const VulkanMeshUploadOptions& options);
     bool uploadVertexScalars(const std::vector<float>& scalars,
                              float minVal,
                              float maxVal,
@@ -103,6 +104,7 @@ public:
     VkInstance instance() const;
     VkPhysicalDevice physicalDevice() const;
     VkDevice device() const;
+    QString renderDiagnostics() const;
     const QString& lastError() const { return lastError_; }
 
 private:

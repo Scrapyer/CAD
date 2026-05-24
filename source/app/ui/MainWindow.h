@@ -64,6 +64,7 @@ private:
     void showBackgroundSettingsDialog();
     void showModelInfoDialog();
     void updateRhiActionText();
+    void updateVulkanDrawStrategyMenu();
     void setModelStructureVisible(bool visible);
     void syncSidebarActions();
     void updateProjectTreeSummary();
@@ -131,6 +132,7 @@ private:
     // 工具栏拾取模式动作组
     QActionGroup*  pickGroup_        = nullptr;
     QActionGroup*  rhiGroup_         = nullptr;
+    QActionGroup*  vulkanDrawStrategyGroup_ = nullptr;
     QActionGroup*  displayModeGroup_ = nullptr;
 
     // 状态栏
@@ -172,6 +174,7 @@ private:
     QMenu*         themeMenu_      = nullptr;
     QAction*       rhiAction_      = nullptr;
     QMenu*         rhiMenu_        = nullptr;
+    QMenu*         vulkanDrawStrategyMenu_ = nullptr;
     QAction*       sidebarsAction_ = nullptr;
     QAction*       leftPanelAction_ = nullptr;
     int            themeIndex_     = 0;
