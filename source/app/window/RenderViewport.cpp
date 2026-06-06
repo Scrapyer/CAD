@@ -811,14 +811,20 @@ void RenderViewport::updateColorBarOverlay()
 
     colorBarOverlay_->resize(size());
     colorBarOverlay_->raise();
-    const bool showOverlay =
-        colorBarVisible_ &&
-        ((activeBackendKind_ == RenderBackendKind::Vulkan &&
-          vulkanViewport_ != nullptr &&
-          vulkanViewport_->isVisible()) ||
-         (activeBackendKind_ == RenderBackendKind::Metal &&
-          metalViewport_ != nullptr &&
-          metalViewport_->isVisible()));
+    bool showOverlay = false;
+#if defined(FERENDER_HAS_VULKAN_RHI) && defined(FERENDER_HAS_MACOS_VULKAN_SURFACE)
+    showOverlay = showOverlay ||
+        (activeBackendKind_ == RenderBackendKind::Vulkan &&
+         vulkanViewport_ != nullptr &&
+         vulkanViewport_->isVisible());
+#endif
+#if defined(FERENDER_HAS_METAL_RHI)
+    showOverlay = showOverlay ||
+        (activeBackendKind_ == RenderBackendKind::Metal &&
+         metalViewport_ != nullptr &&
+         metalViewport_->isVisible());
+#endif
+    showOverlay = colorBarVisible_ && showOverlay;
     colorBarOverlay_->setVisible(showOverlay);
     if (showOverlay) {
         colorBarOverlay_->setRange(colorBarMin_, colorBarMax_);

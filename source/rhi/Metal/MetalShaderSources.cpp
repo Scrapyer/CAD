@@ -132,13 +132,10 @@ float3 applyViewportGrid(float3 baseColor, float2 fragCoord, float4 gridParams)
     float minorLine = 1.0 - smoothstep(0.55, 1.35, min(minorCell.x, minorCell.y));
     float majorLine = 1.0 - smoothstep(0.65, 1.80, min(majorCell.x, majorCell.y));
 
-    float luminance = dot(baseColor, float3(0.299, 0.587, 0.114));
-    float3 lightGrid = float3(0.88, 0.93, 1.0);
-    float3 darkGrid = float3(0.22, 0.28, 0.36);
-    float3 gridColor = mix(lightGrid, darkGrid, step(0.58, luminance));
-    float alpha = max(fineLine * 0.08 * gridParams.z,
-                      max(minorLine * 0.16, majorLine * 0.28)) * gridParams.x;
-    return mix(baseColor, gridColor, alpha);
+    float3 gridColor = float3(0.50, 0.58, 0.68);
+    float alpha = max(fineLine * gridParams.z,
+                      max(minorLine, majorLine)) * gridParams.x;
+    return mix(baseColor, gridColor, clamp(alpha, 0.0, 1.0));
 }
 
 fragment float4 fragment_main(VertexOut in [[stage_in]])

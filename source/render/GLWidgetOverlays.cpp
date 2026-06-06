@@ -51,14 +51,17 @@ void GLWidget::drawAxesIndicator() {
 
     const int axesSize = kAxesViewportSize;
     const int margin = kAxesMargin;
-    const int dpr = devicePixelRatio();
+    const double dpr = std::max<qreal>(devicePixelRatioF(), 1.0);
 
     // 仅旋转的 view 矩阵（固定距离，跟随相机朝向）
     glm::mat4 axesMVP = axesIndicatorMvp();
 
     // ── 左下角小视口绘制 ──
     auto* glBackend = openGLBackend();
-    glBackend->setViewport(margin * dpr, margin * dpr, axesSize * dpr, axesSize * dpr);
+    glBackend->setViewport(static_cast<int>(std::lround(margin * dpr)),
+                           static_cast<int>(std::lround(margin * dpr)),
+                           static_cast<int>(std::lround(axesSize * dpr)),
+                           static_cast<int>(std::lround(axesSize * dpr)));
     glBackend->clearDepthBuffer();
 
     axesShader_->bind();
@@ -89,7 +92,10 @@ void GLWidget::drawAxesIndicator() {
     axesShader_->release();
 
     // 恢复主视口
-    glBackend->setViewport(0, 0, width() * dpr, height() * dpr);
+    glBackend->setViewport(0,
+                           0,
+                           std::max(1, static_cast<int>(std::lround(width() * dpr))),
+                           std::max(1, static_cast<int>(std::lround(height() * dpr))));
 
     // 保存投影参数，供 drawAxesLabels() 使用
     axesMVP_ = axesMVP;

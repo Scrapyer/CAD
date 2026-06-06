@@ -30,6 +30,7 @@ static int runParseMode(const QString& filePath) {
     QFileInfo fi(filePath);
     if (!fi.exists()) {
         qWarning("文件不存在: %s", qPrintable(filePath));
+        fprintf(stderr, "file does not exist: %s\n", qPrintable(filePath));
         return 1;
     }
 

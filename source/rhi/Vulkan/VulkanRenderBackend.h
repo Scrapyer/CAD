@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderBackend.h"
+#include "ferender_export.h"
 
 #include <QMatrix4x4>
 #include <QVector3D>
@@ -41,7 +42,7 @@ struct VulkanMeshUploadOptions {
  * 当前负责 Vulkan instance、逻辑设备、基础队列、swapchain、主网格/边线管线和
  * 单像素拾取读回；descriptor、云图和后处理资源会在后续迁入。
  */
-class VulkanRenderBackend final : public IRenderBackend {
+class FERENDER_EXPORT VulkanRenderBackend final : public IRenderBackend {
 public:
     VulkanRenderBackend();
     ~VulkanRenderBackend() override;

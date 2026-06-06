@@ -226,7 +226,7 @@ public:
     void setViewport(int x, int y, int width, int height) const;
 
     /** @brief 开始一帧常规绘制，恢复 viewport、深度和混合状态。 */
-    void beginFrame(int width, int height, int devicePixelRatio) const;
+    void beginFrame(int width, int height, double devicePixelRatio) const;
 
     /** @brief 清理指定缓冲。 */
     void clear(GLbitfield mask) const;

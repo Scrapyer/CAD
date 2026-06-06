@@ -70,7 +70,7 @@ void GLWidget::renderPickBuffer(const glm::mat4& mvp) {
         return;
     }
 
-    int dpr = devicePixelRatio();
+    const qreal dpr = std::max<qreal>(devicePixelRatioF(), 1.0);
 
     // 逐单元绘制，跳过隐藏部件
     std::vector<PickDrawItem> drawItems;
@@ -100,8 +100,8 @@ void GLWidget::renderPickBuffer(const glm::mat4& mvp) {
     glBackend->renderPickBuffer(*pickFramebuffer_,
                                 *pickVertexArray_,
                                 *meshResource_,
-                                width() * dpr,
-                                height() * dpr,
+                                std::max(1, static_cast<int>(std::lround(width() * dpr))),
+                                std::max(1, static_cast<int>(std::lround(height() * dpr))),
                                 pickShader_->programId(),
                                 allTriIndices_.data(),
                                 static_cast<int>(allTriIndices_.size()),
@@ -126,9 +126,9 @@ void GLWidget::pickAtPoint(const QPoint& pos, bool ctrlHeld) {
 
         // 读取点击位置像素（使用原始 GL 调用，避免 Qt FBO 状态追踪污染）
         unsigned char pixel[4] = {0};
-        int dpr = devicePixelRatio();
-        int px = pos.x() * dpr;
-        int py = (height() - pos.y()) * dpr;  // OpenGL Y 轴翻转
+        const qreal dpr = std::max<qreal>(devicePixelRatioF(), 1.0);
+        int px = static_cast<int>(std::lround(pos.x() * dpr));
+        int py = static_cast<int>(std::lround((height() - pos.y()) * dpr));  // OpenGL Y 轴翻转
         auto* glBackend = openGLBackend();
         glBackend->readFramebufferPixel(*pickFramebuffer_, px, py, pixel);
         elemId = colorToId(pixel[0], pixel[1], pixel[2]);
@@ -406,9 +406,9 @@ void GLWidget::deselectAtPoint(const QPoint& pos) {
         renderPickBuffer(mvp);
 
         unsigned char pixel[4] = {0};
-        int dpr = devicePixelRatio();
-        int px = pos.x() * dpr;
-        int py = (height() - pos.y()) * dpr;
+        const qreal dpr = std::max<qreal>(devicePixelRatioF(), 1.0);
+        int px = static_cast<int>(std::lround(pos.x() * dpr));
+        int py = static_cast<int>(std::lround((height() - pos.y()) * dpr));
         auto* glBackend = openGLBackend();
         glBackend->readFramebufferPixel(*pickFramebuffer_, px, py, pixel);
         elemId = colorToId(pixel[0], pixel[1], pixel[2]);

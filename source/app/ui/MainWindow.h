@@ -178,7 +178,7 @@ private:
     QAction*       sidebarsAction_ = nullptr;
     QAction*       leftPanelAction_ = nullptr;
     int            themeIndex_     = 0;
-    BackgroundMode backgroundMode_ = BackgroundMode::Gradient;
+    BackgroundMode backgroundMode_ = BackgroundMode::Solid;
     QColor         backgroundSolidColor_{210, 217, 230};
     QColor         backgroundGradientTopColor_{150, 166, 190};
     QColor         backgroundGradientBottomColor_{210, 217, 230};

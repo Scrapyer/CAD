@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ferender_export.h"
+
 #include <vulkan/vulkan.h>
 
 /**
@@ -7,7 +9,7 @@
  *
  * 具体平台 surface 由后续 macOS/Windows 工厂创建；这里先统一 ownership。
  */
-class VulkanSurface {
+class FERENDER_EXPORT VulkanSurface {
 public:
     VulkanSurface() = default;
     VulkanSurface(VkInstance instance, VkSurfaceKHR surface, bool ownsSurface = true);

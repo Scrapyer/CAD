@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VulkanGpuDrivenTypes.h"
+#include "ferender_export.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -61,15 +62,15 @@ struct VulkanGpuDrivenVisibilityStateData {
     VulkanGpuDrivenVisibilityUniforms uniforms;
 };
 
-VulkanGpuDrivenUploadData buildVulkanGpuDrivenUploadData(
+FERENDER_EXPORT VulkanGpuDrivenUploadData buildVulkanGpuDrivenUploadData(
     const Mesh& mesh,
     const VulkanMeshUploadOptions& options);
 
-VulkanGpuDrivenUploadV2Data buildVulkanGpuDrivenUploadV2Data(
+FERENDER_EXPORT VulkanGpuDrivenUploadV2Data buildVulkanGpuDrivenUploadV2Data(
     const Mesh& mesh,
     const VulkanMeshUploadOptions& options);
 
-VulkanGpuDrivenVisibilityStateData buildVulkanGpuDrivenVisibilityStateData(
+FERENDER_EXPORT VulkanGpuDrivenVisibilityStateData buildVulkanGpuDrivenVisibilityStateData(
     const VulkanMeshUploadOptions& options,
     uint32_t triangleCount,
     uint32_t minimumPartStateCount = 0);

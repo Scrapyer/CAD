@@ -11,6 +11,8 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QString>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <utility>
 
@@ -431,9 +433,13 @@ void OpenGLRenderBackend::setViewport(int x, int y, int width, int height) const
     ctx->functions()->glViewport(x, y, width, height);
 }
 
-void OpenGLRenderBackend::beginFrame(int width, int height, int devicePixelRatio) const
+void OpenGLRenderBackend::beginFrame(int width, int height, double devicePixelRatio) const
 {
-    setViewport(0, 0, width * devicePixelRatio, height * devicePixelRatio);
+    const double scale = std::max(devicePixelRatio, 1.0);
+    setViewport(0,
+                0,
+                std::max(1, static_cast<int>(std::lround(width * scale))),
+                std::max(1, static_cast<int>(std::lround(height * scale))));
     setDepthTestEnabled(true);
     glDepthFunc(GL_LESS);
     setBlendEnabled(false);
@@ -1039,19 +1045,27 @@ bool OpenGLRenderBackend::renderPickBuffer(GLuint framebuffer,
         return false;
     }
 
-    auto glBindVAO = reinterpret_cast<void(APIENTRY*)(GLuint)>(
+    using GlBindVertexArrayProc = void (*)(GLuint);
+    using GlUseProgramProc = void (*)(GLuint);
+    using GlGetUniformLocationProc = GLint (*)(GLuint, const char*);
+    using GlUniformMatrix4fvProc = void (*)(GLint, GLsizei, GLboolean, const GLfloat*);
+    using GlUniform3fProc = void (*)(GLint, GLfloat, GLfloat, GLfloat);
+    using GlGenBuffersProc = void (*)(GLsizei, GLuint*);
+    using GlDeleteBuffersProc = void (*)(GLsizei, const GLuint*);
+
+    auto glBindVAO = reinterpret_cast<GlBindVertexArrayProc>(
         ctx->getProcAddress("glBindVertexArray"));
-    auto glUseProgram = reinterpret_cast<void(APIENTRY*)(GLuint)>(
+    auto glUseProgram = reinterpret_cast<GlUseProgramProc>(
         ctx->getProcAddress("glUseProgram"));
-    auto glGetUniformLocation = reinterpret_cast<GLint(APIENTRY*)(GLuint, const char*)>(
+    auto glGetUniformLocation = reinterpret_cast<GlGetUniformLocationProc>(
         ctx->getProcAddress("glGetUniformLocation"));
-    auto glUniformMatrix4fv = reinterpret_cast<void(APIENTRY*)(GLint, GLsizei, GLboolean, const GLfloat*)>(
+    auto glUniformMatrix4fv = reinterpret_cast<GlUniformMatrix4fvProc>(
         ctx->getProcAddress("glUniformMatrix4fv"));
-    auto glUniform3f = reinterpret_cast<void(APIENTRY*)(GLint, GLfloat, GLfloat, GLfloat)>(
+    auto glUniform3f = reinterpret_cast<GlUniform3fProc>(
         ctx->getProcAddress("glUniform3f"));
-    auto glGenBuffers = reinterpret_cast<void(APIENTRY*)(GLsizei, GLuint*)>(
+    auto glGenBuffers = reinterpret_cast<GlGenBuffersProc>(
         ctx->getProcAddress("glGenBuffers"));
-    auto glDeleteBuffers = reinterpret_cast<void(APIENTRY*)(GLsizei, const GLuint*)>(
+    auto glDeleteBuffers = reinterpret_cast<GlDeleteBuffersProc>(
         ctx->getProcAddress("glDeleteBuffers"));
 
     if (!glBindVAO || !glUseProgram || !glGetUniformLocation ||

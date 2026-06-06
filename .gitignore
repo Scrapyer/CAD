@@ -1,6 +1,7 @@
 build/
 build-qt6/
 build-vs/
+build-windows-msvc/
 .DS_Store
 *.o
 *.dSYM/

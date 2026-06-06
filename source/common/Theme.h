@@ -98,7 +98,7 @@ struct Theme {
         t.gradTopHov  = "#585b70";
         t.gradBotHov  = "#45475a";
         // GL 视口渐变
-        t.bgTopR = 0.38f; t.bgTopG = 0.45f; t.bgTopB = 0.58f;
+        t.bgTopR = 0.68f; t.bgTopG = 0.74f; t.bgTopB = 0.82f;
         t.bgBotR = 0.68f; t.bgBotG = 0.74f; t.bgBotB = 0.82f;
         // 色标文字
         t.barTextR = 255; t.barTextG = 255; t.barTextB = 255;
@@ -133,7 +133,7 @@ struct Theme {
         t.gradTopHov  = "#ccd0da";
         t.gradBotHov  = "#bcc0cc";
         // GL 视口渐变
-        t.bgTopR = 0.93f; t.bgTopG = 0.95f; t.bgTopB = 0.97f;
+        t.bgTopR = 0.82f; t.bgTopG = 0.85f; t.bgTopB = 0.90f;
         t.bgBotR = 0.82f; t.bgBotG = 0.85f; t.bgBotB = 0.90f;
         // 色标文字
         t.barTextR = 30; t.barTextG = 30; t.barTextB = 30;
@@ -168,7 +168,7 @@ struct Theme {
         t.gradTopHov  = "#414868";
         t.gradBotHov  = "#343a55";
         // GL 视口渐变
-        t.bgTopR = 0.12f; t.bgTopG = 0.14f; t.bgTopB = 0.21f;
+        t.bgTopR = 0.26f; t.bgTopG = 0.32f; t.bgTopB = 0.50f;
         t.bgBotR = 0.26f; t.bgBotG = 0.32f; t.bgBotB = 0.50f;
         // 色标文字
         t.barTextR = 192; t.barTextG = 202; t.barTextB = 245;
@@ -203,7 +203,7 @@ struct Theme {
         t.gradTopHov  = "#665c54";
         t.gradBotHov  = "#504945";
         // GL 视口渐变
-        t.bgTopR = 0.15f; t.bgTopG = 0.13f; t.bgTopB = 0.11f;
+        t.bgTopR = 0.34f; t.bgTopG = 0.30f; t.bgTopB = 0.25f;
         t.bgBotR = 0.34f; t.bgBotG = 0.30f; t.bgBotB = 0.25f;
         // 色标文字
         t.barTextR = 235; t.barTextG = 219; t.barTextB = 178;
@@ -238,7 +238,7 @@ struct Theme {
         t.gradTopHov  = "#545768";
         t.gradBotHov  = "#44475a";
         // GL 视口渐变
-        t.bgTopR = 0.16f; t.bgTopG = 0.16f; t.bgTopB = 0.21f;
+        t.bgTopR = 0.32f; t.bgTopG = 0.34f; t.bgTopB = 0.48f;
         t.bgBotR = 0.32f; t.bgBotG = 0.34f; t.bgBotB = 0.48f;
         // 色标文字
         t.barTextR = 248; t.barTextG = 248; t.barTextB = 242;
@@ -273,7 +273,7 @@ struct Theme {
         t.gradTopHov  = "#1a5060";
         t.gradBotHov  = "#0d4150";
         // GL 视口渐变
-        t.bgTopR = 0.00f; t.bgTopG = 0.17f; t.bgTopB = 0.21f;
+        t.bgTopR = 0.07f; t.bgTopG = 0.32f; t.bgTopB = 0.38f;
         t.bgBotR = 0.07f; t.bgBotG = 0.32f; t.bgBotB = 0.38f;
         // 色标文字
         t.barTextR = 238; t.barTextG = 232; t.barTextB = 213;

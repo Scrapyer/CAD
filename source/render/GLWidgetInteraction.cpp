@@ -23,10 +23,12 @@ void GLWidget::resizeGL(int w, int h) {
 
     // 重建拾取 framebuffer（尺寸需与视口一致）
     // 注意：resizeGL 由 Qt 调用时 GL 上下文已 current，无需手动 makeCurrent/doneCurrent
-    int dpr = devicePixelRatio();
+    const qreal dpr = std::max<qreal>(devicePixelRatioF(), 1.0);
     if (!pickFramebuffer_)
         pickFramebuffer_ = std::make_unique<OpenGLFramebuffer>();
-    glBackend->resizeFramebuffer(*pickFramebuffer_, w * dpr, h * dpr);
+    glBackend->resizeFramebuffer(*pickFramebuffer_,
+                                  std::max(1, static_cast<int>(std::lround(w * dpr))),
+                                  std::max(1, static_cast<int>(std::lround(h * dpr))));
 
     // 色标覆盖层跟随窗口大小
     if (colorBarOverlay_)

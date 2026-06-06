@@ -16,13 +16,10 @@ vec3 applyViewportGrid(vec3 baseColor, vec2 fragCoord)
     float minorLine = 1.0 - smoothstep(0.55, 1.35, min(minorCell.x, minorCell.y));
     float majorLine = 1.0 - smoothstep(0.65, 1.80, min(majorCell.x, majorCell.y));
 
-    float luminance = dot(baseColor, vec3(0.299, 0.587, 0.114));
-    vec3 lightGrid = vec3(0.88, 0.93, 1.0);
-    vec3 darkGrid = vec3(0.22, 0.28, 0.36);
-    vec3 gridColor = mix(lightGrid, darkGrid, step(0.58, luminance));
-    float alpha = max(fineLine * 0.08 * uGridParams.z,
-                      max(minorLine * 0.16, majorLine * 0.28)) * uGridParams.x;
-    return mix(baseColor, gridColor, alpha);
+    vec3 gridColor = vec3(0.50, 0.58, 0.68);
+    float alpha = max(fineLine * uGridParams.z,
+                      max(minorLine, majorLine)) * uGridParams.x;
+    return mix(baseColor, gridColor, clamp(alpha, 0.0, 1.0));
 }
 
 void main() {

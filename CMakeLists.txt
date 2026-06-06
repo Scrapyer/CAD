@@ -148,10 +148,34 @@ elseif(FEMODELVIEWER_ENABLE_METAL_RHI)
 endif()
 
 if(FEMODELVIEWER_ENABLE_OPENCASCADE_IMPORT)
-    set(_occ_vendor_dir "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencascade/lib/cmake/opencascade")
-    if(EXISTS "${_occ_vendor_dir}/OpenCASCADEConfig.cmake")
-        set(OpenCASCADE_DIR "${_occ_vendor_dir}" CACHE PATH "OpenCASCADE CMake package directory" FORCE)
-    elseif(NOT OpenCASCADE_DIR OR NOT EXISTS "${OpenCASCADE_DIR}/OpenCASCADEConfig.cmake")
+    set(_occ_vendor_hints)
+    if(WIN32)
+        list(APPEND _occ_vendor_hints
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/windows/opencascade/cmake"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/windows/opencascade/lib/cmake/opencascade"
+        )
+    elseif(APPLE)
+        list(APPEND _occ_vendor_hints
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/macos/opencascade/lib/cmake/opencascade"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/macos/opencascade/cmake"
+        )
+    elseif(UNIX)
+        list(APPEND _occ_vendor_hints
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/linux/opencascade/lib/cmake/opencascade"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/linux/opencascade/cmake"
+        )
+    endif()
+    list(APPEND _occ_vendor_hints
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencascade/lib/cmake/opencascade"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opencascade/cmake"
+    )
+    foreach(_occ_vendor_dir ${_occ_vendor_hints})
+        if(EXISTS "${_occ_vendor_dir}/OpenCASCADEConfig.cmake")
+            set(OpenCASCADE_DIR "${_occ_vendor_dir}" CACHE PATH "OpenCASCADE CMake package directory" FORCE)
+            break()
+        endif()
+    endforeach()
+    if(NOT OpenCASCADE_DIR OR NOT EXISTS "${OpenCASCADE_DIR}/OpenCASCADEConfig.cmake")
         foreach(_occ_hint
             "$ENV{OpenCASCADE_DIR}"
             "/opt/homebrew/opt/opencascade/lib/cmake/opencascade"
@@ -172,8 +196,15 @@ if(FEMODELVIEWER_ENABLE_OPENCASCADE_IMPORT)
         DataExchange
     )
     if(OpenCASCADE_FOUND OR (OpenCASCADE_INCLUDE_DIR AND EXISTS "${OpenCASCADE_INCLUDE_DIR}/STEPControl_Reader.hxx"))
-        set(FERENDER_HAS_OPENCASCADE_IMPORT ON)
-        message(STATUS "OpenCASCADE import enabled: ${OpenCASCADE_VERSION} (${OpenCASCADE_DIR})")
+        if(MINGW AND OpenCASCADE_COMPILER MATCHES "^vc")
+            message(STATUS
+                "OpenCASCADE import disabled: bundled Windows OpenCASCADE was built with "
+                "${OpenCASCADE_COMPILER}, which is not ABI-compatible with MinGW"
+            )
+        else()
+            set(FERENDER_HAS_OPENCASCADE_IMPORT ON)
+            message(STATUS "OpenCASCADE import enabled: ${OpenCASCADE_VERSION} (${OpenCASCADE_DIR})")
+        endif()
     else()
         message(STATUS "OpenCASCADE import disabled: OpenCASCADE was not found")
     endif()
@@ -416,6 +447,19 @@ if(FERENDER_HAS_OPENCASCADE_IMPORT)
         ${OpenCASCADE_ModelingAlgorithms_LIBRARIES}
         ${OpenCASCADE_DataExchange_LIBRARIES}
     )
+    if(MSVC)
+        set(_occ_delay_load_libraries
+            ${OpenCASCADE_FoundationClasses_LIBRARIES}
+            ${OpenCASCADE_ModelingData_LIBRARIES}
+            ${OpenCASCADE_ModelingAlgorithms_LIBRARIES}
+            ${OpenCASCADE_DataExchange_LIBRARIES}
+        )
+        list(REMOVE_DUPLICATES _occ_delay_load_libraries)
+        foreach(_occ_delay_load_library ${_occ_delay_load_libraries})
+            target_link_options(FERender PRIVATE "/DELAYLOAD:${_occ_delay_load_library}.dll")
+        endforeach()
+        target_link_libraries(FERender PRIVATE delayimp)
+    endif()
 endif()
 
 if(FERENDER_HAS_METAL_RHI)
@@ -671,14 +715,23 @@ target_include_directories(FERender SYSTEM PUBLIC
 # ── GUI 模块（应用程序）──
 
 # 手动 MOC 应用程序自己的头文件，避免 AUTOMOC 重复 moc FERender 的 Q_OBJECT 类
-qt6_wrap_cpp(VIEWER_MOC_SRCS
-    ${SOURCE_DIR}/app/ui/MainWindow.h
-    ${SOURCE_DIR}/app/ui/FEModelPanel.h
-    ${SOURCE_DIR}/app/ui/PartsPanel.h
-    ${SOURCE_DIR}/app/ui/ResultPanel.h
-    ${SOURCE_DIR}/app/ui/ViewportContextMenu.h
-    ${SOURCE_DIR}/app/ui/ControlPanel.h
-    ${SOURCE_DIR}/app/ui/MonitorPanel.h
+set(VIEWER_MOC_DIR "${CMAKE_CURRENT_BINARY_DIR}/moc/${PROJECT_NAME}")
+file(MAKE_DIRECTORY "${VIEWER_MOC_DIR}")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/MainWindow.h "${VIEWER_MOC_DIR}/moc_MainWindow.cpp")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/FEModelPanel.h "${VIEWER_MOC_DIR}/moc_FEModelPanel.cpp")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/PartsPanel.h "${VIEWER_MOC_DIR}/moc_PartsPanel.cpp")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/ResultPanel.h "${VIEWER_MOC_DIR}/moc_ResultPanel.cpp")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/ViewportContextMenu.h "${VIEWER_MOC_DIR}/moc_ViewportContextMenu.cpp")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/ControlPanel.h "${VIEWER_MOC_DIR}/moc_ControlPanel.cpp")
+qt6_generate_moc(${SOURCE_DIR}/app/ui/MonitorPanel.h "${VIEWER_MOC_DIR}/moc_MonitorPanel.cpp")
+set(VIEWER_MOC_SRCS
+    "${VIEWER_MOC_DIR}/moc_MainWindow.cpp"
+    "${VIEWER_MOC_DIR}/moc_FEModelPanel.cpp"
+    "${VIEWER_MOC_DIR}/moc_PartsPanel.cpp"
+    "${VIEWER_MOC_DIR}/moc_ResultPanel.cpp"
+    "${VIEWER_MOC_DIR}/moc_ViewportContextMenu.cpp"
+    "${VIEWER_MOC_DIR}/moc_ControlPanel.cpp"
+    "${VIEWER_MOC_DIR}/moc_MonitorPanel.cpp"
 )
 
 qt6_add_resources(VIEWER_QRC icons.qrc)
@@ -717,6 +770,20 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 # ── 安装规则 ──
+
+if(WIN32 AND MSVC AND FERENDER_HAS_OPENCASCADE_IMPORT)
+    add_library(jemalloc SHARED
+        third_party/windows/opencascade/jemalloc_shim/jemalloc_shim.c
+    )
+    set_target_properties(jemalloc PROPERTIES
+        OUTPUT_NAME jemalloc
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/Debug"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/Release"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_CURRENT_BINARY_DIR}/RelWithDebInfo"
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_CURRENT_BINARY_DIR}/MinSizeRel"
+    )
+endif()
 
 include(GNUInstallDirs)
 
@@ -1034,7 +1101,10 @@ if(BUILD_TESTING)
         )
     endif()
 
-    qt6_wrap_cpp(TEST_RESULT_PANEL_MOC_SRCS ${SOURCE_DIR}/app/ui/ResultPanel.h)
+    set(TEST_RESULT_PANEL_MOC_DIR "${CMAKE_CURRENT_BINARY_DIR}/moc/test_result_panel")
+    file(MAKE_DIRECTORY "${TEST_RESULT_PANEL_MOC_DIR}")
+    qt6_generate_moc(${SOURCE_DIR}/app/ui/ResultPanel.h "${TEST_RESULT_PANEL_MOC_DIR}/moc_ResultPanel.cpp")
+    set(TEST_RESULT_PANEL_MOC_SRCS "${TEST_RESULT_PANEL_MOC_DIR}/moc_ResultPanel.cpp")
     add_executable(test_result_panel
         tests/test_result_panel.cpp
         ${SOURCE_DIR}/app/ui/ResultPanel.cpp
@@ -1051,7 +1121,10 @@ if(BUILD_TESTING)
         COMMAND test_result_panel
     )
 
-    qt6_wrap_cpp(TEST_PARTS_PANEL_MOC_SRCS ${SOURCE_DIR}/app/ui/PartsPanel.h)
+    set(TEST_PARTS_PANEL_MOC_DIR "${CMAKE_CURRENT_BINARY_DIR}/moc/test_parts_panel")
+    file(MAKE_DIRECTORY "${TEST_PARTS_PANEL_MOC_DIR}")
+    qt6_generate_moc(${SOURCE_DIR}/app/ui/PartsPanel.h "${TEST_PARTS_PANEL_MOC_DIR}/moc_PartsPanel.cpp")
+    set(TEST_PARTS_PANEL_MOC_SRCS "${TEST_PARTS_PANEL_MOC_DIR}/moc_PartsPanel.cpp")
     add_executable(test_parts_panel
         tests/test_parts_panel.cpp
         ${SOURCE_DIR}/app/ui/PartsPanel.cpp
@@ -1068,7 +1141,10 @@ if(BUILD_TESTING)
         COMMAND test_parts_panel
     )
 
-    qt6_wrap_cpp(TEST_VIEWPORT_CONTEXT_MENU_MOC_SRCS ${SOURCE_DIR}/app/ui/ViewportContextMenu.h)
+    set(TEST_VIEWPORT_CONTEXT_MENU_MOC_DIR "${CMAKE_CURRENT_BINARY_DIR}/moc/test_viewport_context_menu")
+    file(MAKE_DIRECTORY "${TEST_VIEWPORT_CONTEXT_MENU_MOC_DIR}")
+    qt6_generate_moc(${SOURCE_DIR}/app/ui/ViewportContextMenu.h "${TEST_VIEWPORT_CONTEXT_MENU_MOC_DIR}/moc_ViewportContextMenu.cpp")
+    set(TEST_VIEWPORT_CONTEXT_MENU_MOC_SRCS "${TEST_VIEWPORT_CONTEXT_MENU_MOC_DIR}/moc_ViewportContextMenu.cpp")
     add_executable(test_viewport_context_menu
         tests/test_viewport_context_menu.cpp
         ${SOURCE_DIR}/app/ui/ViewportContextMenu.cpp

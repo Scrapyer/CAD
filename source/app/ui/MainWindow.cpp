@@ -2087,7 +2087,7 @@ void MainWindow::loadBackgroundSettings()
     const QColor themeBottom = themeColor(currentTheme_.bgBotR, currentTheme_.bgBotG, currentTheme_.bgBotB);
     QSettings settings = makeAppSettings();
     const int mode = settings.value(QString::fromLatin1(kBackgroundModeKey),
-                                    static_cast<int>(BackgroundMode::Gradient)).toInt();
+                                    static_cast<int>(BackgroundMode::Solid)).toInt();
     backgroundMode_ = mode == static_cast<int>(BackgroundMode::Solid)
         ? BackgroundMode::Solid
         : BackgroundMode::Gradient;

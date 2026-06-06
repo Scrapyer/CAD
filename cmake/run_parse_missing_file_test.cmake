@@ -22,6 +22,6 @@ if(NOT parse_result EQUAL 1)
     message(FATAL_ERROR "Expected parse mode to exit 1 for a missing file, got ${parse_result}")
 endif()
 
-if(NOT parse_output MATCHES "文件不存在")
+if(NOT parse_output MATCHES "file does not exist")
     message(FATAL_ERROR "Expected missing-file message, got: ${parse_output}")
 endif()

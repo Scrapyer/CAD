@@ -24,7 +24,7 @@ void GLWidget::paintOpenGLFrame() {
     }
 
     // 恢复 GL 状态（QPainter 可能在上一帧末尾修改了 viewport/深度/混合等）
-    glBackend->beginFrame(width(), height(), devicePixelRatio());
+    glBackend->beginFrame(width(), height(), devicePixelRatioF());
 
     processDeferredPicks();
 
